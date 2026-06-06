@@ -1,0 +1,92 @@
+name: Daily BIST MA Reaction Scan
+
+# Her hafta içi günü, BIST kapanışından (18:00 İstanbul) sonra çalışır
+on:
+  schedule:
+    - cron: '30 15 * * 1-5'   # 15:30 UTC = 18:30 İstanbul (BIST kapanışı + ~30 dk)
+  workflow_dispatch:          # Manuel tetikleme için
+    inputs:
+      tickers:
+        description: 'Hisse listesi (BIST_100, BIST_50, BIST_30, veya virgülle ayrı)'
+        required: false
+        default: 'BIST_100'
+      period:
+        description: 'Veri periyodu'
+        required: false
+        default: '3y'
+      no_walk_forward:
+        description: 'Walk-forward atla (hızlı çalıştırma)'
+        required: false
+        default: 'false'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Hisse listesini hazırla
+        id: prep
+        run: |
+          INPUT="${{ github.event.inputs.tickers || 'BIST_100' }}"
+          if [ "$INPUT" = "BIST_100" ]; then
+            TICKERS_ARG="--all-bist"
+          else
+            TICKERS_ARG="--tickers $INPUT"
+          fi
+          echo "tickers_arg=$TICKERS_ARG" >> $GITHUB_OUTPUT
+          
+          WF="${{ github.event.inputs.no_walk_forward || 'false' }}"
+          if [ "$WF" = "true" ]; then
+            echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT
+          else
+            echo "wf_arg=" >> $GITHUB_OUTPUT
+          fi
+          
+          TIMESTAMP=$(date +'%Y-%m-%d')
+          echo "ts=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+      - name: Tarama çalıştır
+        run: |
+          mkdir -p reports
+          python scanner/bist_ma_reaction_scanner.py \
+            ${{ steps.prep.outputs.tickers_arg }} \
+            --period ${{ github.event.inputs.period || '3y' }} \
+            ${{ steps.prep.outputs.wf_arg }} \
+            --output reports/scan_${{ steps.prep.outputs.ts }}.csv \
+            --report both \
+            --top_n 10
+        continue-on-error: false
+
+      - name: Telegram'a özet gönder
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python scanner/notifier.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}.csv \
+            --mode daily
+        continue-on-error: true   # Telegram başarısız olsa bile artifact yüklensin
+
+      - name: Sonuçları artifact olarak yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ steps.prep.outputs.ts }}
+          path: reports/
+          retention-days: 90
