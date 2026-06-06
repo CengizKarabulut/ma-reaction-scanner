@@ -529,7 +529,7 @@ def save_html_report(combined_df, path='ma_scan_report.html'):
     for ticker in combined_df['ticker'].unique():
         sub = combined_df[combined_df['ticker'] == ticker].nlargest(10, 'composite_score')
         html += f"<h2>{ticker}</h2><table><tr>"
-        for col in ['Sıra','MA','Per','Dok','WR%','MFE','MAE','Exp','Hız','T%','Y%','Grade','Değer','Uzak%','WF-Tr','WF-Ts','Robust']:
+        for col in ['Sıra','MA','Per','Dok','WR%','MFE','MAE','Exp','Brk(Resp%)','T%','Y%','Grade','Değer','Uzak%','WF-Tr','WF-Ts','Robust']:
             html += f"<th>{col}</th>"
         html += "</tr>"
         for i, (_, r) in enumerate(sub.iterrows(), 1):
@@ -543,7 +543,10 @@ def save_html_report(combined_df, path='ma_scan_report.html'):
             html += f"<td>{r['avg_mae']:.2f}</td>"
             exp_cls = 'pos' if r['expectancy'] > 0 else 'neg'
             html += f"<td class='{exp_cls}'>{r['expectancy']:+.2f}</td>"
-            html += f"<td>{r['avg_speed']:.1f}</td>"
+            # v6: avg_speed kaldırıldı, yerine Brk + Respect%
+            brk = int(r.get('breakthroughs', 0))
+            resp = r.get('respect_ratio', 0) * 100
+            html += f"<td>{brk} ({resp:.0f}%)</td>"
             html += f"<td>{r['trend_wr_pct']:.0f}</td>" if not pd.isna(r['trend_wr_pct']) else "<td>—</td>"
             html += f"<td>{r['range_wr_pct']:.0f}</td>" if not pd.isna(r['range_wr_pct']) else "<td>—</td>"
             html += f"<td>{r['grade']}</td>"
