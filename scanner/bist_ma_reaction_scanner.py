@@ -152,15 +152,23 @@ def compute_ma(ma_type, close, volume, period):
 
 def analyze_reactions(df, ma_series,
                      react_bars=5, react_pct=1.5,
-                     atr_mult=0.2, adx_threshold=25):
+                     atr_mult=0.2, adx_threshold=25,
+                     separation_mult=2.0, breakthrough_bars=10):
     """
-    Bir MA'nın tepki istatistiklerini hesapla.
-    Pine'ın process_r() fonksiyonunun Python versiyonu — birebir mantık.
+    Bir MA'nın tepki istatistiklerini hesapla — v6 metodolojisi.
+    Pine'ın process_r() fonksiyonunun birebir Python karşılığı.
+
+    v6 KAVRAMSAL DÜZELTMELER:
+    - Pre-touch separation: bir touch sayılması için fiyatın önce MA'dan
+      separation_mult × ATR uzaklaşması şart (kısa MA "sahte saygı" düzeltici)
+    - Breakthrough count: fiyat MA'yı geçip breakthrough_bars boyunca
+      öbür tarafta kalırsa "kırılım" sayılır
 
     Returns: dict {
         'trend_touches', 'trend_reacts',
         'range_touches', 'range_reacts',
-        'mfe_sum', 'mae_sum', 'speed_sum'
+        'mfe_sum', 'mae_sum',
+        'brk_count'   # YENİ v6
     }
     """
     high = df['High'].values
@@ -171,19 +179,30 @@ def analyze_reactions(df, ma_series,
     ma = ma_series.values
     n = len(df)
 
-    trend_t = trend_r = range_t = range_r = 0
-    mfe_sum = mae_sum = speed_sum = 0.0
+    trend_t = trend_r = range_t = range_r = brk_count = 0
+    mfe_sum = mae_sum = 0.0
 
-    # 1. PASS: Touch detection (yalnızca yeni giriş)
-    touches = []  # (bar_index, was_trending)
+    # 1. PASS: Touch detection + Breakthrough tracking
+    touches = []
     prev_in_zone = False
+    was_far_enough = False  # v6: pre-separation şartı
+    was_above = None        # v6: yön tracking
+    bars_since_cross = 0    # v6: cross süresi
+
     for i in range(n):
         if np.isnan(ma[i]) or np.isnan(atr_v[i]):
             prev_in_zone = False
             continue
         zone = atr_mult * atr_v[i]
         in_zone = low[i] <= ma[i] + zone and high[i] >= ma[i] - zone
-        new_touch = in_zone and not prev_in_zone
+
+        # v6: Pre-touch separation şartı
+        distance_from_ma = abs(close[i] - ma[i])
+        if not in_zone and distance_from_ma > atr_v[i] * separation_mult:
+            was_far_enough = True
+
+        # Touch sadece pre-separation şartı sağlandıysa geçerli
+        new_touch = in_zone and not prev_in_zone and was_far_enough
         if new_touch:
             is_trending = (not np.isnan(adx_v[i])) and (adx_v[i] > adx_threshold)
             touches.append((i, is_trending))
@@ -191,14 +210,24 @@ def analyze_reactions(df, ma_series,
                 trend_t += 1
             else:
                 range_t += 1
+            was_far_enough = False  # Reset
         prev_in_zone = in_zone
 
-    # 2. PASS: Her dokunma için MFE/MAE/Speed analizi
+        # v6: Breakthrough tespiti
+        currently_above = close[i] > ma[i]
+        if was_above is None:
+            was_above = currently_above
+        elif currently_above != was_above:
+            bars_since_cross = 0
+            was_above = currently_above
+        else:
+            bars_since_cross += 1
+            if bars_since_cross == breakthrough_bars:
+                brk_count += 1
+
+    # 2. PASS: MFE/MAE analizi
     for touch_i, was_trending in touches:
-        # react_bars ileriye bakmak için yeterli veri var mı?
-        if touch_i + react_bars >= n:
-            continue
-        if touch_i < 1:
+        if touch_i + react_bars >= n or touch_i < 1:
             continue
 
         touch_price = close[touch_i]
@@ -210,14 +239,12 @@ def analyze_reactions(df, ma_series,
 
         from_above = ref_close > ma_prev
 
-        # MFE ve MAE'i AYNI ANDA hesapla, reach_bar'ı kaydet
         if from_above:
             max_fav_price = high[touch_i + 1]
             max_adv_price = low[touch_i + 1]
         else:
             max_fav_price = low[touch_i + 1]
             max_adv_price = high[touch_i + 1]
-        reach_bar = -1
 
         for fb in range(1, react_bars):
             idx = touch_i + fb
@@ -227,13 +254,6 @@ def analyze_reactions(df, ma_series,
             else:
                 max_fav_price = min(max_fav_price, low[idx])
                 max_adv_price = max(max_adv_price, high[idx])
-            if reach_bar == -1:
-                if from_above:
-                    move_at_fb = (max_fav_price - touch_price) / touch_price * 100
-                else:
-                    move_at_fb = (touch_price - max_fav_price) / touch_price * 100
-                if move_at_fb >= react_pct:
-                    reach_bar = fb
 
         if from_above:
             move = (max_fav_price - touch_price) / touch_price * 100
@@ -242,13 +262,10 @@ def analyze_reactions(df, ma_series,
             move = (touch_price - max_fav_price) / touch_price * 100
             adverse = (max_adv_price - touch_price) / touch_price * 100
 
-        # MAE her dokunmada kaydedilir
         mae_sum += adverse
 
         if move >= react_pct:
             mfe_sum += move
-            if reach_bar > 0:
-                speed_sum += (react_bars - reach_bar)
             if was_trending:
                 trend_r += 1
             else:
@@ -261,17 +278,18 @@ def analyze_reactions(df, ma_series,
         'range_reacts': range_r,
         'mfe_sum': mfe_sum,
         'mae_sum': mae_sum,
-        'speed_sum': speed_sum,
+        'brk_count': brk_count,
     }
 
 # === METRİK HESAPLAMA ===
 
 def compute_metrics(stats):
-    """Raw stats'tan WR, Expectancy, Composite skor vb."""
+    """Raw stats'tan WR, Expectancy, Respect Ratio, Composite skor — v6."""
     tt = stats['trend_touches']
     tr = stats['trend_reacts']
     rt = stats['range_touches']
     rr = stats['range_reacts']
+    brk = stats.get('brk_count', 0)
     total_t = tt + rt
     total_r = tr + rr
 
@@ -281,9 +299,12 @@ def compute_metrics(stats):
     wr = total_r / total_t
     avg_mfe = stats['mfe_sum'] / total_r if total_r > 0 else 0.0
     avg_mae = stats['mae_sum'] / total_t
-    avg_speed = stats['speed_sum'] / total_r if total_r > 0 else 0.0
     expectancy = wr * avg_mfe - (1 - wr) * avg_mae
-    composite_score = expectancy * np.sqrt(total_t)
+    net_edge = avg_mfe - avg_mae  # v6: WR'siz spread
+    # v6: respect ratio - MA gerçekten kırılmadan kalıyor mu?
+    respect_ratio = max(0.0, 1.0 - brk / max(total_t, 1))
+    # v6: composite skor = expectancy × √touches × respect_ratio
+    composite_score = expectancy * np.sqrt(total_t) * respect_ratio
 
     trend_wr = (tr / tt * 100) if tt > 0 else np.nan
     range_wr = (rr / rt * 100) if rt > 0 else np.nan
@@ -304,7 +325,9 @@ def compute_metrics(stats):
         'avg_mfe': avg_mfe,
         'avg_mae': avg_mae,
         'expectancy': expectancy,
-        'avg_speed': avg_speed,
+        'net_edge': net_edge,
+        'breakthroughs': brk,
+        'respect_ratio': respect_ratio,
         'trend_wr_pct': trend_wr,
         'range_wr_pct': range_wr,
         'grade': grade,
@@ -362,6 +385,7 @@ def fetch_data(ticker, period='3y', source='yfinance'):
 
 def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
                react_bars=5, react_pct=1.5, atr_mult=0.2, adx_threshold=25,
+               separation_mult=2.0, breakthrough_bars=10,
                do_walk_forward=True):
     """Tek hisse için tüm 140 MA + walk-forward analizi"""
     try:
@@ -379,6 +403,7 @@ def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
     react_kwargs = dict(
         react_bars=react_bars, react_pct=react_pct,
         atr_mult=atr_mult, adx_threshold=adx_threshold,
+        separation_mult=separation_mult, breakthrough_bars=breakthrough_bars,
     )
 
     results = []
@@ -408,11 +433,17 @@ def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
                     row['wf_test_exp']  = test_m['expectancy']  if test_m  else np.nan
                     row['wf_train_wr']  = train_m['wr_pct']     if train_m else np.nan
                     row['wf_test_wr']   = test_m['wr_pct']      if test_m  else np.nan
-                    # Tutarlılık: hem training hem test'te + expectancy
+                    # v6: Daha sıkı robust kriteri
+                    # (1) İki dönemde de + expectancy
+                    # (2) Test expectancy training'in en az %50'si
+                    # (3) Test WR training'in en az %80'i
+                    # (4) Min dokunma sayısı yeterli iki dönemde de
                     row['wf_robust'] = bool(train_m and test_m
                                             and train_m['expectancy'] > 0
                                             and test_m['expectancy'] > 0
-                                            and test_m['wr_pct'] >= train_m['wr_pct'] * 0.7)
+                                            and test_m['expectancy'] >= 0.5 * train_m['expectancy']
+                                            and test_m['wr_pct'] >= 0.8 * train_m['wr_pct']
+                                            and test_m['touches'] >= 5)
                 results.append(row)
             except Exception:
                 continue
@@ -559,6 +590,10 @@ def main():
     parser.add_argument('--react_pct', type=float, default=1.5)
     parser.add_argument('--atr_mult', type=float, default=0.2)
     parser.add_argument('--adx_threshold', type=float, default=25)
+    parser.add_argument('--separation_mult', type=float, default=2.0,
+                       help='v6: Pre-touch separation şartı (ATR çarpanı, kısa MA bias düzeltici)')
+    parser.add_argument('--breakthrough_bars', type=int, default=10,
+                       help='v6: Kırılım onay barı (respect ratio hesabı için)')
     parser.add_argument('--no_walk_forward', action='store_true',
                        help='Walk-forward analizini atla (3x hızlanır)')
     parser.add_argument('--output', type=str, default='ma_scan_results.csv')
@@ -583,6 +618,8 @@ def main():
         min_touches=args.min_touches,
         react_bars=args.react_bars, react_pct=args.react_pct,
         atr_mult=args.atr_mult, adx_threshold=args.adx_threshold,
+        separation_mult=args.separation_mult,
+        breakthrough_bars=args.breakthrough_bars,
         do_walk_forward=not args.no_walk_forward,
     )
 
