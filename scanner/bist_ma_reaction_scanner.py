@@ -465,11 +465,11 @@ def print_summary(combined_df, top_n=10):
         print(f"\n▸ {ticker}  ({len(sub)} aday MA)")
         top = sub.nlargest(top_n, 'composite_score')[
             ['ma_type', 'period', 'touches', 'wr_pct', 'expectancy',
-             'avg_mfe', 'avg_mae', 'avg_speed', 'grade',
+             'avg_mfe', 'avg_mae', 'breakthroughs', 'respect_ratio', 'grade',
              'wf_train_exp', 'wf_test_exp', 'wf_robust']
         ].copy()
-        top.columns = ['MA', 'Per', 'Dok', 'WR%', 'Exp', 'MFE', 'MAE', 'Hız', 'Grade', 'WF-Tr', 'WF-Ts', 'WF-OK']
-        for col in ['WR%','Exp','MFE','MAE','Hız','WF-Tr','WF-Ts']:
+        top.columns = ['MA', 'Per', 'Dok', 'WR%', 'Exp', 'MFE', 'MAE', 'Brk', 'Resp', 'Grade', 'WF-Tr', 'WF-Ts', 'WF-OK']
+        for col in ['WR%','Exp','MFE','MAE','Resp','WF-Tr','WF-Ts']:
             top[col] = top[col].round(2)
         print(top.to_string(index=False))
 
