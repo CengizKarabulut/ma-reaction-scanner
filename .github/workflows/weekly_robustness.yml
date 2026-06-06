@@ -1,0 +1,67 @@
+name: Weekly BIST Robustness Analysis
+
+# Her Cumartesi sabah çalışır, hafta sonu derinlemesine analiz
+on:
+  schedule:
+    - cron: '0 6 * * 6'   # 06:00 UTC = 09:00 İstanbul Cumartesi
+  workflow_dispatch:
+
+jobs:
+  deep_analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tarih hazırla
+        id: prep
+        run: |
+          echo "ts=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Derinlemesine tarama (5y veri, walk-forward dahil)
+        run: |
+          mkdir -p reports
+          python scanner/bist_ma_reaction_scanner.py \
+            --all-bist \
+            --period 5y \
+            --output reports/weekly_${{ steps.prep.outputs.ts }}.csv \
+            --report both \
+            --top_n 15
+
+      - name: Cross-stock pattern analizi
+        run: |
+          python scanner/cross_stock_analysis.py \
+            --input reports/weekly_${{ steps.prep.outputs.ts }}.csv \
+            --output reports/cross_stock_${{ steps.prep.outputs.ts }}.html
+
+      - name: Telegram'a haftalık rapor
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python scanner/notifier.py \
+            --csv reports/weekly_${{ steps.prep.outputs.ts }}.csv \
+            --mode weekly
+        continue-on-error: true
+
+      - name: Artifact yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-analysis-${{ steps.prep.outputs.ts }}
+          path: reports/
+          retention-days: 365
