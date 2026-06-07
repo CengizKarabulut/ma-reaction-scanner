@@ -7,23 +7,27 @@ on:
   workflow_dispatch:          # Manuel tetikleme için
     inputs:
       tickers:
-        description: 'Hisse listesi (BIST_100, BIST_50, BIST_30, veya virgülle ayrı)'
+        description: 'Hisse listesi (BIST_TUM, BIST_100, BIST_50, BIST_30, XBANK, veya virgülle ayrı)'
         required: false
         default: 'BIST_100'
       period:
-        description: 'Veri periyodu'
+        description: 'Veri periyodu (1y, 3y, 5y, max)'
         required: false
         default: '3y'
       no_walk_forward:
         description: 'Walk-forward atla (hızlı çalıştırma)'
         required: false
         default: 'false'
+      source:
+        description: 'Veri kaynağı (borsapy=TradingView, yfinance=Yahoo)'
+        required: false
+        default: 'borsapy'
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
+    timeout-minutes: 90       # BIST_TUM (~500 hisse) için yeterli
+
     steps:
       - name: Repo checkout
         uses: actions/checkout@v4
@@ -43,20 +47,26 @@ jobs:
         id: prep
         run: |
           INPUT="${{ github.event.inputs.tickers || 'BIST_100' }}"
-          if [ "$INPUT" = "BIST_100" ]; then
-            TICKERS_ARG="--all-bist"
+
+          # Endeks isimleri (BIST_30, BIST_50, BIST_100, BIST_TUM) veya endeks sembolleri (XU100, XUTUM, XBANK)
+          # için --all-bist (tickers.py'dan çekilecek), diğerleri için --tickers
+          if [[ "$INPUT" =~ ^(BIST_TUM|BIST_ALL|BIST_100|BIST_50|BIST_30)$ ]] || [[ "$INPUT" =~ ^X[A-Z0-9]{3,}$ ]]; then
+            TICKERS_ARG="--all-bist --bist-list $INPUT"
           else
             TICKERS_ARG="--tickers $INPUT"
           fi
           echo "tickers_arg=$TICKERS_ARG" >> $GITHUB_OUTPUT
-          
+
           WF="${{ github.event.inputs.no_walk_forward || 'false' }}"
           if [ "$WF" = "true" ]; then
             echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT
           else
             echo "wf_arg=" >> $GITHUB_OUTPUT
           fi
-          
+
+          SRC="${{ github.event.inputs.source || 'borsapy' }}"
+          echo "src_arg=--source $SRC" >> $GITHUB_OUTPUT
+
           TIMESTAMP=$(date +'%Y-%m-%d')
           echo "ts=$TIMESTAMP" >> $GITHUB_OUTPUT
 
@@ -65,11 +75,12 @@ jobs:
           mkdir -p reports
           python scanner/bist_ma_reaction_scanner.py \
             ${{ steps.prep.outputs.tickers_arg }} \
+            ${{ steps.prep.outputs.src_arg }} \
             --period ${{ github.event.inputs.period || '3y' }} \
             ${{ steps.prep.outputs.wf_arg }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}.csv \
             --report both \
-            --top_n 10
+            --top_n 20
         continue-on-error: false
 
       - name: Telegram'a özet gönder
