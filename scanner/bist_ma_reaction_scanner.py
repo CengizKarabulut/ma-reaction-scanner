@@ -21,6 +21,7 @@ Gereksinimler:
 import argparse
 import sys
 import os
+import re
 import warnings
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -364,30 +365,59 @@ def walk_forward(df, ma_type, period, train_pct=0.7, **kwargs):
 MA_TYPES = ['SMA', 'EMA', 'WMA', 'VWMA', 'KAMA', 'ALMA', 'HMA']
 PERIODS = [3, 5, 8, 10, 13, 20, 21, 22, 34, 50, 55, 89, 100, 144, 200, 233, 250, 377, 610, 987]
 
+def _period_to_start_date(period: str) -> str:
+    """borsapy '3y' gibi periyotlari desteklemez, start_date'e cevir."""
+    from datetime import datetime, timedelta
+    period = period.lower().strip()
+    # Hazir gun sayilari
+    days_map = {
+        '1ay': 30, '3ay': 90, '6ay': 180,
+        '1y': 365, '2y': 730, '3y': 1095, '5y': 1825, '10y': 3650,
+        'max': 365 * 15,
+    }
+    if period in days_map:
+        days = days_map[period]
+    else:
+        # "Ny" formati - regex
+        m = re.match(r'^(\d+)y$', period)
+        if m:
+            days = int(m.group(1)) * 365
+        else:
+            m = re.match(r'^(\d+)ay$', period)
+            if m:
+                days = int(m.group(1)) * 30
+            else:
+                days = 365  # Default 1 yil
+    # 60 gun buffer (trading days icin)
+    start = (datetime.now() - timedelta(days=days + 60)).strftime('%Y-%m-%d')
+    return start
+
+
 def fetch_data(ticker, period='3y', source='yfinance'):
     """Veri çek (borsapy veya yfinance)
 
-    borsapy: TradingView WebSocket üzerinden direkt BIST verisi (Pine ile birebir uyumlu)
+    borsapy: TradingView/Paratic üzerinden direkt BIST verisi
     yfinance: Yahoo Finance (.IS suffix gerektirir, bazı hisselerde delisted hatası)
     """
-    # Symbol normalize - .IS suffix borsapy için gereksiz, yfinance için zorunlu
     base_symbol = ticker.replace('.IS', '') if ticker.endswith('.IS') else ticker
 
     if source == 'borsapy' and HAS_BORSAPY:
         try:
             t = bp.Ticker(base_symbol)
-            df = t.history(period=period)
-            # borsapy zaten Open/High/Low/Close/Volume formatında döner
+            # borsapy "3y" gibi periyotlari desteklemez (default 30 bar doner)
+            # Bu yuzden start_date kullaniyoruz
+            start_date = _period_to_start_date(period)
+            df = t.history(start=start_date)
             if df is None or df.empty:
-                raise RuntimeError(f"borsapy boş veri döndü: {base_symbol}")
-            # Index normalize - DatetimeIndex emin ol
+                raise RuntimeError(f"borsapy bos veri dondu: {base_symbol}")
+            if len(df) < 50:
+                raise RuntimeError(f"borsapy yetersiz veri: {base_symbol} ({len(df)} bar)")
             if not isinstance(df.index, pd.DatetimeIndex):
                 df.index = pd.to_datetime(df.index)
             return df
         except Exception as e:
-            # borsapy başarısızsa yfinance'a düş (eğer mevcutsa)
             if HAS_YFINANCE:
-                print(f"  borsapy hatası ({base_symbol}: {e}), yfinance'a düşülüyor...")
+                print(f"  borsapy hatasi ({base_symbol}: {e}), yfinance fallback")
                 source = 'yfinance'
             else:
                 raise
@@ -399,7 +429,7 @@ def fetch_data(ticker, period='3y', source='yfinance'):
             df.columns = df.columns.droplevel(1)
         return df
 
-    raise RuntimeError(f"Veri kaynağı '{source}' kullanılamıyor. pip install borsapy veya yfinance")
+    raise RuntimeError(f"Veri kaynagi '{source}' kullanilamiyor")
 
 def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
                react_bars=5, react_pct=1.5, atr_mult=0.2, adx_threshold=25,
