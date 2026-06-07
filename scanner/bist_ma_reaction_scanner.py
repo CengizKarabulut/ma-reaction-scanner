@@ -182,6 +182,10 @@ def analyze_reactions(df, ma_series,
 
     trend_t = trend_r = range_t = range_r = brk_count = 0
     mfe_sum = mae_sum = 0.0
+    # v6.1: ADR (Average Distance Ratio) - MA'nin "yapisik" mi gercek destek/direnc mi
+    dist_sum = 0.0
+    atr_sum = 0.0
+    valid_bars = 0
 
     # 1. PASS: Touch detection + Breakthrough tracking
     touches = []
@@ -213,6 +217,12 @@ def analyze_reactions(df, ma_series,
                 range_t += 1
             was_far_enough = False  # Reset
         prev_in_zone = in_zone
+
+        # v6.1: ADR icin biriktirme - her gecerli bar
+        if not np.isnan(close[i]) and not np.isnan(ma[i]) and not np.isnan(atr_v[i]):
+            dist_sum += abs(close[i] - ma[i])
+            atr_sum += atr_v[i]
+            valid_bars += 1
 
         # v6: Breakthrough tespiti
         currently_above = close[i] > ma[i]
@@ -272,6 +282,11 @@ def analyze_reactions(df, ma_series,
             else:
                 range_r += 1
 
+    # v6.1: ADR hesapla
+    avg_dist = dist_sum / valid_bars if valid_bars > 0 else 0
+    avg_atr = atr_sum / valid_bars if valid_bars > 0 else 1
+    adr = avg_dist / avg_atr if avg_atr > 0 else 0
+
     return {
         'trend_touches': trend_t,
         'trend_reacts': trend_r,
@@ -280,6 +295,7 @@ def analyze_reactions(df, ma_series,
         'mfe_sum': mfe_sum,
         'mae_sum': mae_sum,
         'brk_count': brk_count,
+        'adr': adr,  # v6.1: yapisiklik metrigi
     }
 
 # === METRİK HESAPLAMA ===
@@ -304,8 +320,12 @@ def compute_metrics(stats):
     net_edge = avg_mfe - avg_mae  # v6: WR'siz spread
     # v6: respect ratio - MA gerçekten kırılmadan kalıyor mu?
     respect_ratio = max(0.0, 1.0 - brk / max(total_t, 1))
-    # v6: composite skor = expectancy × √touches × respect_ratio
-    composite_score = expectancy * np.sqrt(total_t) * respect_ratio
+    # v6.1: ADR (Average Distance Ratio) - MA'nin gercek dest/dir mi yoksa yapisik mi
+    adr = stats.get('adr', 1.0)
+    # ADR'i clamp et: cok dusuk (yapisik) cezalandirir, cok yuksek capper
+    adr_factor = max(0.3, min(adr, 2.0))
+    # v6.1: composite skor = expectancy × √touches × respect_ratio × adr_factor
+    composite_score = expectancy * np.sqrt(total_t) * respect_ratio * adr_factor
 
     trend_wr = (tr / tt * 100) if tt > 0 else np.nan
     range_wr = (rr / rt * 100) if rt > 0 else np.nan
@@ -329,6 +349,7 @@ def compute_metrics(stats):
         'net_edge': net_edge,
         'breakthroughs': brk,
         'respect_ratio': respect_ratio,
+        'adr': adr,  # v6.1
         'trend_wr_pct': trend_wr,
         'range_wr_pct': range_wr,
         'grade': grade,
@@ -433,7 +454,8 @@ def fetch_data(ticker, period='3y', source='yfinance'):
 
 def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
                react_bars=5, react_pct=1.5, atr_mult=0.2, adx_threshold=25,
-               separation_mult=2.0, breakthrough_bars=10,
+               separation_mult=2.5, breakthrough_bars=10,
+               min_hma_period=20, min_adr=0.4,
                do_walk_forward=True):
     """Tek hisse için tüm 140 MA + walk-forward analizi"""
     try:
@@ -457,11 +479,17 @@ def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
     results = []
     for ma_type in MA_TYPES:
         for ma_period in PERIODS:
+            # v6.1: HMA icin minimum periyot filtresi (kisa HMA fiyata yapisik olur)
+            if ma_type == 'HMA' and ma_period < min_hma_period:
+                continue
             try:
                 ma_series = compute_ma(ma_type, df['Close'], df['Volume'], ma_period)
                 stats = analyze_reactions(df, ma_series, **react_kwargs)
                 metrics = compute_metrics(stats)
                 if metrics is None or metrics['touches'] < min_touches:
+                    continue
+                # v6.1: ADR (Avg Distance Ratio) filtresi - MA yapisiksa atla
+                if metrics.get('adr', 1.0) < min_adr:
                     continue
 
                 row = {
@@ -633,11 +661,15 @@ def main():
                        choices=['yfinance', 'borsapy'],
                        help='Veri kaynağı: borsapy (TradingView, BIST için tavsiye) veya yfinance')
     parser.add_argument('--min_touches', type=int, default=10)
+    parser.add_argument('--min_hma_period', type=int, default=20,
+                       help='HMA icin minimum periyot (kisa HMA fiyata yapisik olur)')
+    parser.add_argument('--min_adr', type=float, default=0.4,
+                       help='Minimum ADR (Avg Distance Ratio) - dusuk olursa MA yapisik kabul edilir')
     parser.add_argument('--react_bars', type=int, default=5)
     parser.add_argument('--react_pct', type=float, default=1.5)
     parser.add_argument('--atr_mult', type=float, default=0.2)
     parser.add_argument('--adx_threshold', type=float, default=25)
-    parser.add_argument('--separation_mult', type=float, default=2.0,
+    parser.add_argument('--separation_mult', type=float, default=2.5,
                        help='v6: Pre-touch separation şartı (ATR çarpanı, kısa MA bias düzeltici)')
     parser.add_argument('--breakthrough_bars', type=int, default=10,
                        help='v6: Kırılım onay barı (respect ratio hesabı için)')
@@ -683,6 +715,8 @@ def main():
         atr_mult=args.atr_mult, adx_threshold=args.adx_threshold,
         separation_mult=args.separation_mult,
         breakthrough_bars=args.breakthrough_bars,
+        min_hma_period=args.min_hma_period,
+        min_adr=args.min_adr,
         do_walk_forward=not args.no_walk_forward,
     )
 
