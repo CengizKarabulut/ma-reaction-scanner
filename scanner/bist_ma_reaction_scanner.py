@@ -13,7 +13,7 @@ Kullanım örnekleri:
   python bist_ma_reaction_scanner.py --all-bist --period 3y --workers 8
 
 Gereksinimler:
-  pip install yfinance pandas numpy
+  pip install borsapy pandas numpy   # veya: pip install yfinance pandas numpy
   # opsiyonel: pip install borsapy  (alternatif veri kaynağı)
 ================================================================================
 """
@@ -38,7 +38,7 @@ except ImportError:
     HAS_YFINANCE = False
 
 try:
-    from borsapy import Borsa
+    import borsapy as bp
     HAS_BORSAPY = True
 except ImportError:
     HAS_BORSAPY = False
@@ -365,23 +365,41 @@ MA_TYPES = ['SMA', 'EMA', 'WMA', 'VWMA', 'KAMA', 'ALMA', 'HMA']
 PERIODS = [3, 5, 8, 10, 13, 20, 21, 22, 34, 50, 55, 89, 100, 144, 200, 233, 250, 377, 610, 987]
 
 def fetch_data(ticker, period='3y', source='yfinance'):
-    """Veri çek (yfinance veya borsapy)"""
+    """Veri çek (borsapy veya yfinance)
+
+    borsapy: TradingView WebSocket üzerinden direkt BIST verisi (Pine ile birebir uyumlu)
+    yfinance: Yahoo Finance (.IS suffix gerektirir, bazı hisselerde delisted hatası)
+    """
+    # Symbol normalize - .IS suffix borsapy için gereksiz, yfinance için zorunlu
+    base_symbol = ticker.replace('.IS', '') if ticker.endswith('.IS') else ticker
+
+    if source == 'borsapy' and HAS_BORSAPY:
+        try:
+            t = bp.Ticker(base_symbol)
+            df = t.history(period=period)
+            # borsapy zaten Open/High/Low/Close/Volume formatında döner
+            if df is None or df.empty:
+                raise RuntimeError(f"borsapy boş veri döndü: {base_symbol}")
+            # Index normalize - DatetimeIndex emin ol
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
+            return df
+        except Exception as e:
+            # borsapy başarısızsa yfinance'a düş (eğer mevcutsa)
+            if HAS_YFINANCE:
+                print(f"  borsapy hatası ({base_symbol}: {e}), yfinance'a düşülüyor...")
+                source = 'yfinance'
+            else:
+                raise
+
     if source == 'yfinance' and HAS_YFINANCE:
-        symbol = f"{ticker}.IS" if not ticker.endswith('.IS') else ticker
+        symbol = f"{base_symbol}.IS"
         df = yf.download(symbol, period=period, progress=False, auto_adjust=True)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         return df
-    elif source == 'borsapy' and HAS_BORSAPY:
-        b = Borsa()
-        df = b.veri_cek(ticker, periyod=period)
-        # borsapy çıktı formatına göre column normalize et
-        df = df.rename(columns={'Açılış': 'Open', 'Yüksek': 'High',
-                                 'Düşük': 'Low', 'Kapanış': 'Close',
-                                 'Hacim': 'Volume'})
-        return df
-    else:
-        raise RuntimeError(f"Veri kaynağı '{source}' bulunamadı. pip install yfinance veya borsapy")
+
+    raise RuntimeError(f"Veri kaynağı '{source}' kullanılamıyor. pip install borsapy veya yfinance")
 
 def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
                react_bars=5, react_pct=1.5, atr_mult=0.2, adx_threshold=25,
@@ -563,14 +581,7 @@ def save_html_report(combined_df, path='ma_scan_report.html'):
         f.write(html)
     print(f"\nHTML rapor: {path}")
 
-# === BIST 100 SEMBOL LİSTESİ (örnek) ===
-BIST_100 = [
-    "ASELS","AKBNK","AKSEN","ALARK","ALBRK","ARCLK","ASUZU","BIMAS","BRSAN","CCOLA",
-    "DOAS","DOHOL","EKGYO","ENJSA","ENKAI","EREGL","FROTO","GARAN","GUBRF","HEKTS",
-    "ISCTR","KCHOL","KOZAA","KOZAL","KRDMD","MGROS","ODAS","OYAKC","PETKM","PGSUS",
-    "SAHOL","SASA","SISE","SOKM","TAVHL","TCELL","THYAO","TKFEN","TOASO","TSKB",
-    "TTKOM","TUPRS","ULKER","VAKBN","VESBE","VESTL","YKBNK","ZOREN",
-]
+
 
 # === ANA AKIŞ ===
 
@@ -583,11 +594,14 @@ def main():
     parser.add_argument('--tickers', type=str, default='ASELS,GARAN,THYAO,KCHOL,SISE',
                        help='Virgülle ayrı liste (ASELS,GARAN). --all-bist ile override.')
     parser.add_argument('--all-bist', action='store_true',
-                       help='BIST 100 listesini kullan')
+                       help='Endeks listesi kullan (--bist-list ile birlikte)')
+    parser.add_argument('--bist-list', type=str, default='BIST_100',
+                       help='Endeks adi: BIST_30, BIST_50, BIST_100, BIST_TUM, XBANK, XUTUM vs')
     parser.add_argument('--period', type=str, default='3y',
                        help='Veri periyodu (1y, 2y, 3y, 5y, max)')
-    parser.add_argument('--source', type=str, default='yfinance',
-                       choices=['yfinance', 'borsapy'])
+    parser.add_argument('--source', type=str, default='borsapy',
+                       choices=['yfinance', 'borsapy'],
+                       help='Veri kaynağı: borsapy (TradingView, BIST için tavsiye) veya yfinance')
     parser.add_argument('--min_touches', type=int, default=10)
     parser.add_argument('--react_bars', type=int, default=5)
     parser.add_argument('--react_pct', type=float, default=1.5)
@@ -608,10 +622,26 @@ def main():
     args = parser.parse_args()
 
     if not HAS_YFINANCE and not HAS_BORSAPY:
-        print("HATA: yfinance veya borsapy gerekli. pip install yfinance")
+        print("HATA: borsapy veya yfinance gerekli. pip install borsapy")
         sys.exit(1)
 
-    tickers = BIST_100 if args.all_bist else [t.strip() for t in args.tickers.split(',')]
+    # Hisse listesini hazirla
+    if args.all_bist:
+        # tickers.py'dan dinamik endeks bileseni cek (borsapy varsa)
+        try:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from tickers import get_list
+            tickers = get_list(args.bist_list)
+            if not tickers:
+                print(f"HATA: '{args.bist_list}' icin hisse listesi bos.")
+                return
+            print(f"Endeks listesi: {args.bist_list} -> {len(tickers)} hisse")
+        except ImportError as e:
+            print(f"HATA: tickers.py yuklenemedi: {e}")
+            return
+    else:
+        tickers = [t.strip().upper() for t in args.tickers.split(',') if t.strip()]
     print(f"\nTarama başlıyor: {len(tickers)} hisse × {len(MA_TYPES)*len(PERIODS)} MA kombinasyonu = {len(tickers)*len(MA_TYPES)*len(PERIODS):,} aday")
     print(f"Parametreler: period={args.period}, react_bars={args.react_bars}, react_pct={args.react_pct}, atr_mult={args.atr_mult}")
     print(f"Walk-forward: {'KAPALI' if args.no_walk_forward else 'AÇIK (ilk %70 / son %30)'}\n")
