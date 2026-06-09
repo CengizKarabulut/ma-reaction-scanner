@@ -1,32 +1,43 @@
 name: Daily BIST MA Reaction Scan
 
-# Her hafta içi günü, BIST kapanışından (18:00 İstanbul) sonra çalışır
 on:
   schedule:
-    - cron: '30 15 * * 1-5'   # 15:30 UTC = 18:30 İstanbul (BIST kapanışı + ~30 dk)
-  workflow_dispatch:          # Manuel tetikleme için
+    - cron: '30 15 * * 1-5'   # 18:30 İstanbul, hafta içi
+  workflow_dispatch:
     inputs:
       tickers:
-        description: 'Hisse listesi (BIST_TUM, BIST_100, BIST_50, BIST_30, XBANK, veya virgülle ayrı)'
+        description: 'Liste: BIST_TUM, BIST_100, BIST_50, BIST_30, XBANK, XK030, virgülle özel liste'
         required: false
         default: 'BIST_100'
       period:
         description: 'Veri periyodu (1y, 3y, 5y, max)'
         required: false
         default: '3y'
+      interval:
+        description: 'Zaman dilimi: 1d (günlük), 1wk (haftalık), 1mo (aylık)'
+        required: false
+        default: '1d'
       no_walk_forward:
-        description: 'Walk-forward atla (hızlı çalıştırma)'
+        description: 'Walk-forward atla (hızlı test)'
         required: false
         default: 'false'
       source:
-        description: 'Veri kaynağı (borsapy=TradingView, yfinance=Yahoo)'
+        description: 'Veri kaynağı (borsapy/yfinance)'
         required: false
         default: 'borsapy'
+      generate_strategies:
+        description: 'Strateji raporu üret (en robust 20 hisse için)'
+        required: false
+        default: 'true'
+      portfolio:
+        description: 'Strateji raporu için portföy büyüklüğü (TL)'
+        required: false
+        default: '100000'
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 90       # BIST_TUM (~500 hisse) için yeterli
+    timeout-minutes: 90
 
     steps:
       - name: Repo checkout
@@ -43,13 +54,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Hisse listesini hazırla
+      - name: Parametreler
         id: prep
         run: |
           INPUT="${{ github.event.inputs.tickers || 'BIST_100' }}"
-
-          # Endeks isimleri (BIST_30, BIST_50, BIST_100, BIST_TUM) veya endeks sembolleri (XU100, XUTUM, XBANK)
-          # için --all-bist (tickers.py'dan çekilecek), diğerleri için --tickers
           if [[ "$INPUT" =~ ^(BIST_TUM|BIST_ALL|BIST_100|BIST_50|BIST_30)$ ]] || [[ "$INPUT" =~ ^X[A-Z0-9]{3,}$ ]]; then
             TICKERS_ARG="--all-bist --bist-list $INPUT"
           else
@@ -58,46 +66,59 @@ jobs:
           echo "tickers_arg=$TICKERS_ARG" >> $GITHUB_OUTPUT
 
           WF="${{ github.event.inputs.no_walk_forward || 'false' }}"
-          if [ "$WF" = "true" ]; then
-            echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT
-          else
-            echo "wf_arg=" >> $GITHUB_OUTPUT
-          fi
+          [ "$WF" = "true" ] && echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT || echo "wf_arg=" >> $GITHUB_OUTPUT
 
           SRC="${{ github.event.inputs.source || 'borsapy' }}"
+          INTV="${{ github.event.inputs.interval || '1d' }}"
+
           echo "src_arg=--source $SRC" >> $GITHUB_OUTPUT
+          echo "intv_arg=--interval $INTV" >> $GITHUB_OUTPUT
+          echo "interval=$INTV" >> $GITHUB_OUTPUT
 
-          TIMESTAMP=$(date +'%Y-%m-%d')
-          echo "ts=$TIMESTAMP" >> $GITHUB_OUTPUT
+          TS=$(date +'%Y-%m-%d')
+          echo "ts=$TS" >> $GITHUB_OUTPUT
 
-      - name: Tarama çalıştır
+      - name: Tarama (${{ steps.prep.outputs.interval }})
         run: |
           mkdir -p reports
           python scanner/bist_ma_reaction_scanner.py \
             ${{ steps.prep.outputs.tickers_arg }} \
             ${{ steps.prep.outputs.src_arg }} \
+            ${{ steps.prep.outputs.intv_arg }} \
             --period ${{ github.event.inputs.period || '3y' }} \
             ${{ steps.prep.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}.csv \
+            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
             --report both \
             --top_n 20
-        continue-on-error: false
 
-      - name: Telegram'a özet gönder
+      - name: Strateji raporu üret
+        if: ${{ github.event.inputs.generate_strategies != 'false' && success() }}
+        run: |
+          python scanner/strategy_generator.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
+            --all-robust \
+            --top_ma 5 \
+            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
+            --risk_pct 1.0 \
+            ${{ steps.prep.outputs.src_arg }} \
+            --output reports/strategies_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
+        continue-on-error: true
+
+      - name: Telegram özet
         if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python scanner/notifier.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}.csv \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
             --mode daily
-        continue-on-error: true   # Telegram başarısız olsa bile artifact yüklensin
+        continue-on-error: true
 
-      - name: Sonuçları artifact olarak yükle
+      - name: Artifact yükle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scan-results-${{ steps.prep.outputs.ts }}
+          name: scan-${{ steps.prep.outputs.ts }}-${{ steps.prep.outputs.interval }}
           path: reports/
           retention-days: 90
