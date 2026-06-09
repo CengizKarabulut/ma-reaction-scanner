@@ -1,8 +1,5 @@
 name: Multi-Timeframe Cascade Scan
 
-# Tüm zaman dilimlerinde tarama yapıp consensus üretir
-# Hafta sonu çalıştır (BIST kapalı)
-
 on:
   schedule:
     - cron: '0 7 * * 6'   # Cumartesi 10:00 İstanbul
@@ -20,11 +17,15 @@ on:
         description: 'Portföy (TL)'
         required: false
         default: '100000'
+      min_volume_tl:
+        description: 'Min günlük TL hacim (likidite filtresi, 0=filtre yok, 10M=10000000)'
+        required: false
+        default: '10000000'
 
 jobs:
   cascade-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 180   # 3 saat (D + W + M + consensus + strategy + backtest + confirm)
+    timeout-minutes: 180
 
     steps:
       - name: Repo checkout
@@ -55,18 +56,23 @@ jobs:
           echo "ts=$TS" >> $GITHUB_OUTPUT
           mkdir -p reports
 
-      # === STEP 1: DAILY TARAMA ===
+      # ============================================================
+      # STEP 1: DAILY TARAMA (likidite filtresi aktif)
+      # ============================================================
       - name: 1️⃣ Daily Tarama (1d)
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             ${{ steps.prep.outputs.tickers_arg }} \
             --source borsapy --interval 1d \
             --period ${{ github.event.inputs.period || '3y' }} \
+            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
             --report html --top_n 20
 
-      # === STEP 2: WEEKLY TARAMA (sadece daily robust olan hisseler için) ===
-      - name: 2️⃣ Daily Robust Hisseleri Çıkar
+      # ============================================================
+      # STEP 2: Daily-robust hisseleri çıkar
+      # ============================================================
+      - name: 2️⃣ Robust hisseleri çıkar
         id: filter
         run: |
           python -c "
@@ -74,8 +80,6 @@ jobs:
           df = pd.read_csv('reports/scan_${{ steps.prep.outputs.ts }}_1d.csv')
           if 'wf_robust' in df.columns:
               robust = df[df['wf_robust']==True]
-              tickers = robust['ticker'].unique().tolist()
-              # En çok robust olan top 50 hisse
               top_tickers = robust.groupby('ticker').size().nlargest(50).index.tolist()
           else:
               top_tickers = df.nlargest(100, 'composite_score')['ticker'].unique()[:50].tolist()
@@ -86,6 +90,9 @@ jobs:
           ROBUST_LIST=$(cat robust_tickers.txt)
           echo "robust_list=$ROBUST_LIST" >> $GITHUB_OUTPUT
 
+      # ============================================================
+      # STEP 3: WEEKLY TARAMA
+      # ============================================================
       - name: 3️⃣ Weekly Tarama (1wk)
         if: steps.filter.outputs.robust_list != ''
         run: |
@@ -93,11 +100,15 @@ jobs:
             --tickers "${{ steps.filter.outputs.robust_list }}" \
             --source borsapy --interval 1wk \
             --period ${{ github.event.inputs.period || '3y' }} \
+            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_1wk.csv \
             --report html --top_n 20 \
             --min_touches 8 \
             --separation_mult 2.0
 
+      # ============================================================
+      # STEP 4: MONTHLY TARAMA (FIX: walk-forward AÇIK, daha gevsek)
+      # ============================================================
       - name: 4️⃣ Monthly Tarama (1mo)
         if: steps.filter.outputs.robust_list != ''
         run: |
@@ -105,14 +116,18 @@ jobs:
             --tickers "${{ steps.filter.outputs.robust_list }}" \
             --source borsapy --interval 1mo \
             --period 5y \
+            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_1mo.csv \
             --report html --top_n 20 \
-            --min_touches 5 \
+            --min_touches 3 \
             --separation_mult 1.5 \
-            --no_walk_forward
+            --min_adr 0.3 \
+            --min_hma_period 13
         continue-on-error: true
 
-      # === STEP 5: CONSENSUS ===
+      # ============================================================
+      # STEP 5: CONSENSUS (monthly fallback aktif)
+      # ============================================================
       - name: 5️⃣ Cross-Timeframe Consensus
         run: |
           python scanner/cross_tf_consensus.py \
@@ -123,7 +138,9 @@ jobs:
             --csv-out reports/consensus_${{ steps.prep.outputs.ts }}.csv
         continue-on-error: true
 
-      # === STEP 6: STRATEGY GENERATOR (her TF için) ===
+      # ============================================================
+      # STEP 6: STRATEGY GENERATOR (sadece consensus altın+gümüş için)
+      # ============================================================
       - name: 6️⃣ Strategy Raporu
         run: |
           python scanner/strategy_generator.py \
@@ -133,7 +150,9 @@ jobs:
             --output reports/strategies_${{ steps.prep.outputs.ts }}.html
         continue-on-error: true
 
-      # === STEP 7: BACKTEST ===
+      # ============================================================
+      # STEP 7: BACKTEST
+      # ============================================================
       - name: 7️⃣ Backtest Simulator
         run: |
           python scanner/backtest_simulator.py \
@@ -143,7 +162,9 @@ jobs:
             --output reports/backtest_${{ steps.prep.outputs.ts }}.html
         continue-on-error: true
 
-      # === STEP 8: MULTI-INDICATOR CONFIRMATION ===
+      # ============================================================
+      # STEP 8: MULTI-INDICATOR CONFIRMATION
+      # ============================================================
       - name: 8️⃣ Multi-Indicator Confirmation
         run: |
           python scanner/multi_indicator_confirm.py \
@@ -152,7 +173,9 @@ jobs:
             --output reports/confirm_${{ steps.prep.outputs.ts }}.html
         continue-on-error: true
 
-      # === STEP 9: TELEGRAM ÖZET ===
+      # ============================================================
+      # STEP 9: TELEGRAM ÖZET
+      # ============================================================
       - name: 9️⃣ Telegram Özet
         if: success()
         env:
@@ -164,7 +187,9 @@ jobs:
             --mode daily
         continue-on-error: true
 
-      # === STEP 10: TÜM SONUÇLARI ARTIFACT OLARAK YÜKLE ===
+      # ============================================================
+      # STEP 10: ARTIFACT
+      # ============================================================
       - name: 🔟 Artifact yükle
         if: always()
         uses: actions/upload-artifact@v4
