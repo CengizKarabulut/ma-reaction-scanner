@@ -119,16 +119,18 @@ def format_daily(df: pd.DataFrame) -> str:
     if n_stocks <= 50:
         lines.extend(_format_cross_stock_top(df, n=10))
         lines.append("")
-        lines.append("📋 *Hisse Başı Top 1*")
+        lines.append("📋 *Hisse Başı Top 3 MA*")
+        lines.append("```")
         for ticker in sorted(df['ticker'].unique()):
-            sub = df[df['ticker'] == ticker].nlargest(1, 'composite_score')
+            sub = df[df['ticker'] == ticker].nlargest(3, 'composite_score')
             if len(sub) == 0:
                 continue
-            top1 = sub.iloc[0]
-            line = f"*{ticker}*: {top1['ma_type']} {top1['period']} (Exp {top1['expectancy']:+.2f}, {top1['grade']})"
-            if top1.get('wf_robust', False):
-                line += " ✓"
-            lines.append(line)
+            lines.append(f"{ticker}:")
+            for _, r in sub.iterrows():
+                robust_mark = "✓" if r.get('wf_robust', False) else " "
+                lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
+                             f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f} {robust_mark}")
+        lines.append("```")
 
     # === MEDIUM MODE (50-150 hisse): cross-stock + robust hisselerin özeti ===
     elif n_stocks <= 150:
@@ -142,13 +144,21 @@ def format_daily(df: pd.DataFrame) -> str:
                 df[df['wf_robust'] == True]
                 .groupby('ticker').size()
                 .sort_values(ascending=False)
-                .head(25)
+                .head(15)
             )
             if len(robust_per_stock) > 0:
-                lines.append(f"💎 *Robust MA Sayısı En Yüksek 25 Hisse*")
+                lines.append(f"💎 *En Çok Robust MA'ya Sahip 15 Hisse — Her Birinin Top 3'ü*")
                 lines.append("```")
                 for tk, cnt in robust_per_stock.items():
-                    lines.append(f"{tk:<7} {cnt:>3} robust MA")
+                    # Bu hissenin robust olan top 3 MA'sini al
+                    sub = (
+                        df[(df['ticker'] == tk) & (df['wf_robust'] == True)]
+                        .nlargest(3, 'composite_score')
+                    )
+                    lines.append(f"{tk} ({cnt} robust MA)")
+                    for _, r in sub.iterrows():
+                        lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
+                                     f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f}")
                 lines.append("```")
 
     # === LARGE MODE (>150 hisse, BIST_TUM): yüksek seviyeli özet ===
