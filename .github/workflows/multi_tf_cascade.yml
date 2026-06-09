@@ -1,0 +1,174 @@
+name: Multi-Timeframe Cascade Scan
+
+# Tüm zaman dilimlerinde tarama yapıp consensus üretir
+# Hafta sonu çalıştır (BIST kapalı)
+
+on:
+  schedule:
+    - cron: '0 7 * * 6'   # Cumartesi 10:00 İstanbul
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Liste (BIST_TUM, BIST_100, BIST_50, vs)'
+        required: false
+        default: 'BIST_100'
+      period:
+        description: 'Veri periyodu'
+        required: false
+        default: '3y'
+      portfolio:
+        description: 'Portföy (TL)'
+        required: false
+        default: '100000'
+
+jobs:
+  cascade-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180   # 3 saat (D + W + M + consensus + strategy + backtest + confirm)
+
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Parametreler hazırla
+        id: prep
+        run: |
+          INPUT="${{ github.event.inputs.tickers || 'BIST_100' }}"
+          if [[ "$INPUT" =~ ^(BIST_TUM|BIST_ALL|BIST_100|BIST_50|BIST_30)$ ]] || [[ "$INPUT" =~ ^X[A-Z0-9]{3,}$ ]]; then
+            TICKERS_ARG="--all-bist --bist-list $INPUT"
+          else
+            TICKERS_ARG="--tickers $INPUT"
+          fi
+          echo "tickers_arg=$TICKERS_ARG" >> $GITHUB_OUTPUT
+          TS=$(date +'%Y-%m-%d')
+          echo "ts=$TS" >> $GITHUB_OUTPUT
+          mkdir -p reports
+
+      # === STEP 1: DAILY TARAMA ===
+      - name: 1️⃣ Daily Tarama (1d)
+        run: |
+          python scanner/bist_ma_reaction_scanner.py \
+            ${{ steps.prep.outputs.tickers_arg }} \
+            --source borsapy --interval 1d \
+            --period ${{ github.event.inputs.period || '3y' }} \
+            --output reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --report html --top_n 20
+
+      # === STEP 2: WEEKLY TARAMA (sadece daily robust olan hisseler için) ===
+      - name: 2️⃣ Daily Robust Hisseleri Çıkar
+        id: filter
+        run: |
+          python -c "
+          import pandas as pd
+          df = pd.read_csv('reports/scan_${{ steps.prep.outputs.ts }}_1d.csv')
+          if 'wf_robust' in df.columns:
+              robust = df[df['wf_robust']==True]
+              tickers = robust['ticker'].unique().tolist()
+              # En çok robust olan top 50 hisse
+              top_tickers = robust.groupby('ticker').size().nlargest(50).index.tolist()
+          else:
+              top_tickers = df.nlargest(100, 'composite_score')['ticker'].unique()[:50].tolist()
+          with open('robust_tickers.txt', 'w') as f:
+              f.write(','.join(top_tickers))
+          print(f'Daily robust: {len(top_tickers)} hisse')
+          "
+          ROBUST_LIST=$(cat robust_tickers.txt)
+          echo "robust_list=$ROBUST_LIST" >> $GITHUB_OUTPUT
+
+      - name: 3️⃣ Weekly Tarama (1wk)
+        if: steps.filter.outputs.robust_list != ''
+        run: |
+          python scanner/bist_ma_reaction_scanner.py \
+            --tickers "${{ steps.filter.outputs.robust_list }}" \
+            --source borsapy --interval 1wk \
+            --period ${{ github.event.inputs.period || '3y' }} \
+            --output reports/scan_${{ steps.prep.outputs.ts }}_1wk.csv \
+            --report html --top_n 20 \
+            --min_touches 8 \
+            --separation_mult 2.0
+
+      - name: 4️⃣ Monthly Tarama (1mo)
+        if: steps.filter.outputs.robust_list != ''
+        run: |
+          python scanner/bist_ma_reaction_scanner.py \
+            --tickers "${{ steps.filter.outputs.robust_list }}" \
+            --source borsapy --interval 1mo \
+            --period 5y \
+            --output reports/scan_${{ steps.prep.outputs.ts }}_1mo.csv \
+            --report html --top_n 20 \
+            --min_touches 5 \
+            --separation_mult 1.5 \
+            --no_walk_forward
+        continue-on-error: true
+
+      # === STEP 5: CONSENSUS ===
+      - name: 5️⃣ Cross-Timeframe Consensus
+        run: |
+          python scanner/cross_tf_consensus.py \
+            --daily reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --weekly reports/scan_${{ steps.prep.outputs.ts }}_1wk.csv \
+            --monthly reports/scan_${{ steps.prep.outputs.ts }}_1mo.csv \
+            --output reports/consensus_${{ steps.prep.outputs.ts }}.html \
+            --csv-out reports/consensus_${{ steps.prep.outputs.ts }}.csv
+        continue-on-error: true
+
+      # === STEP 6: STRATEGY GENERATOR (her TF için) ===
+      - name: 6️⃣ Strategy Raporu
+        run: |
+          python scanner/strategy_generator.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --all-robust --top_ma 5 \
+            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
+            --output reports/strategies_${{ steps.prep.outputs.ts }}.html
+        continue-on-error: true
+
+      # === STEP 7: BACKTEST ===
+      - name: 7️⃣ Backtest Simulator
+        run: |
+          python scanner/backtest_simulator.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --all-robust --top_ma 3 \
+            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
+            --output reports/backtest_${{ steps.prep.outputs.ts }}.html
+        continue-on-error: true
+
+      # === STEP 8: MULTI-INDICATOR CONFIRMATION ===
+      - name: 8️⃣ Multi-Indicator Confirmation
+        run: |
+          python scanner/multi_indicator_confirm.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --all-robust --n_tickers 20 \
+            --output reports/confirm_${{ steps.prep.outputs.ts }}.html
+        continue-on-error: true
+
+      # === STEP 9: TELEGRAM ÖZET ===
+      - name: 9️⃣ Telegram Özet
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python scanner/notifier.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --mode daily
+        continue-on-error: true
+
+      # === STEP 10: TÜM SONUÇLARI ARTIFACT OLARAK YÜKLE ===
+      - name: 🔟 Artifact yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cascade-scan-${{ steps.prep.outputs.ts }}
+          path: reports/
+          retention-days: 90
