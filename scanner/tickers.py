@@ -1,121 +1,171 @@
-"""BIST hisse listeleri — borsapy varsa dinamik endeks bileşenleri, yoksa hardcoded fallback."""
+"""BIST hisse listeleri — TAMAMEN borsapy üzerinden dinamik.
 
-# === Fallback listeler (borsapy yoksa kullanılır) ===
+Hardcoded liste YOK. borsapy her çağrıda güncel bileşenleri çeker.
+Opsiyonel olarak son başarılı sonuç .cache/tickers_cache.json'a yazılır
+ve borsapy ulaşılamadığında oradan okunur.
 
-BIST_30_FALLBACK = [
-    "AKBNK","AKSEN","ARCLK","ASELS","BIMAS","DOAS","DOHOL","EKGYO","EREGL","FROTO",
-    "GARAN","GUBRF","HEKTS","ISCTR","KCHOL","KOZAA","KOZAL","KRDMD","ODAS","PETKM",
-    "PGSUS","SAHOL","SASA","SISE","TAVHL","TCELL","THYAO","TOASO","TUPRS","YKBNK",
-]
+Desteklenen isimler:
+  BIST_30 → XU030       Katılım: XK030 (Kat 30), XK050, XKTUM
+  BIST_50 → XU050       Sektör: XBANK, XUSIN, XUMAL, XUTEK, XKMYA, XGIDA, ...
+  BIST_100 → XU100      Bölgesel/Tema: XHOLD, XSGRT, XYORT, ...
+  BIST_TUM → XUTUM (+XKTUM birleşik, ~500+ hisse)
+  Direkt sembol: 'XU100', 'XBANK', vs.
+"""
 
-BIST_50_FALLBACK = BIST_30_FALLBACK + [
-    "ALARK","ASUZU","BRSAN","CCOLA","ENJSA","ENKAI","MGROS","OYAKC","SOKM",
-    "TKFEN","TSKB","TTKOM","ULKER","VAKBN","VESBE","VESTL","ZOREN","ALBRK","ALCTL",
-]
-
-BIST_100_FALLBACK = sorted(set(BIST_50_FALLBACK + [
-    "AGHOL","AKCNS","AKFGY","AKSA","ALCAR","ALKIM","ASTOR","AYDEM","AYGAZ","BAGFS",
-    "BANVT","BERA","BIENY","BIOEN","BIZIM","BJKAS","BRYAT","CANTE","CIMSA","CWENE",
-    "DEVA","DGGYO","DOCO","ECILC","ECZYT","EGEEN","EGGUB","ENERY","ESEN","EUPWR",
-    "EUREN","FENER","GENIL","GESAN","GOLTS","GOZDE","GSDHO","GSRAY","HALKB","INDES",
-    "ISMEN","IZINV","JANTS","KAREL","KAYSE","KFEIN","KLMSN","KLNMA","KMPUR","KONTR",
-]))
+import json
+import os
+from datetime import datetime, timedelta
+from pathlib import Path
 
 
-def _get_borsapy_components(index_symbol: str) -> list:
-    """borsapy ile endeks bileşenlerini çek. Hata durumunda boş liste döner."""
+# === Endeks isim eşleştirmesi ===
+INDEX_MAP = {
+    'BIST_30':   'XU030',
+    'BIST_50':   'XU050',
+    'BIST_100':  'XU100',
+    'BIST_TUM':  'XUTUM',  # Özel davranış: XUTUM + XKTUM birleştir
+    'BIST_ALL':  'XUTUM',
+    'BIST_KAT':  'XKTUM',
+    'KATILIM_30':  'XK030',
+    'KATILIM_50':  'XK050',
+    'KATILIM_100': 'XK100',
+    'BANKA':     'XBANK',
+    'SINAI':     'XUSIN',
+    'MALI':      'XUMAL',
+    'TEKNOLOJI': 'XUTEK',
+    'KIMYA':     'XKMYA',
+    'GIDA':      'XGIDA',
+    'HOLDING':   'XHOLD',
+    'SIGORTA':   'XSGRT',
+    'GAYRIMENKUL': 'XYORT',
+}
+
+
+# === Cache yolu (script'in olduğu dizinde) ===
+_CACHE_DIR = Path(__file__).parent / '.cache'
+_CACHE_FILE = _CACHE_DIR / 'tickers_cache.json'
+_CACHE_MAX_AGE_DAYS = 7  # Cache 7 gün geçerli
+
+
+def _load_cache() -> dict:
+    """Cache'den oku, yoksa veya çok eskiyse boş döndür."""
+    if not _CACHE_FILE.exists():
+        return {}
+    try:
+        data = json.loads(_CACHE_FILE.read_text())
+        cached_at = datetime.fromisoformat(data.get('cached_at', '2000-01-01'))
+        if datetime.now() - cached_at > timedelta(days=_CACHE_MAX_AGE_DAYS):
+            print(f"  Cache çok eski ({_CACHE_MAX_AGE_DAYS} gün+), yenilenecek")
+            return {}
+        return data.get('lists', {})
+    except Exception as e:
+        print(f"  Cache okuma hatası: {e}")
+        return {}
+
+
+def _save_cache(lists: dict):
+    """Tüm listeleri cache'e kaydet."""
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        data = {
+            'cached_at': datetime.now().isoformat(),
+            'lists': lists,
+        }
+        _CACHE_FILE.write_text(json.dumps(data, indent=2))
+    except Exception as e:
+        print(f"  Cache yazma hatası: {e}")
+
+
+def _fetch_from_borsapy(index_symbol: str) -> list:
+    """borsapy ile endeks bileşenlerini çek (cache yok)."""
     try:
         import borsapy as bp
         idx = bp.Index(index_symbol)
         components = idx.component_symbols
         if components:
-            print(f"  borsapy: {index_symbol} icin {len(components)} hisse cekildi")
-        return components or []
-    except Exception as e:
-        print(f"  Uyari: borsapy'den {index_symbol} bilesenleri alinamadi ({e}), fallback kullaniliyor")
+            print(f"  borsapy: {index_symbol} → {len(components)} hisse")
+            return list(components)
         return []
-
-
-def _get_all_bist_stocks() -> list:
-    """BIST'in tum hisselerini cek (XUTUM endeksi, 500+ hisse).
-    Birden fazla endeksi birlestirerek daha kapsamli liste olusturur."""
-    try:
-        import borsapy as bp
-        all_symbols = set()
-
-        # XUTUM: BIST Tum (~500+ hisse, ana liste)
-        try:
-            xutum = bp.Index("XUTUM")
-            symbols = xutum.component_symbols
-            if symbols:
-                all_symbols.update(symbols)
-                print(f"  borsapy: XUTUM -> {len(symbols)} hisse")
-        except Exception as e:
-            print(f"  XUTUM cekilemedi: {e}")
-
-        # XKTUM: BIST Katilim Tum (218 hisse, ek hisseler icin)
-        try:
-            xktum = bp.Index("XKTUM")
-            symbols = xktum.component_symbols
-            if symbols:
-                all_symbols.update(symbols)
-        except Exception:
-            pass
-
-        return sorted(all_symbols)
     except ImportError:
-        print("  HATA: BIST_TUM icin borsapy gerekli")
+        raise RuntimeError(
+            "borsapy yüklü değil. 'pip install borsapy' veya virgülle "
+            "ayrılmış özel ticker listesi verin."
+        )
+    except Exception as e:
+        print(f"  borsapy hatası ({index_symbol}): {e}")
         return []
+
+
+def _fetch_bist_tum() -> list:
+    """BIST Tümü — XUTUM + XKTUM birleşik (~500+ hisse)."""
+    all_symbols = set()
+    for sym in ['XUTUM', 'XKTUM']:
+        symbols = _fetch_from_borsapy(sym)
+        if symbols:
+            all_symbols.update(symbols)
+    return sorted(all_symbols)
 
 
 def get_list(name: str) -> list:
-    """Isim ile liste dondur. borsapy varsa dinamik, yoksa hardcoded fallback.
+    """İsim ile hisse listesi döndür.
 
-    Desteklenen isimler:
-    - BIST_30, BIST_50, BIST_100  -> Ana endeksler
-    - BIST_TUM (veya BIST_ALL)    -> Tum BIST (~500+ hisse, borsapy gerekli)
-    - XU030, XU050, XU100, XUTUM  -> Endeks sembolleri direkt
-    - XK030, XK050, XK100, XKTUM  -> Katilim endeksleri
-    - XBANK, XUSIN, XUMAL, ...    -> Sektor endeksleri
+    Sırayla denenir:
+    1. borsapy ile canlı çekim (en güncel)
+    2. Cache (son 7 gün)
+    3. Hata fırlatma (kullanıcı manuel liste vermeli)
     """
-    name_upper = name.upper()
+    name_upper = name.upper().strip()
 
-    # Tum BIST ozel durum
+    # Önce endeks sembolünü belirle
+    if name_upper in INDEX_MAP:
+        index_symbol = INDEX_MAP[name_upper]
+    elif name_upper.startswith('X') and len(name_upper) >= 4:
+        # Doğrudan endeks sembolü verildi (XBANK, XU030, vs)
+        index_symbol = name_upper
+    else:
+        print(f"  HATA: '{name}' tanımlı değil. Geçerli: {', '.join(INDEX_MAP.keys())}")
+        return []
+
+    # Cache'i yükle (varsa)
+    cache = _load_cache()
+
+    # 1) borsapy'den canlı çekim dene
     if name_upper in ('BIST_TUM', 'BIST_ALL', 'XUTUM'):
-        components = _get_all_bist_stocks()
-        if components:
-            return components
-        # Fallback: BIST 100
-        print("  Tum BIST icin borsapy gerekli, BIST_100 fallback'ine donuluyor")
-        return BIST_100_FALLBACK
+        symbols = _fetch_bist_tum()
+    else:
+        symbols = _fetch_from_borsapy(index_symbol)
 
-    # Endeks sembolu direkt verildiyse
-    if name_upper.startswith('X') and len(name_upper) >= 4:
-        components = _get_borsapy_components(name_upper)
-        if components:
-            return components
-        print(f"  HATA: {name_upper} icin borsapy gerekli")
-        return []
+    # Başarılıysa cache'e yaz
+    if symbols:
+        cache[index_symbol] = symbols
+        _save_cache(cache)
+        return symbols
 
-    # Adlandirilmis kisayollar
-    mapping = {
-        'BIST_30':  ('XU030', BIST_30_FALLBACK),
-        'BIST_50':  ('XU050', BIST_50_FALLBACK),
-        'BIST_100': ('XU100', BIST_100_FALLBACK),
-    }
+    # 2) Cache fallback
+    if index_symbol in cache:
+        cached = cache[index_symbol]
+        print(f"  Cache fallback: {index_symbol} → {len(cached)} hisse "
+              f"(borsapy ulaşılamadı)")
+        return cached
 
-    if name_upper not in mapping:
-        return []
-
-    index_symbol, fallback = mapping[name_upper]
-    components = _get_borsapy_components(index_symbol)
-    if components:
-        return components
-    return fallback
+    # 3) Tamamen başarısız
+    print(f"  HATA: {name} listesi alınamadı. borsapy çalışmıyor ve cache yok.")
+    print(f"  Çözüm: --tickers HISSE1,HISSE2,... şeklinde manuel liste verin.")
+    return []
 
 
-# Backward compatibility
-BIST_30 = BIST_30_FALLBACK
-BIST_50 = BIST_50_FALLBACK
-BIST_100 = BIST_100_FALLBACK
-BIST_ALL_APPROX = BIST_100_FALLBACK
+def list_available() -> list:
+    """Desteklenen tüm isim/sembolleri döndür."""
+    return sorted(INDEX_MAP.keys()) + ['Direkt sembol: XU100, XBANK, XKTUM, vs.']
+
+
+if __name__ == '__main__':
+    # Test
+    import sys
+    target = sys.argv[1] if len(sys.argv) > 1 else 'BIST_30'
+    print(f"Test: {target}")
+    result = get_list(target)
+    print(f"Sonuç: {len(result)} hisse")
+    if result:
+        print(f"İlk 10: {', '.join(result[:10])}")
+        print(f"Son 5: {', '.join(result[-5:])}")
