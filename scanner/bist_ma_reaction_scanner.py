@@ -452,7 +452,8 @@ def fetch_data(ticker, period='3y', source='yfinance'):
 
     raise RuntimeError(f"Veri kaynagi '{source}' kullanilamiyor")
 
-def scan_stock(ticker, period='3y', source='yfinance', min_touches=10,
+def scan_stock(ticker, period='3y', source='yfinance', interval='1d',
+               min_touches=10,
                react_bars=5, react_pct=1.5, atr_mult=0.2, adx_threshold=25,
                separation_mult=2.5, breakthrough_bars=10,
                min_hma_period=20, min_adr=0.4,
@@ -660,6 +661,9 @@ def main():
     parser.add_argument('--source', type=str, default='borsapy',
                        choices=['yfinance', 'borsapy'],
                        help='Veri kaynağı: borsapy (TradingView, BIST için tavsiye) veya yfinance')
+    parser.add_argument('--interval', type=str, default='1d',
+                       choices=['1d', '1wk', '1mo'],
+                       help='Zaman dilimi: 1d (gunluk), 1wk (haftalik), 1mo (aylik)')
     parser.add_argument('--min_touches', type=int, default=10)
     parser.add_argument('--min_hma_period', type=int, default=20,
                        help='HMA icin minimum periyot (kisa HMA fiyata yapisik olur)')
@@ -709,7 +713,7 @@ def main():
     print(f"Walk-forward: {'KAPALI' if args.no_walk_forward else 'AÇIK (ilk %70 / son %30)'}\n")
 
     scan_kwargs = dict(
-        period=args.period, source=args.source,
+        period=args.period, source=args.source, interval=args.interval,
         min_touches=args.min_touches,
         react_bars=args.react_bars, react_pct=args.react_pct,
         atr_mult=args.atr_mult, adx_threshold=args.adx_threshold,
