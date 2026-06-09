@@ -31,6 +31,9 @@ import pandas as pd
 
 warnings.filterwarnings('ignore')
 
+# v6.2: Module-level state for likidite
+_last_avg_volume_tl = 0
+
 # === VERİ KAYNAĞI ===
 try:
     import yfinance as yf
@@ -457,6 +460,7 @@ def scan_stock(ticker, period='3y', source='yfinance', interval='1d',
                react_bars=5, react_pct=1.5, atr_mult=0.2, adx_threshold=25,
                separation_mult=2.5, breakthrough_bars=10,
                min_hma_period=20, min_adr=0.4,
+               min_volume_tl=0,
                do_walk_forward=True):
     """Tek hisse için tüm 140 MA + walk-forward analizi"""
     try:
@@ -500,6 +504,7 @@ def scan_stock(ticker, period='3y', source='yfinance', interval='1d',
                     **metrics,
                     'current_ma_value': float(ma_series.iloc[-1]) if not pd.isna(ma_series.iloc[-1]) else np.nan,
                     'current_close': float(df['Close'].iloc[-1]),
+                    'avg_daily_volume_tl': _last_avg_volume_tl,  # v6.2: likidite bilgisi
                 }
                 row['distance_pct'] = (row['current_close'] - row['current_ma_value']) / row['current_ma_value'] * 100 if not np.isnan(row['current_ma_value']) else np.nan
 
@@ -669,6 +674,8 @@ def main():
                        help='HMA icin minimum periyot (kisa HMA fiyata yapisik olur)')
     parser.add_argument('--min_adr', type=float, default=0.4,
                        help='Minimum ADR (Avg Distance Ratio) - dusuk olursa MA yapisik kabul edilir')
+    parser.add_argument('--min_volume_tl', type=float, default=0,
+                       help='Minimum gunluk ortalama TL hacim (likidite filtresi). 0=filtre yok. Onerilen: 10000000 (10M TL)')
     parser.add_argument('--react_bars', type=int, default=5)
     parser.add_argument('--react_pct', type=float, default=1.5)
     parser.add_argument('--atr_mult', type=float, default=0.2)
@@ -721,6 +728,7 @@ def main():
         breakthrough_bars=args.breakthrough_bars,
         min_hma_period=args.min_hma_period,
         min_adr=args.min_adr,
+        min_volume_tl=args.min_volume_tl,
         do_walk_forward=not args.no_walk_forward,
     )
 
