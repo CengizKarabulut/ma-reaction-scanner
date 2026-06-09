@@ -86,6 +86,7 @@ jobs:
             ${{ steps.prep.outputs.src_arg }} \
             ${{ steps.prep.outputs.intv_arg }} \
             --period ${{ github.event.inputs.period || '3y' }} \
+            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             ${{ steps.prep.outputs.wf_arg }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
             --report both \
