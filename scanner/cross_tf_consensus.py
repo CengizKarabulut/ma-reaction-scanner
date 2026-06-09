@@ -22,17 +22,29 @@ import pandas as pd
 import numpy as np
 
 
-def load_robust(csv_path: str, label: str) -> pd.DataFrame:
-    """CSV'den robust olan kayitlari yukle."""
+def load_robust(csv_path: str, label: str, fallback_score_thresh: float = 5.0) -> pd.DataFrame:
+    """CSV'den robust olan kayitlari yukle.
+
+    Eger wf_robust kolonu yoksa (walk-forward yapilmadiysa):
+    composite_score >= fallback_score_thresh olanlari "robust" kabul et.
+    Bu ozellikle monthly tarama icin gerekli (az veri = walk-forward zor).
+    """
     if not csv_path or not os.path.exists(csv_path):
         print(f"  {label}: dosya yok, atlaniyor")
         return pd.DataFrame()
     df = pd.read_csv(csv_path)
-    if 'wf_robust' not in df.columns:
-        print(f"  {label}: wf_robust kolonu yok")
+
+    if 'wf_robust' in df.columns:
+        robust = df[df['wf_robust'] == True].copy()
+        print(f"  {label}: {len(robust):,} robust MA (wf), {robust['ticker'].nunique()} hisse")
+    elif 'composite_score' in df.columns:
+        # Walk-forward yoksa, composite_score ile fallback
+        robust = df[df['composite_score'] >= fallback_score_thresh].copy()
+        print(f"  {label}: {len(robust):,} robust MA (composite >= {fallback_score_thresh}), "
+              f"{robust['ticker'].nunique()} hisse [walk-forward yok, score-based]")
+    else:
+        print(f"  {label}: ne wf_robust ne composite_score kolonu var")
         return pd.DataFrame()
-    robust = df[df['wf_robust'] == True].copy()
-    print(f"  {label}: {len(robust):,} robust MA, {robust['ticker'].nunique()} hisse")
     return robust
 
 
