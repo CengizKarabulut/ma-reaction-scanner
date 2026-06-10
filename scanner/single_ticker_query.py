@@ -314,6 +314,81 @@ def mini_scan(ticker, source='borsapy'):
         print(f"  Hicbir MA filtreyi gecmedi. Atlanan nedenler: {skipped_reasons}")
         print(f"  Min touches: {min_touches_eff}, Min ADR: {min_adr_eff}")
 
+        # FALLBACK MODE: Cok gevsek filtre ile tekrar dene
+        # Tek hisse merak edildiginde en azindan bir bilgi gostermek icin
+        print(f"  FALLBACK: Cok gevsek filtre ile tekrar deniyor...")
+        min_touches_fb = 2
+        min_adr_fb = 0.15
+
+        for ma_type in MA_TYPES:
+            for period in PERIODS:
+                if ma_type == 'HMA' and period < 20:
+                    continue
+                if period * 2 > n_bars:
+                    continue
+                try:
+                    ma = compute_ma(ma_type, df['Close'], df['Volume'], period)
+                    if ma is None or ma.isna().sum() > len(ma) * 0.5:
+                        continue
+                    ma_v = ma.values
+                    touches = wins = 0
+                    mfe_sum = 0
+                    was_far = False
+                    dist_sum = atr_count = 0
+                    for i in range(50, len(df)-5):
+                        if np.isnan(ma_v[i]) or np.isnan(atr_v[i]):
+                            continue
+                        dist_sum += abs(close[i] - ma_v[i])
+                        atr_count += 1
+                        if abs(close[i] - ma_v[i]) > 1.5 * atr_v[i]:  # gevsek separation
+                            was_far = True
+                        in_zone = (low[i] <= ma_v[i] + 0.3*atr_v[i] and
+                                   high[i] >= ma_v[i] - 0.3*atr_v[i])  # genis zone
+                        if in_zone and was_far:
+                            touches += 1
+                            prev_above = close[i-1] > ma_v[i-1] if not np.isnan(ma_v[i-1]) else True
+                            if prev_above:
+                                max_fav = max(high[i+1:i+6])
+                                move = (max_fav - close[i]) / close[i] * 100
+                            else:
+                                min_fav = min(low[i+1:i+6])
+                                move = (close[i] - min_fav) / close[i] * 100
+                            if move >= 1.0:  # gevsek react_pct
+                                wins += 1
+                                mfe_sum += move
+                            was_far = False
+
+                    if touches < min_touches_fb:
+                        continue
+                    wr = wins/touches * 100
+                    avg_mfe = mfe_sum/wins if wins > 0 else 0
+                    avg_dist = dist_sum / atr_count if atr_count > 0 else 0
+                    avg_atr_val = np.nanmean(atr_v[50:])
+                    adr = avg_dist / avg_atr_val if avg_atr_val > 0 else 0
+                    if adr < min_adr_fb:
+                        continue
+                    expectancy = (wr/100) * avg_mfe - (1-wr/100) * 1.0
+                    composite = expectancy * np.sqrt(touches) * min(adr, 2.0)
+
+                    results.append({
+                        'ma_type': ma_type,
+                        'period': period,
+                        'touches': touches,
+                        'wins': wins,
+                        'wr_pct': wr,
+                        'avg_mfe': avg_mfe,
+                        'expectancy': expectancy,
+                        'adr': adr,
+                        'composite_score': composite,
+                        'current_ma_value': float(ma_v[-1]),
+                        'weak_signal': True,  # FALLBACK ile bulundu
+                    })
+                except Exception:
+                    continue
+
+        if results:
+            print(f"  FALLBACK: {len(results)} MA bulundu (zayif sinyal)")
+
     return pd.DataFrame(results), df, inst_type
 
 
@@ -627,19 +702,40 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
             lines.append("En az 6 ay (~120 bar) veri toplandıktan sonra tekrar dene")
         else:
             lines.append(f"Veri: {n_bars} bar var ama MA'lar filtreyi gecemedi")
-            lines.append("Olası: ADR yetersiz (fiyat MA'lara yapisik) veya touch sayisi az")
+            lines.append("Sebep: Hisse yatay piyasada (trend yok) veya MA'lara yapisik")
         lines.append("")
-        lines.append("Mevcut durum:")
-        # En azından fiyat seviyeleri ile yorum
-        if rsi_now < 30:
-            lines.append("• RSI asiri satim - bounce ihtimali")
-        elif rsi_now > 70:
-            lines.append("• RSI asiri alim - dusus ihtimali")
+        lines.append("📍 *Mevcut Durum*")
+        # Detayli yorum
+        lines.append(f"• Fiyat: {current_price:.4f} ({range_pos:.0f}% range pozisyonu)")
         if range_pos < 25:
-            lines.append(f"• 20-gun range dipte ({range_pos:.0f}%) - destek arayisi")
+            lines.append(f"• 20-gun range DIPTE - destek arayisi, bounce potansiyeli")
         elif range_pos > 75:
-            lines.append(f"• 20-gun range zirvede ({range_pos:.0f}%) - direnc arayisi")
+            lines.append(f"• 20-gun range ZIRVEDE - direnc bolgesi, dusus riski")
+        else:
+            lines.append(f"• 20-gun range ORTADA - yatay piyasa, beklemede kal")
+
+        if rsi_now < 30:
+            lines.append(f"• RSI {rsi_now:.0f} ASIRI SATIM - bounce ihtimali var")
+        elif rsi_now > 70:
+            lines.append(f"• RSI {rsi_now:.0f} ASIRI ALIM - dusus ihtimali")
+        else:
+            lines.append(f"• RSI {rsi_now:.0f} notr")
+
+        macd_dir = "yukseliyor ↑" if macd_hist > 0 else "dususte ↓"
+        lines.append(f"• MACD histogram {macd_dir} ({macd_hist:+.4f})")
+
+        lines.append("")
+        lines.append("💡 *Oneri:* Bu hisse su an *trade etmek icin uygun degil*.")
+        lines.append("Trend olusana kadar bekle veya baska hisse incele.")
+
         return '\n'.join(lines)
+
+    # Weak signal kontrolu - fallback ile bulunmus mu?
+    weak_signals = top.get('weak_signal', pd.Series([False]*len(top))).any() if 'weak_signal' in top.columns else False
+    if weak_signals:
+        lines.append("⚠️ *Sadece ZAYIF sinyaller bulundu* (gevsek filtre)")
+        lines.append("Bu MA'lar tam dogrulanmamis, dikkat!")
+        lines.append("")
 
     lines.append("📊 *En İyi 8 MA Setup*")
     lines.append("```")
