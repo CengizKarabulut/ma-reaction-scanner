@@ -417,37 +417,91 @@ def _period_to_start_date(period: str) -> str:
     return start
 
 
-def fetch_data(ticker, period='3y', source='yfinance'):
-    """Veri çek (borsapy veya yfinance)
+def _detect_instrument_type(symbol: str) -> str:
+    """Sembol turunu tahmin et: bist, crypto, forex, metal, bist_index."""
+    s = symbol.upper().replace('.IS', '')
+    # Metal: XAU/XAG/XPT/XPD ile baslayan
+    if s.startswith('XAU') or s.startswith('XAG') or s.startswith('XPT') or s.startswith('XPD'):
+        return 'metal'
+    # BIST endeks pattern: X + 3-4 alfanumerik (XU100, XBANK, XK030, vs)
+    import re
+    if re.match(r'^X[A-Z0-9]{3,4}$', s):
+        return 'bist_index'
+    crypto_bases = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOT', 'DOGE',
+                    'AVAX', 'MATIC', 'LINK', 'UNI', 'LTC', 'TRX']
+    if any(s.startswith(c) for c in crypto_bases):
+        return 'crypto'
+    forex_curr = ['USD', 'EUR', 'GBP', 'JPY', 'TRY', 'CHF', 'CAD', 'AUD', 'NZD']
+    if len(s) == 6 and s[:3] in forex_curr and s[3:] in forex_curr:
+        return 'forex'
+    return 'bist'
 
-    borsapy: TradingView/Paratic üzerinden direkt BIST verisi
-    yfinance: Yahoo Finance (.IS suffix gerektirir, bazı hisselerde delisted hatası)
+
+def fetch_data(ticker, period='3y', source='yfinance'):
+    """Veri çek - Multi-instrument destekli
+
+    borsapy: BIST + (varsa) crypto, FX, metal
+    yfinance: BIST + crypto + forex
     """
     base_symbol = ticker.replace('.IS', '') if ticker.endswith('.IS') else ticker
+    inst_type = _detect_instrument_type(base_symbol)
 
     if source == 'borsapy' and HAS_BORSAPY:
         try:
-            t = bp.Ticker(base_symbol)
-            # borsapy "3y" gibi periyotlari desteklemez (default 30 bar doner)
-            # Bu yuzden start_date kullaniyoruz
             start_date = _period_to_start_date(period)
+            # Default: bp.Ticker - BIST + büyük olasılıkla diğerleri için de çalışır
+            t = bp.Ticker(base_symbol)
             df = t.history(start=start_date)
+
+            # Yetersiz veri ise enstrüman tipine göre alternatif sınıf dene
+            if (df is None or df.empty or len(df) < 50):
+                if inst_type == 'bist_index' and hasattr(bp, 'Index'):
+                    # BIST endeksi: bp.Index().history() (bileşen listesi değil, fiyat geçmişi)
+                    try:
+                        df = bp.Index(base_symbol).history(start=start_date)
+                    except Exception:
+                        pass
+                elif inst_type == 'crypto' and hasattr(bp, 'Crypto'):
+                    df = bp.Crypto(base_symbol).history(start=start_date)
+                elif inst_type == 'forex' and hasattr(bp, 'FX'):
+                    df = bp.FX(base_symbol).history(start=start_date)
+                elif inst_type == 'metal' and hasattr(bp, 'Metal'):
+                    df = bp.Metal(base_symbol).history(start=start_date)
+
             if df is None or df.empty:
-                raise RuntimeError(f"borsapy bos veri dondu: {base_symbol}")
+                raise RuntimeError(f"borsapy bos veri: {base_symbol}")
             if len(df) < 50:
-                raise RuntimeError(f"borsapy yetersiz veri: {base_symbol} ({len(df)} bar)")
+                raise RuntimeError(f"borsapy yetersiz: {base_symbol} ({len(df)} bar)")
             if not isinstance(df.index, pd.DatetimeIndex):
                 df.index = pd.to_datetime(df.index)
             return df
         except Exception as e:
-            if HAS_YFINANCE:
+            if HAS_YFINANCE and inst_type == 'bist':
                 print(f"  borsapy hatasi ({base_symbol}: {e}), yfinance fallback")
                 source = 'yfinance'
             else:
                 raise
 
     if source == 'yfinance' and HAS_YFINANCE:
-        symbol = f"{base_symbol}.IS"
+        # yfinance multi-instrument sembol normalize
+        if inst_type == 'bist':
+            symbol = f"{base_symbol}.IS"
+        elif inst_type == 'crypto':
+            # BTCUSD -> BTC-USD format
+            if len(base_symbol) == 6:
+                symbol = f"{base_symbol[:3]}-{base_symbol[3:]}"
+            else:
+                symbol = base_symbol
+        elif inst_type == 'forex':
+            # EURUSD -> EURUSD=X format
+            symbol = f"{base_symbol}=X"
+        elif inst_type == 'metal':
+            # XAUUSD -> GC=F (Gold futures) gibi
+            metal_map = {'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F', 'XPTUSD': 'PL=F', 'XPDUSD': 'PA=F'}
+            symbol = metal_map.get(base_symbol, base_symbol)
+        else:
+            symbol = base_symbol
+
         df = yf.download(symbol, period=period, progress=False, auto_adjust=True)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
@@ -470,6 +524,26 @@ def scan_stock(ticker, period='3y', source='yfinance', interval='1d',
 
     if df is None or len(df) < 300:
         return None, f"Yetersiz veri ({0 if df is None else len(df)} bar)"
+
+    # v6.2: Volume kolonu yoksa veya 0 ise (endeks olabilir), 1 ile doldur
+    if 'Volume' not in df.columns:
+        df['Volume'] = 1
+    elif df['Volume'].sum() == 0 or df['Volume'].isna().all():
+        df['Volume'] = 1
+
+    # v6.2: Likidite filtresi (sadece BIST hisseleri için, endeksler hariç)
+    global _last_avg_volume_tl
+    _last_avg_volume_tl = 0
+    inst_type_curr = _detect_instrument_type(ticker)
+    if min_volume_tl > 0 and inst_type_curr == 'bist':
+        recent = df.tail(20)
+        avg_volume_tl = (recent['Close'] * recent['Volume']).mean()
+        if avg_volume_tl < min_volume_tl:
+            return None, f"Likidite yetersiz ({avg_volume_tl/1e6:.1f}M TL < {min_volume_tl/1e6:.0f}M TL)"
+        _last_avg_volume_tl = avg_volume_tl
+    elif inst_type_curr == 'bist':
+        recent = df.tail(20)
+        _last_avg_volume_tl = (recent['Close'] * recent['Volume']).mean()
 
     # ATR ve ADX
     df['ATR'] = atr(df['High'], df['Low'], df['Close'], 14)
