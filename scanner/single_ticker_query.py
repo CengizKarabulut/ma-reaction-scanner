@@ -502,6 +502,7 @@ def main():
     p.add_argument('--risk_pct', type=float, default=1.0)
     p.add_argument('--scan-fresh', action='store_true', help='CSV varsa bile yeniden tara')
     p.add_argument('--output', type=str, default='')
+    p.add_argument('--summary-text', type=str, default='', help='Telegram-ready özet metni için dosya yolu')
     args = p.parse_args()
 
     csv = '' if args.scan_fresh else args.csv
@@ -514,6 +515,135 @@ def main():
     output = args.output or f"{args.ticker.upper()}_analiz.html"
     build_html_report(result, portfolio=args.portfolio, risk_pct=args.risk_pct,
                        output=output)
+
+    # Telegram özet dosyası (opsiyonel)
+    if args.summary_text:
+        summary = _build_telegram_summary(result, portfolio=args.portfolio,
+                                          risk_pct=args.risk_pct)
+        with open(args.summary_text, 'w', encoding='utf-8') as f:
+            f.write(summary)
+        print(f"✓ Telegram özeti: {args.summary_text}")
+
+
+def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
+    """Telegram-ready özet metni (Markdown)."""
+    ticker = result['ticker']
+    df = result['price_df']
+    top = result['top_mas']
+    inst_type = result['instrument_type']
+
+    if df is None or len(df) == 0:
+        return f"🎯 *{ticker}*\n\nVeri çekilemedi."
+
+    current_price = float(df['Close'].iloc[-1])
+    high = df['High'].values
+    low = df['Low'].values
+    close = df['Close'].values
+    tr = np.maximum.reduce([high[1:]-low[1:], np.abs(high[1:]-close[:-1]),
+                            np.abs(low[1:]-close[:-1])])
+    atr_val = float(np.mean(tr[-14:]))
+    lo20 = float(np.min(low[-20:]))
+    hi20 = float(np.max(high[-20:]))
+    range_pos = (current_price - lo20) / (hi20 - lo20) * 100 if hi20 > lo20 else 50
+
+    rsi_now = float(rsi(df['Close']).iloc[-1])
+    m_l, m_s, m_h = macd(df['Close'])
+    macd_hist = float(m_h.iloc[-1])
+
+    avg_volume_tl = float((df['Close'] * df['Volume']).tail(20).mean())
+
+    inst_emoji = {'bist': '🇹🇷', 'crypto': '₿', 'forex': '💱',
+                  'metal': '🥇', 'bist_index': '📊'}.get(inst_type, '📊')
+
+    lines = [f"{inst_emoji} *{ticker} Analizi*"]
+    lines.append(f"Fiyat: *{current_price:.4f}* | ATR: {atr_val:.4f} ({atr_val/current_price*100:.2f}%)")
+    lines.append(f"20-gün Range: *{range_pos:.0f}%* pozisyonda ({lo20:.2f} - {hi20:.2f})")
+
+    # Hacim (sadece BIST için)
+    if inst_type == 'bist':
+        if avg_volume_tl > 50_000_000:
+            vol_lbl = "Yüksek ✓"
+        elif avg_volume_tl > 10_000_000:
+            vol_lbl = "Orta"
+        else:
+            vol_lbl = "Düşük ⚠️"
+        lines.append(f"Hacim: {avg_volume_tl/1e6:.0f}M TL ({vol_lbl})")
+
+    # İndikatörler
+    rsi_lbl = 'Aşırı Alım' if rsi_now > 70 else ('Aşırı Satım' if rsi_now < 30 else 'Nötr')
+    macd_arrow = '↑' if macd_hist > 0 else '↓'
+    lines.append(f"İnd: RSI {rsi_now:.0f} ({rsi_lbl}) | MACD {macd_arrow} {macd_hist:+.4f}")
+    lines.append("")
+
+    # Top 8 MA setup'ları
+    if top is None or top.empty:
+        lines.append("⚠️ Hiçbir robust MA bulunamadı.")
+        lines.append("Olası sebepler: yetersiz touch, düşük ADR, fiyat MA'lara çok yapışık.")
+        return '\n'.join(lines)
+
+    lines.append("📊 *En İyi 8 MA Setup*")
+    lines.append("```")
+    lines.append(f"{'#':<2} {'MA':<5} {'Per':<4} {'Mes':<7} {'Durum':<7} {'Yön':<5} {'WR':<5} {'Exp':<7}")
+    lines.append("-" * 52)
+
+    actionable = []
+    for i, (_, row) in enumerate(top.head(8).iterrows(), 1):
+        ma_val = row.get('current_ma_value', np.nan)
+        if pd.isna(ma_val):
+            continue
+
+        dist = current_price - ma_val
+        dist_atr = dist / atr_val if atr_val > 0 else 0
+        abs_dist = abs(dist_atr)
+
+        if abs_dist < 0.5:
+            status, sk = 'TOUCH', 'touch'
+        elif abs_dist < 2.0:
+            status, sk = 'YAKIN', 'near'
+        elif abs_dist < 3.5:
+            status, sk = 'READY', 'ready'
+        else:
+            status, sk = 'UZAK', 'far'
+
+        side = 'LONG' if dist > 0 else 'SHORT'
+        wr = row['wr_pct']
+        exp = row['expectancy']
+
+        lines.append(f"{i:<2} {row['ma_type']:<5} {int(row['period']):<4} "
+                     f"{dist_atr:+6.2f} {status:<7} {side:<5} "
+                     f"{wr:>3.0f}%  {exp:+5.2f}")
+
+        if sk in ('touch', 'ready'):
+            actionable.append((row, status, side, ma_val, dist_atr))
+
+    lines.append("```")
+
+    # Aksiyon alınabilir setup'lar
+    if actionable:
+        lines.append("")
+        lines.append("⚡ *Aksiyon Setup'ları:*")
+        for row, status, side, ma_val, dist_atr in actionable[:5]:
+            emoji = '🟢' if side == 'LONG' else '🔴'
+            mfe = row.get('avg_mfe', 5)
+            # Trade params
+            if side == 'LONG':
+                entry = ma_val
+                stop = ma_val - 1.5 * atr_val
+                tp2 = entry * (1 + mfe / 100)
+            else:
+                entry = ma_val
+                stop = ma_val + 1.5 * atr_val
+                tp2 = entry * (1 - mfe / 100)
+            risk_per_lot = abs(entry - stop)
+            n_lots = int((portfolio * risk_pct / 100) / risk_per_lot) if risk_per_lot > 0 else 0
+            lines.append(f"{emoji} *{row['ma_type']} {int(row['period'])}* — {status} {side}")
+            lines.append(f"   Entry: `{entry:.4f}` | Stop: `{stop:.4f}` | TP2: `{tp2:.4f}` | Lot: {n_lots:,}")
+            lines.append(f"   WR: {row['wr_pct']:.0f}% | Exp: {row['expectancy']:+.2f} | Skor: {row.get('composite_score', 0):.1f}")
+    else:
+        lines.append("")
+        lines.append("⏸ Şu an aksiyon alınabilir setup yok — fiyat MA'lardan uzak veya yakın geçişte.")
+
+    return '\n'.join(lines)
 
 
 if __name__ == '__main__':
