@@ -147,13 +147,13 @@ def format_daily(df: pd.DataFrame) -> str:
                 .head(15)
             )
             if len(robust_per_stock) > 0:
-                lines.append(f"💎 *En Çok Robust MA'ya Sahip 15 Hisse — Her Birinin Top 3'ü*")
+                lines.append(f"💎 *En Çok Robust MA'ya Sahip 12 Hisse — Her Birinin Top 5'i*")
                 lines.append("```")
-                for tk, cnt in robust_per_stock.items():
-                    # Bu hissenin robust olan top 3 MA'sini al
+                for tk, cnt in robust_per_stock.head(12).items():
+                    # Bu hissenin robust olan top 5 MA'sini al
                     sub = (
                         df[(df['ticker'] == tk) & (df['wf_robust'] == True)]
-                        .nlargest(3, 'composite_score')
+                        .nlargest(5, 'composite_score')
                     )
                     lines.append(f"{tk} ({cnt} robust MA)")
                     for _, r in sub.iterrows():
@@ -163,27 +163,30 @@ def format_daily(df: pd.DataFrame) -> str:
 
     # === LARGE MODE (>150 hisse, BIST_TUM): yüksek seviyeli özet ===
     else:
-        lines.extend(_format_cross_stock_top(df, n=30))
+        lines.extend(_format_cross_stock_top(df, n=20))
         lines.append("")
-        lines.extend(_format_ma_family_stats(df, n=15))
+        lines.extend(_format_ma_family_stats(df, n=12))
         lines.append("")
-        # Top 30 hisse — en iyi skorlu MA'ları olan
+        # En iyi 12 hisse - HER BIRININ TOP 5 MA'si (Cengiz isteği)
+        # composite_score'a göre en yüksek hisseleri seç, sonra her birinin top 5 MA'sını göster
         best_per_stock = (
             df.groupby('ticker')['composite_score']
             .max().sort_values(ascending=False)
-            .head(30)
+            .head(12)
         )
-        lines.append("🚀 *En Yüksek Skorlu 30 Hisse*")
+        lines.append("🚀 *En Güçlü 12 Hissenin TOP 5 MA'sı*")
         lines.append("```")
-        lines.append(f"{'Hisse':<7} {'Top MA':<11} {'Skor':<6}")
-        lines.append("-" * 28)
         for tk, _ in best_per_stock.items():
-            sub = df[df['ticker'] == tk].nlargest(1, 'composite_score').iloc[0]
-            ma_per = f"{sub['ma_type']} {sub['period']}"
-            lines.append(f"{tk:<7} {ma_per:<11} {sub['composite_score']:<6.2f}")
+            top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
+            lines.append(f"{tk}:")
+            for _, r in top5.iterrows():
+                robust_mark = "✓" if r.get('wf_robust', False) else " "
+                lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
+                             f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f} "
+                             f"Skor={r['composite_score']:.1f} {robust_mark}")
         lines.append("```")
         lines.append("")
-        lines.append("_Detaylı sonuçlar için GitHub Actions artifact'ında CSV/HTML dosyalarını indirin._")
+        lines.append("_Detaylı tüm hisseler ve setup'lar için GitHub Actions artifact'ında CSV/HTML dosyalarını indirin._")
 
     return '\n'.join(lines)
 
