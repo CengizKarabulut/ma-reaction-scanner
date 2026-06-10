@@ -40,6 +40,88 @@ INDEX_MAP = {
     'GAYRIMENKUL': 'XYORT',
 }
 
+# === Multi-instrument gruplari (BIST disi) ===
+# borsapy'nin destekledigi sembolleri tahmin ettim, gercekte bazilari calismayabilir.
+# Calismayanlar single_ticker_query.py'de --scan-fresh ile tek tek denenebilir.
+INSTRUMENT_GROUPS = {
+    'KRIPTO_TOP': [
+        'BTCUSD', 'ETHUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD',
+        'SOLUSD', 'DOTUSD', 'AVAXUSD', 'MATICUSD', 'LINKUSD',
+    ],
+    'KRIPTO_TRY': [
+        'BTCTRY', 'ETHTRY', 'BNBTRY', 'XRPTRY', 'SOLTRY',
+    ],
+    'FOREX_MAJOR': [
+        'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD',
+        'NZDUSD', 'USDCAD',
+    ],
+    'FOREX_TRY': [
+        'USDTRY', 'EURTRY', 'GBPTRY', 'CHFTRY', 'JPYTRY',
+    ],
+    'METAL': [
+        'XAUUSD',  # Altın USD
+        'XAGUSD',  # Gümüş USD
+        'XPTUSD',  # Platin
+        'XPDUSD',  # Paladyum
+    ],
+    'METAL_TRY': [
+        'XAUTRY',  # Ons Altın TRY
+        'XAGTRY',  # Ons Gümüş TRY
+        # 'GA' Gram altın - borsapy'de farkli sembol olabilir
+    ],
+    'EMTIA': [
+        'XAUUSD', 'XAGUSD',  # Kıymetli metaller
+        'WTIUSD', 'BRENTUSD',  # Petrol
+        'NATGAS',  # Doğalgaz
+        'COPPER',  # Bakır
+    ],
+    'ENDEKS_GLOBAL': [
+        'SPX500', 'NAS100', 'DJI30',   # ABD
+        'DE40', 'UK100', 'FR40',        # Avrupa
+        'NK225', 'HK50',                # Asya
+    ],
+
+    # === BIST Endekslerinin KENDİSİ (bileşenleri değil) ===
+    # Bu listede endeks sembolleri var. Her biri endeks fiyat geçmişi olarak çekilir.
+    # XBANK endeksinin (12000 puan) kendi MA'larına saygı pattern'i analiz edilir.
+    'BIST_ENDEKSLER': [
+        # Ana ulusal endeksler
+        'XU030', 'XU050', 'XU100', 'XUTUM',
+        # Katılım endeksleri
+        'XKTUM', 'XK030', 'XK050', 'XK100',
+        # Sektör endeksleri (28 tane)
+        'XBANK',  # Banka
+        'XUSIN',  # Sınai
+        'XUMAL',  # Mali
+        'XUTEK',  # Teknoloji
+        'XHOLD',  # Holding
+        'XKMYA',  # Kimya, Petrol Kauçuk
+        'XGIDA',  # Gıda, İçecek
+        'XSGRT',  # Sigorta
+        'XYORT',  # GYO
+        'XTRZM',  # Turizm
+        'XELKT',  # Elektrik
+        'XILTM',  # İletişim
+        'XINSA',  # İnşaat
+        'XKAGT',  # Orman, Kağıt, Basım
+        'XMADN',  # Madencilik
+        'XMESY',  # Metal Eşya, Makine
+        'XSPOR',  # Spor
+        'XTAST',  # Taş Toprak
+        'XTCRT',  # Ticaret
+        'XTEKS',  # Tekstil, Deri
+        'XULAS',  # Ulaştırma
+        'XSVNM',  # Savunma
+        'XUHIZ',  # Hizmetler
+        'XMANA',  # Ana Metal
+        # Tema endeksleri
+        'XTMTU',  # Temettü
+        'XTM25',  # Temettü 25
+        'XYUZO',  # Yıldız
+        'XKURY',  # Kurumsal Yönetim
+    ],
+}
+
 
 # === Cache yolu (script'in olduğu dizinde) ===
 _CACHE_DIR = Path(__file__).parent / '.cache'
@@ -110,20 +192,28 @@ def get_list(name: str) -> list:
     """İsim ile hisse listesi döndür.
 
     Sırayla denenir:
-    1. borsapy ile canlı çekim (en güncel)
-    2. Cache (son 7 gün)
-    3. Hata fırlatma (kullanıcı manuel liste vermeli)
+    1. INSTRUMENT_GROUPS (BIST dışı: kripto, forex, metal)
+    2. borsapy ile canlı çekim (BIST endeksleri)
+    3. Cache (son 7 gün)
+    4. Hata fırlatma
     """
     name_upper = name.upper().strip()
+
+    # Multi-instrument grup kontrolu (BIST disi)
+    if name_upper in INSTRUMENT_GROUPS:
+        symbols = INSTRUMENT_GROUPS[name_upper]
+        print(f"  Multi-instrument grup: {name_upper} → {len(symbols)} sembol")
+        return symbols
 
     # Önce endeks sembolünü belirle
     if name_upper in INDEX_MAP:
         index_symbol = INDEX_MAP[name_upper]
-    elif name_upper.startswith('X') and len(name_upper) >= 4:
-        # Doğrudan endeks sembolü verildi (XBANK, XU030, vs)
+    elif name_upper.startswith('X') and len(name_upper) >= 4 and name_upper != 'XAU' and name_upper != 'XAG':
+        # Doğrudan endeks sembolü verildi (XBANK, XU030, vs) - XAU/XAG hariç
         index_symbol = name_upper
     else:
-        print(f"  HATA: '{name}' tanımlı değil. Geçerli: {', '.join(INDEX_MAP.keys())}")
+        all_avail = list(INDEX_MAP.keys()) + list(INSTRUMENT_GROUPS.keys())
+        print(f"  HATA: '{name}' tanımlı değil. Geçerli: {', '.join(all_avail)}")
         return []
 
     # Cache'i yükle (varsa)
