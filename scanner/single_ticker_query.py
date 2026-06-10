@@ -739,10 +739,14 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
 
     lines.append("📊 *En İyi 8 MA Setup*")
     lines.append("```")
-    lines.append(f"{'#':<2} {'MA':<5} {'Per':<4} {'Mes':<7} {'Durum':<7} {'Yön':<5} {'WR':<5} {'Exp':<7}")
+    # T = touch sayisi (kritik bilgi!)
+    lines.append(f"{'#':<2} {'MA':<5} {'P':<4} {'T':<3} {'Mes':<6} {'Durum':<6} {'Yön':<5} {'WR':<5} {'Exp':<6}")
     lines.append("-" * 52)
 
     actionable = []
+    sides_seen = set()
+    suspicious_count = 0  # Az touch + yuksek WR olan setup sayisi
+
     for i, (_, row) in enumerate(top.head(8).iterrows(), 1):
         ma_val = row.get('current_ma_value', np.nan)
         if pd.isna(ma_val):
@@ -762,26 +766,50 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
             status, sk = 'UZAK', 'far'
 
         side = 'LONG' if dist > 0 else 'SHORT'
+        sides_seen.add(side)
         wr = row['wr_pct']
         exp = row['expectancy']
+        touches = int(row.get('touches', 0))
+
+        # Şüpheli: az touch + yüksek WR (overfitting)
+        is_suspicious = touches < 10 and wr >= 90
+        if is_suspicious:
+            suspicious_count += 1
+
+        # Touch sayısını görsel ile işaretle
+        touch_mark = '!' if is_suspicious else ' '
 
         lines.append(f"{i:<2} {row['ma_type']:<5} {int(row['period']):<4} "
-                     f"{dist_atr:+6.2f} {status:<7} {side:<5} "
+                     f"{touches:<3}{touch_mark}{dist_atr:+5.2f} {status:<6} {side:<5} "
                      f"{wr:>3.0f}%  {exp:+5.2f}")
 
         if sk in ('touch', 'ready'):
-            actionable.append((row, status, side, ma_val, dist_atr))
+            actionable.append((row, status, side, ma_val, dist_atr, touches, is_suspicious))
 
     lines.append("```")
+
+    # Uyarı: Hem LONG hem SHORT setup varsa yatay piyasa
+    if 'LONG' in sides_seen and 'SHORT' in sides_seen:
+        lines.append("")
+        lines.append("⚠️ *YATAY PIYASA UYARISI*")
+        lines.append("Hem LONG hem SHORT setup var = fiyat MA'lar arasinda sikismis")
+        lines.append("Trade etme, breakout bekle!")
+
+    # Uyarı: Şüpheli setup'lar (az touch + yüksek WR)
+    if suspicious_count >= 3:
+        lines.append("")
+        lines.append(f"⚠️ *DUSUK GUVEN UYARISI*")
+        lines.append(f"{suspicious_count} setup'ta touch sayisi <10 ama WR >=90% (! isareti)")
+        lines.append("Bu istatistiksel olarak anlamli degil, dikkat!")
 
     # Aksiyon alınabilir setup'lar
     if actionable:
         lines.append("")
         lines.append("⚡ *Aksiyon Setup'ları:*")
-        for row, status, side, ma_val, dist_atr in actionable[:5]:
+        for row, status, side, ma_val, dist_atr, touches, is_susp in actionable[:5]:
             emoji = '🟢' if side == 'LONG' else '🔴'
+            susp_mark = ' ⚠️' if is_susp else ''
             mfe = row.get('avg_mfe', 5)
-            # Trade params
             if side == 'LONG':
                 entry = ma_val
                 stop = ma_val - 1.5 * atr_val
@@ -792,9 +820,9 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
                 tp2 = entry * (1 - mfe / 100)
             risk_per_lot = abs(entry - stop)
             n_lots = int((portfolio * risk_pct / 100) / risk_per_lot) if risk_per_lot > 0 else 0
-            lines.append(f"{emoji} *{row['ma_type']} {int(row['period'])}* — {status} {side}")
+            lines.append(f"{emoji} *{row['ma_type']} {int(row['period'])}* — {status} {side}{susp_mark}")
             lines.append(f"   Entry: `{entry:.4f}` | Stop: `{stop:.4f}` | TP2: `{tp2:.4f}` | Lot: {n_lots:,}")
-            lines.append(f"   WR: {row['wr_pct']:.0f}% | Exp: {row['expectancy']:+.2f} | Skor: {row.get('composite_score', 0):.1f}")
+            lines.append(f"   T={touches} | WR: {row['wr_pct']:.0f}% | Exp: {row['expectancy']:+.2f} | Skor: {row.get('composite_score', 0):.1f}")
     else:
         lines.append("")
         lines.append("⏸ Şu an aksiyon alınabilir setup yok — fiyat MA'lardan uzak veya yakın geçişte.")
