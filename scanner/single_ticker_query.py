@@ -200,12 +200,40 @@ def mini_scan(ticker, source='borsapy'):
     low = df['Low'].values
 
     MA_TYPES = ['SMA', 'EMA', 'WMA', 'VWMA', 'HMA', 'ALMA', 'KAMA']
-    PERIODS = [3, 5, 8, 10, 13, 20, 21, 22, 34, 50, 55, 89, 100, 144, 200, 233, 250]
+
+    # Veri uzunlugu kontrolu - kisa veri ise uzun periyotlari atla
+    n_bars = len(df)
+    if n_bars < 100:
+        # Yeni listelenen hisse - sadece kisa MA'lar
+        PERIODS = [3, 5, 8, 10, 13, 20, 21, 22, 34]
+        min_touches_eff = 3
+        min_adr_eff = 0.3
+        print(f"  Uyari: Az veri ({n_bars} bar) - sadece kisa MA'lar (3-34), gevsek filtre")
+    elif n_bars < 250:
+        # Orta veri
+        PERIODS = [3, 5, 8, 10, 13, 20, 21, 22, 34, 50, 55, 89, 100]
+        min_touches_eff = 5
+        min_adr_eff = 0.35
+        print(f"  Orta veri ({n_bars} bar) - kisa-orta MA'lar (3-100)")
+    elif n_bars < 500:
+        PERIODS = [3, 5, 8, 10, 13, 20, 21, 22, 34, 50, 55, 89, 100, 144, 200]
+        min_touches_eff = 8
+        min_adr_eff = 0.4
+    else:
+        # Yeterli veri - tum periyotlar
+        PERIODS = [3, 5, 8, 10, 13, 20, 21, 22, 34, 50, 55, 89, 100, 144, 200, 233, 250]
+        min_touches_eff = 10
+        min_adr_eff = 0.4
 
     results = []
+    skipped_reasons = {'period_too_long': 0, 'too_few_touches': 0, 'low_adr': 0, 'nan_data': 0}
     for ma_type in MA_TYPES:
         for period in PERIODS:
             if ma_type == 'HMA' and period < 20:
+                continue
+            # MA periyodu veri uzunlugundan fazla ise atla
+            if period * 2 > n_bars:
+                skipped_reasons['period_too_long'] += 1
                 continue
             try:
                 ma = compute_ma(ma_type, df['Close'], df['Volume'], period)
@@ -252,14 +280,16 @@ def mini_scan(ticker, source='borsapy'):
                             mfe_sum += move
                         was_far = False
 
-                if touches < 10:
+                if touches < min_touches_eff:
+                    skipped_reasons['too_few_touches'] += 1
                     continue
                 wr = wins/touches * 100
                 avg_mfe = mfe_sum/wins if wins > 0 else 0
                 avg_dist = dist_sum / atr_count if atr_count > 0 else 0
                 avg_atr = np.nanmean(atr_v[50:])
                 adr = avg_dist / avg_atr if avg_atr > 0 else 0
-                if adr < 0.4:
+                if adr < min_adr_eff:
+                    skipped_reasons['low_adr'] += 1
                     continue
                 expectancy = (wr/100) * avg_mfe - (1-wr/100) * 1.5  # avg_mae varsayım 1.5
                 composite = expectancy * np.sqrt(touches) * min(adr, 2.0)
@@ -278,6 +308,11 @@ def mini_scan(ticker, source='borsapy'):
                 })
             except Exception:
                 continue
+
+    if not results:
+        # Hicbir sonuc yoksa neden olduğunu logla
+        print(f"  Hicbir MA filtreyi gecmedi. Atlanan nedenler: {skipped_reasons}")
+        print(f"  Min touches: {min_touches_eff}, Min ADR: {min_adr_eff}")
 
     return pd.DataFrame(results), df, inst_type
 
@@ -299,11 +334,19 @@ def analyze_ticker(ticker, csv_path=None, source='borsapy', portfolio=100000, ri
             top = sub.nlargest(15, 'composite_score')
             print(f"  CSV'de {len(sub)} kayit bulundu, top 15 alindi")
 
+    scan_df = None
     if not csv_path:
         scan_df, price_df, inst_type = mini_scan(ticker, source=source)
-        if scan_df is None or scan_df.empty:
+        if scan_df is None:
+            # Veri çekme tamamen başarısız
+            print(f"  {ticker}: veri kaynağına erişilemedi")
             return None
-        top = scan_df.nlargest(15, 'composite_score')
+        if scan_df.empty:
+            # Veri var ama MA bulunamadı - yine de rapor üret (sadece fiyat bilgisi)
+            print(f"  {ticker}: hicbir MA robust degil, ama fiyat raporu uretilecek")
+            top = pd.DataFrame()  # boş
+        else:
+            top = scan_df.nlargest(15, 'composite_score')
     else:
         # CSV'de fiyat verisi yok, sadece güncel bilgi için çek
         price_df, inst_type = fetch_data(ticker, source=source)
@@ -577,8 +620,25 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
 
     # Top 8 MA setup'ları
     if top is None or top.empty:
-        lines.append("⚠️ Hiçbir robust MA bulunamadı.")
-        lines.append("Olası sebepler: yetersiz touch, düşük ADR, fiyat MA'lara çok yapışık.")
+        lines.append("⚠️ *Hiçbir robust MA bulunamadı*")
+        n_bars = len(df)
+        if n_bars < 100:
+            lines.append(f"Sebep: Yeni listelenen hisse ({n_bars} bar veri yeterli değil)")
+            lines.append("En az 6 ay (~120 bar) veri toplandıktan sonra tekrar dene")
+        else:
+            lines.append(f"Veri: {n_bars} bar var ama MA'lar filtreyi gecemedi")
+            lines.append("Olası: ADR yetersiz (fiyat MA'lara yapisik) veya touch sayisi az")
+        lines.append("")
+        lines.append("Mevcut durum:")
+        # En azından fiyat seviyeleri ile yorum
+        if rsi_now < 30:
+            lines.append("• RSI asiri satim - bounce ihtimali")
+        elif rsi_now > 70:
+            lines.append("• RSI asiri alim - dusus ihtimali")
+        if range_pos < 25:
+            lines.append(f"• 20-gun range dipte ({range_pos:.0f}%) - destek arayisi")
+        elif range_pos > 75:
+            lines.append(f"• 20-gun range zirvede ({range_pos:.0f}%) - direnc arayisi")
         return '\n'.join(lines)
 
     lines.append("📊 *En İyi 8 MA Setup*")
