@@ -1,0 +1,122 @@
+name: BIST Endeks Tarama
+
+# BIST endekslerinin KENDİSİNİ tarar (bileşenlerini değil)
+# XBANK endeksi (12000 puan) kendi MA'larına saygı duyuyor mu?
+# Makro trend filtresi için kullanılır.
+
+on:
+  schedule:
+    - cron: '30 16 * * 1-5'   # 19:30 İstanbul, hafta içi (daily scan'den 1 saat sonra)
+  workflow_dispatch:
+    inputs:
+      period:
+        description: 'Veri periyodu'
+        required: false
+        default: '5y'
+      interval:
+        description: 'Zaman dilimi (1d, 1wk, 1mo)'
+        required: false
+        default: '1d'
+
+jobs:
+  scan-indices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tarih hazırla
+        id: prep
+        run: |
+          TS=$(date +'%Y-%m-%d')
+          echo "ts=$TS" >> $GITHUB_OUTPUT
+          mkdir -p reports
+
+      # ============================================================
+      # ENDEKS TARAMA — BIST_ENDEKSLER grubu (35+ endeks)
+      # ============================================================
+      - name: Endeks Tarama
+        run: |
+          python scanner/bist_ma_reaction_scanner.py \
+            --all-bist --bist-list BIST_ENDEKSLER \
+            --source borsapy \
+            --interval ${{ github.event.inputs.interval || '1d' }} \
+            --period ${{ github.event.inputs.period || '5y' }} \
+            --output reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
+            --report html --top_n 20 \
+            --min_touches 8
+
+      # ============================================================
+      # ENDEKS STRATEGY (her endeks için top 5 MA + setup)
+      # ============================================================
+      - name: Endeks Stratejileri
+        run: |
+          python scanner/strategy_generator.py \
+            --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
+            --all-robust --top_ma 5 \
+            --portfolio 100000 \
+            --output reports/index_strategies_${{ steps.prep.outputs.ts }}.html
+        continue-on-error: true
+
+      # ============================================================
+      # TELEGRAM ÖZET
+      # ============================================================
+      - name: Telegram Özet
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, requests, pandas as pd
+
+          df = pd.read_csv('reports/index_scan_${{ steps.prep.outputs.ts }}.csv')
+          robust = df[df['wf_robust']==True] if 'wf_robust' in df.columns else df
+
+          msg = ['📊 *BIST Endeks MA-Saygı Tarama*',
+                 f'_${{ steps.prep.outputs.ts }}_', '',
+                 f'*Endeks sayısı:* {df[\"ticker\"].nunique()}',
+                 f'*Aday MA:* {len(df):,}',
+                 f'*Robust:* {len(robust):,} ({100*len(robust)/max(len(df),1):.1f}%)',
+                 '',
+                 '🏆 *Robust Top 15 Endeks Setupları*',
+                 '\`\`\`']
+          if not robust.empty:
+              top = robust.nlargest(15, 'composite_score')
+              msg.append(f'{\"Endeks\":<8} {\"MA\":<6} {\"Per\":<4} {\"WR\":<5} {\"Exp\":<6}')
+              msg.append('-' * 33)
+              for _, r in top.iterrows():
+                  msg.append(f'{r[\"ticker\"]:<8} {r[\"ma_type\"]:<6} {r[\"period\"]:<4} {r[\"wr_pct\"]:<5.1f} {r[\"expectancy\"]:+.2f}')
+          msg.append('\`\`\`')
+          msg.append('')
+          msg.append('_Detay: GitHub Actions artifact_')
+
+          text = '\n'.join(msg)
+          requests.post(
+              f'https://api.telegram.org/bot{os.environ[\"TELEGRAM_BOT_TOKEN\"]}/sendMessage',
+              json={'chat_id': os.environ['TELEGRAM_CHAT_ID'], 'text': text, 'parse_mode': 'Markdown'},
+              timeout=20
+          )
+          "
+        continue-on-error: true
+
+      - name: Artifact yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-scan-${{ steps.prep.outputs.ts }}
+          path: reports/index*
+          retention-days: 90
