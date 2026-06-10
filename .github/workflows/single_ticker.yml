@@ -1,0 +1,215 @@
+name: Tek Hisse / Sembol Analiz
+
+# Tek bir sembol için zengin analiz raporu (mobile-friendly)
+# Hızlı (~30 saniye), Telegram'a otomatik özet
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: 'Sembol kodu (BIST: ASELS, Kripto: BTCUSD, Altın: XAUUSD, Endeks: XU100)'
+        required: true
+        default: 'ASELS'
+      use_latest_csv:
+        description: "Son tarama CSV'sini kullan (false = canlı tara, daha güncel)"
+        required: false
+        default: 'true'
+      portfolio:
+        description: 'Portföy büyüklüğü (TL)'
+        required: false
+        default: '100000'
+      risk_pct:
+        description: 'Trade başına risk (%)'
+        required: false
+        default: '1.0'
+      source:
+        description: 'Veri kaynağı (borsapy / yfinance)'
+        required: false
+        default: 'borsapy'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Parametreler
+        id: prep
+        run: |
+          TICKER="${{ github.event.inputs.ticker }}"
+          # Upper-case yap
+          TICKER_UPPER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]')
+          echo "ticker=$TICKER_UPPER" >> $GITHUB_OUTPUT
+          TS=$(date +'%Y-%m-%d_%H-%M')
+          echo "ts=$TS" >> $GITHUB_OUTPUT
+          mkdir -p reports
+
+          # En son CSV'yi bul (eğer reports/ klasöründe varsa)
+          USE_CSV="${{ github.event.inputs.use_latest_csv || 'true' }}"
+          CSV_FLAG=""
+          if [ "$USE_CSV" = "true" ]; then
+            # Son daily scan CSV'sini bul
+            LATEST=$(ls -t reports/scan_*_1d.csv 2>/dev/null | head -1)
+            if [ -n "$LATEST" ] && [ -f "$LATEST" ]; then
+              CSV_FLAG="--csv $LATEST"
+              echo "csv_used=$LATEST" >> $GITHUB_OUTPUT
+              echo "Son CSV: $LATEST"
+            else
+              echo "Son CSV bulunamadı, canlı tarama yapılacak"
+              CSV_FLAG="--scan-fresh"
+              echo "csv_used=canlı-tarama" >> $GITHUB_OUTPUT
+            fi
+          else
+            CSV_FLAG="--scan-fresh"
+            echo "csv_used=canlı-tarama (manuel)" >> $GITHUB_OUTPUT
+          fi
+          echo "csv_flag=$CSV_FLAG" >> $GITHUB_OUTPUT
+
+      - name: Hisse Analizi Çalıştır
+        run: |
+          python scanner/single_ticker_query.py \
+            --ticker "${{ steps.prep.outputs.ticker }}" \
+            ${{ steps.prep.outputs.csv_flag }} \
+            --source "${{ github.event.inputs.source || 'borsapy' }}" \
+            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
+            --risk_pct ${{ github.event.inputs.risk_pct || '1.0' }} \
+            --output reports/${{ steps.prep.outputs.ticker }}_${{ steps.prep.outputs.ts }}.html
+
+      - name: Telegram özet gönder
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, requests, sys, glob, json
+          import re
+
+          ticker = '${{ steps.prep.outputs.ticker }}'
+          csv_used = '${{ steps.prep.outputs.csv_used }}'
+
+          # HTML rapordan key bilgileri çıkar
+          html_files = glob.glob('reports/' + ticker + '*.html')
+          if not html_files:
+              print('HTML bulunamadı')
+              sys.exit(0)
+
+          with open(html_files[0]) as f:
+              html = f.read()
+
+          # Fiyat
+          price_m = re.search(r'Güncel Fiyat:.*?<strong>([\d.]+)</strong>', html)
+          atr_m = re.search(r'ATR \(14\)</strong><span>([\d.]+)</span>', html)
+          atr_pct_m = re.search(r'ATR%</strong><span>([\d.]+)%</span>', html)
+          range_pos_m = re.search(r'Range Pozisyon</strong><span>(\d+)%</span>', html)
+          rsi_m = re.search(r'RSI\(14\)</strong>\s*<span[^>]*>(\d+) \((\w+ ?\w*)\)</span>', html)
+          macd_hist_m = re.search(r'MACD Histogram</strong>\s*<span[^>]*>([+\-\d.]+)</span>', html)
+          vol_m = re.search(r'20-gün Ort\. Günlük Hacim:.*?<span[^>]*>([\d.]+)M TL.*?\((\w+[^<]*)\)</span>', html)
+
+          # Top 15 MA tablosu
+          ma_rows = re.findall(
+              r'<tr class=\"(\w*)\"><td>(\d+)</td>'
+              r'<td>(\w+)</td><td>(\d+)</td>'
+              r'<td>([\d.]+)</td>'
+              r'<td>([+\-\d.]+)</td>'
+              r'<td>([^<]+)</td>'
+              r'<td class=\"\w+\">(\w+)</td>'
+              r'<td>(\d+)%</td>'
+              r'<td>([+\-\d.]+)</td>',
+              html
+          )
+
+          msg = [f'🎯 *{ticker} Analizi*']
+          if price_m:
+              msg.append(f'Fiyat: *{price_m.group(1)}* | ATR: {atr_m.group(1) if atr_m else \"-\"} ({atr_pct_m.group(1) if atr_pct_m else \"-\"}%)')
+          if range_pos_m:
+              msg.append(f'20-gün Range: *{range_pos_m.group(1)}%* pozisyonda')
+          if vol_m:
+              msg.append(f'Hacim: {vol_m.group(1)}M TL ({vol_m.group(2)})')
+          if rsi_m or macd_hist_m:
+              ind = []
+              if rsi_m:
+                  ind.append(f'RSI {rsi_m.group(1)} ({rsi_m.group(2)})')
+              if macd_hist_m:
+                  hist_val = float(macd_hist_m.group(1))
+                  arrow = '↑' if hist_val > 0 else '↓'
+                  ind.append(f'MACD {arrow} {macd_hist_m.group(1)}')
+              msg.append('İndikatör: ' + ' | '.join(ind))
+          msg.append('')
+          msg.append('📊 *En İyi 8 MA Setup*')
+          msg.append('\`\`\`')
+          msg.append(f'{\"#\":<3} {\"MA\":<5} {\"Per\":<4} {\"Mes\":<7} {\"Durum\":<13} {\"Yön\":<5} {\"WR\":<4} {\"Exp\":<6}')
+          msg.append('-' * 55)
+          for i, row in enumerate(ma_rows[:8]):
+              status_cls, idx, ma_t, per, ma_v, dist, action, side, wr, exp = row
+              # Türkçe açıklamayı kısalt
+              short_status = {
+                  '⚡ HAZIR': 'TOUCH',
+                  'Yakın': 'YAKIN',
+                  '⏳ Touch bekle': 'READY',
+                  'Çok uzak': 'FAR'
+              }.get(action.strip(), action.strip()[:8])
+              msg.append(f'{idx:<3} {ma_t:<5} {per:<4} {dist:<7} {short_status:<13} {side:<5} {wr}%   {exp}')
+          msg.append('\`\`\`')
+
+          # Aksiyon alınabilir setup'lar
+          actionable = [r for r in ma_rows if r[6].strip() in ('⚡ HAZIR', '⏳ Touch bekle')]
+          if actionable:
+              msg.append('')
+              msg.append('⚡ *Aksiyon Setup\'ları:*')
+              for r in actionable[:5]:
+                  status_cls, idx, ma_t, per, ma_v, dist, action, side, wr, exp = r
+                  emoji = '🟢' if side == 'LONG' else '🔴'
+                  msg.append(f'{emoji} *{ma_t} {per}* — {action.strip()} {side} (WR {wr}%, Exp {exp})')
+
+          msg.append('')
+          msg.append(f'_Veri kaynağı: {csv_used}_')
+          msg.append('_Detaylı HTML: GitHub Actions artifact_')
+
+          text = '\n'.join(msg)
+
+          # Telegram'a gönder (uzunsa parçala)
+          token = os.environ['TELEGRAM_BOT_TOKEN']
+          chat_id = os.environ['TELEGRAM_CHAT_ID']
+          if len(text) > 4000:
+              text = text[:3900] + '\n_(kısaltıldı)_'
+          resp = requests.post(
+              f'https://api.telegram.org/bot{token}/sendMessage',
+              json={'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown'},
+              timeout=20
+          )
+          if not resp.ok:
+              print(f'Telegram error: {resp.status_code} - {resp.text[:200]}')
+              # Fallback - Markdown parse hatası olabilir, plain text dene
+              resp2 = requests.post(
+                  f'https://api.telegram.org/bot{token}/sendMessage',
+                  json={'chat_id': chat_id, 'text': text},
+                  timeout=20
+              )
+              print(f'Plain text retry: {resp2.status_code}')
+          else:
+              print('Telegram gönderildi')
+          "
+        continue-on-error: true
+
+      - name: HTML rapor artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ticker-${{ steps.prep.outputs.ticker }}-${{ steps.prep.outputs.ts }}
+          path: reports/${{ steps.prep.outputs.ticker }}*.html
+          retention-days: 30
