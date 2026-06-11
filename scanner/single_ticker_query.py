@@ -65,7 +65,7 @@ def detect_instrument_type(symbol: str) -> str:
     return 'bist'
 
 
-def fetch_data(ticker, source='borsapy', period_days=1100):
+def fetch_data(ticker, source='borsapy', period_days=1100, interval='1d'):
     """Multi-instrument veri çek."""
     base = ticker.replace('.IS', '').upper()
     inst_type = detect_instrument_type(base)
@@ -76,7 +76,15 @@ def fetch_data(ticker, source='borsapy', period_days=1100):
             # borsapy bp.Ticker tüm enstrümanları (BIST/FX/crypto) destekliyor olabilir
             # Eğer ayrı sınıflar gerekiyorsa burada dispatch yap
             t = bp.Ticker(base)
-            df = t.history(start=start)
+            if interval in ('1h', '4h'):
+                from datetime import timedelta as _td
+                short_start = (datetime.now() - _td(days=60 if interval == '1h' else 120)).strftime('%Y-%m-%d')
+                try:
+                    df = t.history(start=short_start, interval=interval)
+                except TypeError:
+                    df = t.history(start=short_start)
+            else:
+                df = t.history(start=start)
 
             if df is None or df.empty or len(df) < 50:
                 # FX/Crypto için alternatif sınıf dene
@@ -112,7 +120,14 @@ def fetch_data(ticker, source='borsapy', period_days=1100):
             symbol = f"{base[:3]}-{base[3:]}" if len(base) == 6 else base
         else:
             symbol = base
-        df = yf.download(symbol, period='3y', progress=False, auto_adjust=True)
+        if interval == '1h':
+            df = yf.download(symbol, period='60d', interval='1h', progress=False, auto_adjust=True)
+        elif interval == '4h':
+            df = yf.download(symbol, period='120d', interval='1h', progress=False, auto_adjust=True)
+            if not df.empty:
+                df = df.resample('4h').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
+        else:
+            df = yf.download(symbol, period='3y', progress=False, auto_adjust=True)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         return (df if not df.empty else None), inst_type
@@ -185,10 +200,12 @@ def atr_calc(df, p=14):
 
 # === Mini scan (CSV yoksa) ===
 
-def mini_scan(ticker, source='borsapy'):
+def mini_scan(ticker, source='borsapy', interval='1d'):
     """Tek hisse için tüm MA kombinasyonlarını tara."""
-    print(f"  {ticker} için canlı tarama başlıyor...")
-    df, inst_type = fetch_data(ticker, source=source)
+    interval_label = {'1h':'1 saatlik', '4h':'4 saatlik', '1d':'günlük',
+                       '1wk':'haftalık', '1mo':'aylık'}.get(interval, interval)
+    print(f"  {ticker} için {interval_label} canlı tarama başlıyor...")
+    df, inst_type = fetch_data(ticker, source=source, interval=interval)
     if df is None:
         return None, None, None
 
@@ -394,7 +411,7 @@ def mini_scan(ticker, source='borsapy'):
 
 # === Ana fonksiyon ===
 
-def analyze_ticker(ticker, csv_path=None, source='borsapy', portfolio=100000, risk_pct=1.0):
+def analyze_ticker(ticker, csv_path=None, source='borsapy', interval='1d', portfolio=100000, risk_pct=1.0):
     ticker = ticker.upper().strip()
 
     # 1. MA listesi al (CSV varsa filtreleyerek, yoksa canli tarama)
@@ -411,7 +428,7 @@ def analyze_ticker(ticker, csv_path=None, source='borsapy', portfolio=100000, ri
 
     scan_df = None
     if not csv_path:
-        scan_df, price_df, inst_type = mini_scan(ticker, source=source)
+        scan_df, price_df, inst_type = mini_scan(ticker, source=source, interval=interval)
         if scan_df is None:
             # Veri çekme tamamen başarısız
             print(f"  {ticker}: veri kaynağına erişilemedi")
@@ -424,7 +441,7 @@ def analyze_ticker(ticker, csv_path=None, source='borsapy', portfolio=100000, ri
             top = scan_df.nlargest(15, 'composite_score')
     else:
         # CSV'de fiyat verisi yok, sadece güncel bilgi için çek
-        price_df, inst_type = fetch_data(ticker, source=source)
+        price_df, inst_type = fetch_data(ticker, source=source, interval=interval)
 
     if price_df is None:
         return None
@@ -616,6 +633,9 @@ def main():
     p.add_argument('--ticker', required=True, help='Hisse/sembol kodu')
     p.add_argument('--csv', type=str, default='', help='Tarama CSV (opsiyonel)')
     p.add_argument('--source', type=str, default='borsapy')
+    p.add_argument('--interval', type=str, default='1d',
+                   choices=['1h', '4h', '1d', '1wk', '1mo'],
+                   help='Zaman dilimi (1h, 4h intraday icin)')
     p.add_argument('--portfolio', type=float, default=100000)
     p.add_argument('--risk_pct', type=float, default=1.0)
     p.add_argument('--scan-fresh', action='store_true', help='CSV varsa bile yeniden tara')
@@ -625,6 +645,7 @@ def main():
 
     csv = '' if args.scan_fresh else args.csv
     result = analyze_ticker(args.ticker, csv_path=csv, source=args.source,
+                            interval=args.interval,
                             portfolio=args.portfolio, risk_pct=args.risk_pct)
     if not result:
         print(f"HATA: {args.ticker} için veri çekilemedi")
@@ -739,13 +760,15 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
 
     lines.append("📊 *En İyi 8 MA Setup*")
     lines.append("```")
-    # T = touch sayisi (kritik bilgi!)
-    lines.append(f"{'#':<2} {'MA':<5} {'P':<4} {'T':<3} {'Mes':<6} {'Durum':<6} {'Yön':<5} {'WR':<5} {'Exp':<6}")
-    lines.append("-" * 52)
+    # T = touch, Değer = MA'nın sayı değeri (kritik!), Etiket = DESTEK/DIRENC
+    lines.append(f"{'#':<2} {'MA':<5} {'P':<4} {'Değer':<10} {'Mes':<6} {'T':<3} {'Etiket':<8} {'WR':<5}")
+    lines.append("-" * 60)
 
     actionable = []
     sides_seen = set()
-    suspicious_count = 0  # Az touch + yuksek WR olan setup sayisi
+    suspicious_count = 0
+    ma_clusters = {'destek': [], 'direnc': []}  # Cluster icin
+    ma_values_list = []  # Tum MA degerleri (cluster analizi)
 
     for i, (_, row) in enumerate(top.head(8).iterrows(), 1):
         ma_val = row.get('current_ma_value', np.nan)
@@ -771,22 +794,88 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
         exp = row['expectancy']
         touches = int(row.get('touches', 0))
 
-        # Şüpheli: az touch + yüksek WR (overfitting)
+        # Etiket: MA fiyatin altinda mi ustunde mi (destek/direnc)
+        if ma_val < current_price:
+            etiket = 'DESTEK'
+            ma_clusters['destek'].append((row['ma_type'], int(row['period']), ma_val))
+        else:
+            etiket = 'DIRENC'
+            ma_clusters['direnc'].append((row['ma_type'], int(row['period']), ma_val))
+        ma_values_list.append((row['ma_type'], int(row['period']), ma_val, etiket))
+
+        # Şüpheli setup
         is_suspicious = touches < 10 and wr >= 90
         if is_suspicious:
             suspicious_count += 1
-
-        # Touch sayısını görsel ile işaretle
         touch_mark = '!' if is_suspicious else ' '
 
+        # Fiyat formati - hisse fiyatina gore decimal sayisi
+        if current_price < 10:
+            val_fmt = f"{ma_val:.4f}"
+        elif current_price < 100:
+            val_fmt = f"{ma_val:.3f}"
+        else:
+            val_fmt = f"{ma_val:.2f}"
+
         lines.append(f"{i:<2} {row['ma_type']:<5} {int(row['period']):<4} "
-                     f"{touches:<3}{touch_mark}{dist_atr:+5.2f} {status:<6} {side:<5} "
-                     f"{wr:>3.0f}%  {exp:+5.2f}")
+                     f"{val_fmt:<10} {dist_atr:+5.2f} "
+                     f"{touches:<2}{touch_mark} {etiket:<8} {wr:>3.0f}%")
 
         if sk in ('touch', 'ready'):
-            actionable.append((row, status, side, ma_val, dist_atr, touches, is_suspicious))
+            actionable.append((row, status, side, ma_val, dist_atr, touches, is_suspicious, etiket))
 
     lines.append("```")
+
+    # MA Kumesi gosterimi - yakın değerli MA'lari grupla
+    def fmt_price(p):
+        if current_price < 10: return f"{p:.4f}"
+        elif current_price < 100: return f"{p:.3f}"
+        else: return f"{p:.2f}"
+
+    def cluster_mas(mas, threshold_atr=0.5):
+        """Yakın değerli MA'lari grupla."""
+        if not mas:
+            return []
+        sorted_mas = sorted(mas, key=lambda x: x[2])
+        clusters = []
+        current = [sorted_mas[0]]
+        for ma in sorted_mas[1:]:
+            if abs(ma[2] - current[-1][2]) <= threshold_atr * atr_val:
+                current.append(ma)
+            else:
+                clusters.append(current)
+                current = [ma]
+        clusters.append(current)
+        return clusters
+
+    if ma_clusters['destek'] or ma_clusters['direnc']:
+        lines.append("")
+        lines.append("🎯 *MA Kümeleri (Destek/Direnç)*")
+        lines.append("```")
+
+        # Direncler (yukaridakiler)
+        direnc_clusters = cluster_mas(ma_clusters['direnc'])
+        for cluster in sorted(direnc_clusters, key=lambda c: c[0][2]):  # En yakin direnc once
+            vals = [m[2] for m in cluster]
+            tags = ', '.join(f"{m[0]}{m[1]}" for m in cluster)
+            if len(cluster) > 1:
+                lines.append(f"🔴 {fmt_price(min(vals))}-{fmt_price(max(vals))}: {tags} ({len(cluster)} MA)")
+            else:
+                lines.append(f"🔴 {fmt_price(vals[0])}: {tags}")
+
+        # Mevcut fiyat
+        lines.append(f"━━ FIYAT: {fmt_price(current_price)} ━━")
+
+        # Destekler (asagidakiler) - en yakindan baslayarak
+        destek_clusters = cluster_mas(ma_clusters['destek'])
+        for cluster in sorted(destek_clusters, key=lambda c: -c[0][2]):  # En yakin destek once
+            vals = [m[2] for m in cluster]
+            tags = ', '.join(f"{m[0]}{m[1]}" for m in cluster)
+            if len(cluster) > 1:
+                lines.append(f"🟢 {fmt_price(min(vals))}-{fmt_price(max(vals))}: {tags} ({len(cluster)} MA)")
+            else:
+                lines.append(f"🟢 {fmt_price(vals[0])}: {tags}")
+        lines.append("```")
 
     # Uyarı: Hem LONG hem SHORT setup varsa yatay piyasa
     if 'LONG' in sides_seen and 'SHORT' in sides_seen:
@@ -806,7 +895,7 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
     if actionable:
         lines.append("")
         lines.append("⚡ *Aksiyon Setup'ları:*")
-        for row, status, side, ma_val, dist_atr, touches, is_susp in actionable[:5]:
+        for row, status, side, ma_val, dist_atr, touches, is_susp, etiket in actionable[:5]:
             emoji = '🟢' if side == 'LONG' else '🔴'
             susp_mark = ' ⚠️' if is_susp else ''
             mfe = row.get('avg_mfe', 5)
@@ -820,8 +909,8 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
                 tp2 = entry * (1 - mfe / 100)
             risk_per_lot = abs(entry - stop)
             n_lots = int((portfolio * risk_pct / 100) / risk_per_lot) if risk_per_lot > 0 else 0
-            lines.append(f"{emoji} *{row['ma_type']} {int(row['period'])}* — {status} {side}{susp_mark}")
-            lines.append(f"   Entry: `{entry:.4f}` | Stop: `{stop:.4f}` | TP2: `{tp2:.4f}` | Lot: {n_lots:,}")
+            lines.append(f"{emoji} *{row['ma_type']} {int(row['period'])}* @ {fmt_price(ma_val)} — {etiket} {status}{susp_mark}")
+            lines.append(f"   Entry: `{fmt_price(entry)}` | Stop: `{fmt_price(stop)}` | TP2: `{fmt_price(tp2)}` | Lot: {n_lots:,}")
             lines.append(f"   T={touches} | WR: {row['wr_pct']:.0f}% | Exp: {row['expectancy']:+.2f} | Skor: {row.get('composite_score', 0):.1f}")
     else:
         lines.append("")
