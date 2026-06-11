@@ -150,15 +150,31 @@ def format_daily(df: pd.DataFrame) -> str:
                 lines.append(f"💎 *En Çok Robust MA'ya Sahip 12 Hisse — Her Birinin Top 5'i*")
                 lines.append("```")
                 for tk, cnt in robust_per_stock.head(12).items():
-                    # Bu hissenin robust olan top 5 MA'sini al
                     sub = (
                         df[(df['ticker'] == tk) & (df['wf_robust'] == True)]
                         .nlargest(5, 'composite_score')
                     )
-                    lines.append(f"{tk} ({cnt} robust MA)")
+                    curr_price = sub.iloc[0].get('current_close', None)
+                    if curr_price and not pd.isna(curr_price):
+                        if curr_price < 10: pf = f"{curr_price:.4f}"
+                        elif curr_price < 100: pf = f"{curr_price:.3f}"
+                        else: pf = f"{curr_price:.2f}"
+                        lines.append(f"{tk} ({pf}) - {cnt} robust MA")
+                    else:
+                        lines.append(f"{tk} ({cnt} robust MA)")
                     for _, r in sub.iterrows():
-                        lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
-                                     f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f}")
+                        ma_val = r.get('current_ma_value', None)
+                        if ma_val and not pd.isna(ma_val) and curr_price:
+                            if curr_price < 10: vf = f"{ma_val:.4f}"
+                            elif curr_price < 100: vf = f"{ma_val:.3f}"
+                            else: vf = f"{ma_val:.2f}"
+                            etiket = 'D' if ma_val < curr_price else 'R'
+                            lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
+                                         f"@{vf} [{etiket}] "
+                                         f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f}")
+                        else:
+                            lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
+                                         f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f}")
                 lines.append("```")
 
     # === LARGE MODE (>150 hisse, BIST_TUM): yüksek seviyeli özet ===
@@ -178,12 +194,28 @@ def format_daily(df: pd.DataFrame) -> str:
         lines.append("```")
         for tk, _ in best_per_stock.items():
             top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
-            lines.append(f"{tk}:")
+            curr_price = top5.iloc[0].get('current_close', None)
+            if curr_price and not pd.isna(curr_price):
+                if curr_price < 10: pf = f"{curr_price:.4f}"
+                elif curr_price < 100: pf = f"{curr_price:.3f}"
+                else: pf = f"{curr_price:.2f}"
+                lines.append(f"{tk} ({pf}):")
+            else:
+                lines.append(f"{tk}:")
             for _, r in top5.iterrows():
                 robust_mark = "✓" if r.get('wf_robust', False) else " "
-                lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
-                             f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f} "
-                             f"Skor={r['composite_score']:.1f} {robust_mark}")
+                ma_val = r.get('current_ma_value', None)
+                if ma_val and not pd.isna(ma_val) and curr_price:
+                    if curr_price < 10: vf = f"{ma_val:.4f}"
+                    elif curr_price < 100: vf = f"{ma_val:.3f}"
+                    else: vf = f"{ma_val:.2f}"
+                    etiket = 'D' if ma_val < curr_price else 'R'
+                    lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
+                                 f"@{vf} [{etiket}] "
+                                 f"WR={r['wr_pct']:.0f}% Skor={r['composite_score']:.1f} {robust_mark}")
+                else:
+                    lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
+                                 f"WR={r['wr_pct']:.0f}% Skor={r['composite_score']:.1f} {robust_mark}")
         lines.append("```")
         lines.append("")
         lines.append("_Detaylı tüm hisseler ve setup'lar için GitHub Actions artifact'ında CSV/HTML dosyalarını indirin._")
