@@ -14,7 +14,7 @@ on:
         required: false
         default: '3y'
       interval:
-        description: 'Zaman dilimi: 1d (günlük), 1wk (haftalık), 1mo (aylık)'
+        description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
         required: false
         default: '1d'
       no_walk_forward:
