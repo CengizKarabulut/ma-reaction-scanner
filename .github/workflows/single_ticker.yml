@@ -26,6 +26,10 @@ on:
         description: 'Veri kaynağı (borsapy / yfinance)'
         required: false
         default: 'borsapy'
+      interval:
+        description: 'Zaman dilimi: 1h, 4h (intraday), 1d, 1wk, 1mo'
+        required: false
+        default: '1d'
 
 jobs:
   analyze:
@@ -81,6 +85,7 @@ jobs:
             --ticker "${{ steps.prep.outputs.ticker }}" \
             ${{ steps.prep.outputs.csv_flag }} \
             --source "${{ github.event.inputs.source || 'borsapy' }}" \
+            --interval "${{ github.event.inputs.interval || '1d' }}" \
             --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
             --risk_pct ${{ github.event.inputs.risk_pct || '1.0' }} \
             --output reports/${{ steps.prep.outputs.ticker }}_${{ steps.prep.outputs.ts }}.html \
