@@ -191,6 +191,174 @@ def macd(close):
     return m, sig, m - sig
 
 
+def rsi_ma(rsi_series, period=9):
+    """RSI'in hareketli ortalamasi - RSI cizgisini kesme analizi icin."""
+    return rsi_series.ewm(span=period, adjust=False).mean()
+
+
+def detect_rsi_divergence(close, rsi_series, lookback=20):
+    """Bullish/Bearish divergence tespit et.
+
+    Bullish div: fiyat daha dusuk dip yaparken RSI daha yuksek dip yapiyorsa
+    Bearish div: fiyat daha yuksek tepe yaparken RSI daha dusuk tepe yapiyorsa
+    """
+    if len(close) < lookback + 5:
+        return None
+    p = close.values[-lookback:]
+    r = rsi_series.values[-lookback:]
+
+    # Son ve onceki dip
+    # Argmin/argmax ile yaklasik
+    half = lookback // 2
+    p_recent_low = p[-half:].min()
+    p_old_low = p[:half].min()
+    r_recent_low_idx = -half + np.argmin(p[-half:])
+    r_old_low_idx = np.argmin(p[:half])
+    r_recent_low = r[r_recent_low_idx]
+    r_old_low = r[r_old_low_idx]
+
+    # Bullish: fiyat dusuk dip + RSI yuksek dip
+    if p_recent_low < p_old_low * 0.98 and r_recent_low > r_old_low + 3:
+        return 'bullish_divergence'
+
+    # Bearish: fiyat yuksek tepe + RSI dusuk tepe
+    p_recent_high = p[-half:].max()
+    p_old_high = p[:half].max()
+    r_recent_high_idx = -half + np.argmax(p[-half:])
+    r_old_high_idx = np.argmax(p[:half])
+    r_recent_high = r[r_recent_high_idx]
+    r_old_high = r[r_old_high_idx]
+    if p_recent_high > p_old_high * 1.02 and r_recent_high < r_old_high - 3:
+        return 'bearish_divergence'
+
+    return None
+
+
+def interpret_rsi(rsi_now, rsi_prev, rsi_ma_now, rsi_ma_prev, divergence=None):
+    """RSI'i profesyonel olarak yorumla."""
+    msg_parts = []
+
+    # Asiri al/sat veya isiniyor
+    if rsi_now > 80:
+        msg_parts.append(f"{rsi_now:.0f} (EXTREM ASIRI ALIM - satis gelmesi yuksek)")
+    elif rsi_now > 70:
+        msg_parts.append(f"{rsi_now:.0f} (asiri alim - indikator isiniyor)")
+    elif rsi_now < 20:
+        msg_parts.append(f"{rsi_now:.0f} (EXTREM ASIRI SATIM - bounce yuksek olasilik)")
+    elif rsi_now < 30:
+        msg_parts.append(f"{rsi_now:.0f} (asiri satim - dipten donus ihtimali)")
+    elif rsi_now > 50:
+        msg_parts.append(f"{rsi_now:.0f} (50 ustu - bullish bolge)")
+    elif rsi_now < 50:
+        msg_parts.append(f"{rsi_now:.0f} (50 alti - bearish bolge)")
+    else:
+        msg_parts.append(f"{rsi_now:.0f} (notr)")
+
+    # RSI MA kesisi
+    if rsi_prev <= rsi_ma_prev and rsi_now > rsi_ma_now:
+        msg_parts.append("MA'yi yukari kesti ↑ (bullish)")
+    elif rsi_prev >= rsi_ma_prev and rsi_now < rsi_ma_now:
+        msg_parts.append("MA'yi asagi kesti ↓ (bearish)")
+    elif rsi_now > rsi_ma_now:
+        msg_parts.append("MA ustunde (trend ile uyumlu)")
+    elif rsi_now < rsi_ma_now:
+        msg_parts.append("MA altinda (trend zayif)")
+
+    # Divergence
+    if divergence == 'bullish_divergence':
+        msg_parts.append("⚠️ *BULLISH DIVERGENCE* (donus sinyali)")
+    elif divergence == 'bearish_divergence':
+        msg_parts.append("⚠️ *BEARISH DIVERGENCE* (tepe sinyali)")
+
+    return msg_parts
+
+
+def interpret_macd(macd_line_now, macd_line_prev, signal_now, signal_prev,
+                    hist_now, hist_prev, hist_3ago=None):
+    """MACD'i profesyonel olarak yorumla.
+
+    Onemli kombinasyonlar:
+    - MACD > Signal + Hist > 0 + MACD > 0 → TUM POZITIF (en guclu bullish)
+    - MACD < Signal + Hist < 0 + MACD < 0 → TUM NEGATIF (en guclu bearish)
+    - MACD > Signal, ikisi de 0 altinda → dipten donus baslangici
+    - MACD < Signal, ikisi de 0 ustunde → tepeden dusus baslangici
+    - Histogram 0 altinda pikler kuculuyor → bearish momentum zayifliyor (LONG firsati)
+    - Histogram 0 ustunde pikler kuculuyor → bullish momentum zayifliyor (SHORT firsati)
+    """
+    msg_parts = []
+
+    # Cross detection
+    cross = None
+    if macd_line_prev <= signal_prev and macd_line_now > signal_now:
+        cross = 'bullish_cross'
+        msg_parts.append("MACD yukari kesti ↑ (alis sinyali)")
+    elif macd_line_prev >= signal_prev and macd_line_now < signal_now:
+        cross = 'bearish_cross'
+        msg_parts.append("MACD asagi kesti ↓ (satis sinyali)")
+
+    # Bileşik durum
+    above_signal = macd_line_now > signal_now
+    macd_pos = macd_line_now > 0
+    signal_pos = signal_now > 0
+    hist_pos = hist_now > 0
+
+    if above_signal and macd_pos and signal_pos and hist_pos:
+        msg_parts.append("🟢 *TUM POZITIF* (MACD>Signal, ikisi >0, Hist>0) - GUCLU BULLISH")
+    elif not above_signal and not macd_pos and not signal_pos and not hist_pos:
+        msg_parts.append("🔴 *TUM NEGATIF* (MACD<Signal, ikisi <0, Hist<0) - GUCLU BEARISH")
+    elif above_signal and not macd_pos:
+        msg_parts.append("🟡 Dipten donus baslangici (MACD>Signal, ikisi <0)")
+    elif not above_signal and macd_pos:
+        msg_parts.append("🟠 Tepeden dusus baslangici (MACD<Signal, ikisi >0)")
+    elif above_signal and macd_pos and not signal_pos:
+        msg_parts.append("🟢 Bullish gelisiyor (MACD signal'i geçti, 0 ustune)")
+    elif not above_signal and not macd_pos and signal_pos:
+        msg_parts.append("🔴 Bearish gelisiyor (MACD signal alti, 0 alti)")
+
+    # Histogram momentum analizi
+    if hist_3ago is not None:
+        if hist_pos and hist_now < hist_prev < hist_3ago:
+            msg_parts.append("Hist 0 ustu ama pikler azaliyor (bullish momentum zayifliyor)")
+        elif not hist_pos and hist_now > hist_prev > hist_3ago:
+            msg_parts.append("Hist 0 alti pikler azaliyor (bearish momentum zayifliyor - LONG firsati)")
+        elif hist_pos and hist_now > hist_prev > hist_3ago:
+            msg_parts.append("Hist pikler buyuyor (bullish momentum guclu)")
+        elif not hist_pos and hist_now < hist_prev < hist_3ago:
+            msg_parts.append("Hist pikler buyuyor negatif yonde (bearish momentum guclu)")
+
+    # MACD'in mutlak konumu
+    msg_parts.insert(0, f"MACD: {macd_line_now:+.4f} | Signal: {signal_now:+.4f} | Hist: {hist_now:+.4f}")
+
+    return msg_parts
+
+
+def find_ma_reaction_points(close, high, low, ma_series, atr_series, lookback_bars=10,
+                              zone_atr=0.3):
+    """MA'nin tarihte tepki gosterdigi fiyat noktalarini bul.
+
+    Her touch icin ±lookback_bars cevresinde lokal dip/tepe arar.
+    Bu noktalar gercek destek/direnc seviyelerini gosterir.
+    """
+    points = []
+    n = len(close)
+    for i in range(50, n - lookback_bars):
+        if pd.isna(ma_series.iloc[i]) or pd.isna(atr_series.iloc[i]):
+            continue
+        zone = zone_atr * atr_series.iloc[i]
+        if low.iloc[i] <= ma_series.iloc[i] + zone and high.iloc[i] >= ma_series.iloc[i] - zone:
+            # Touch! Local dip/tepe ara
+            window_low = low.iloc[max(0, i-lookback_bars):i+lookback_bars+1].min()
+            window_high = high.iloc[max(0, i-lookback_bars):i+lookback_bars+1].max()
+            # MA'nin altindan dondu = lokal dip
+            if abs(window_low - ma_series.iloc[i]) < abs(window_high - ma_series.iloc[i]):
+                points.append({'type': 'low', 'price': float(window_low),
+                                'idx': i, 'ma_val': float(ma_series.iloc[i])})
+            else:
+                points.append({'type': 'high', 'price': float(window_high),
+                                'idx': i, 'ma_val': float(ma_series.iloc[i])})
+    return points
+
+
 def atr_calc(df, p=14):
     h, l, c = df['High'].values, df['Low'].values, df['Close'].values
     tr = np.maximum.reduce([h[1:]-l[1:], np.abs(h[1:]-c[:-1]), np.abs(l[1:]-c[:-1])])
@@ -685,9 +853,24 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
     hi20 = float(np.max(high[-20:]))
     range_pos = (current_price - lo20) / (hi20 - lo20) * 100 if hi20 > lo20 else 50
 
-    rsi_now = float(rsi(df['Close']).iloc[-1])
+    # RSI detayli analiz
+    rsi_series = rsi(df['Close'])
+    rsi_ma_series = rsi_ma(rsi_series)
+    rsi_now = float(rsi_series.iloc[-1])
+    rsi_prev = float(rsi_series.iloc[-2]) if len(rsi_series) > 1 else rsi_now
+    rsi_ma_now = float(rsi_ma_series.iloc[-1])
+    rsi_ma_prev = float(rsi_ma_series.iloc[-2]) if len(rsi_ma_series) > 1 else rsi_ma_now
+    divergence = detect_rsi_divergence(df['Close'], rsi_series, lookback=20)
+
+    # MACD detayli analiz
     m_l, m_s, m_h = macd(df['Close'])
+    macd_now = float(m_l.iloc[-1])
+    macd_prev = float(m_l.iloc[-2]) if len(m_l) > 1 else macd_now
+    signal_now = float(m_s.iloc[-1])
+    signal_prev = float(m_s.iloc[-2]) if len(m_s) > 1 else signal_now
     macd_hist = float(m_h.iloc[-1])
+    macd_hist_prev = float(m_h.iloc[-2]) if len(m_h) > 1 else macd_hist
+    macd_hist_3ago = float(m_h.iloc[-4]) if len(m_h) > 3 else None
 
     avg_volume_tl = float((df['Close'] * df['Volume']).tail(20).mean())
 
@@ -708,10 +891,19 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
             vol_lbl = "Düşük ⚠️"
         lines.append(f"Hacim: {avg_volume_tl/1e6:.0f}M TL ({vol_lbl})")
 
-    # İndikatörler
-    rsi_lbl = 'Aşırı Alım' if rsi_now > 70 else ('Aşırı Satım' if rsi_now < 30 else 'Nötr')
-    macd_arrow = '↑' if macd_hist > 0 else '↓'
-    lines.append(f"İnd: RSI {rsi_now:.0f} ({rsi_lbl}) | MACD {macd_arrow} {macd_hist:+.4f}")
+    # İndikatör detayli yorumlama (Cengiz isteği: RSI/MACD profesyonel analiz)
+    lines.append("")
+    lines.append("📈 *RSI Analizi*")
+    rsi_parts = interpret_rsi(rsi_now, rsi_prev, rsi_ma_now, rsi_ma_prev, divergence)
+    for part in rsi_parts:
+        lines.append(f"   {part}")
+
+    lines.append("")
+    lines.append("📊 *MACD Analizi*")
+    macd_parts = interpret_macd(macd_now, macd_prev, signal_now, signal_prev,
+                                  macd_hist, macd_hist_prev, macd_hist_3ago)
+    for part in macd_parts:
+        lines.append(f"   {part}")
     lines.append("")
 
     # Top 8 MA setup'ları
@@ -915,6 +1107,86 @@ def _build_telegram_summary(result, portfolio=100000, risk_pct=1.0):
     else:
         lines.append("")
         lines.append("⏸ Şu an aksiyon alınabilir setup yok — fiyat MA'lardan uzak veya yakın geçişte.")
+
+    # === MA Tepki Bölgeleri (Cengiz isteği: range gercek tepki noktalarindan) ===
+    # En güçlü 3 MA için tarihi tepki noktalarını bul
+    if top is not None and not top.empty and len(top) >= 1:
+        try:
+            close_s = df['Close']
+            high_s = df['High']
+            low_s = df['Low']
+            # ATR hesapla
+            from numpy import maximum as _max, abs as _abs
+            tr_arr = _max.reduce([
+                high_s.values[1:] - low_s.values[1:],
+                _abs(high_s.values[1:] - close_s.values[:-1]),
+                _abs(low_s.values[1:] - close_s.values[:-1])
+            ])
+            atr_s = pd.Series(tr_arr).rolling(14).mean()
+            atr_s = pd.concat([pd.Series([np.nan]), atr_s]).reset_index(drop=True)
+            atr_s.index = df.index
+
+            all_reactions = []
+            for _, row in top.head(3).iterrows():
+                ma_t = row['ma_type']
+                ma_p = int(row['period'])
+                ma_series = compute_ma(ma_t, close_s, df['Volume'], ma_p)
+                if ma_series is None:
+                    continue
+                reactions = find_ma_reaction_points(close_s, high_s, low_s, ma_series,
+                                                     atr_s, lookback_bars=10, zone_atr=0.3)
+                for rp in reactions:
+                    rp['ma_label'] = f"{ma_t}{ma_p}"
+                    all_reactions.append(rp)
+
+            if all_reactions:
+                # Lokal dip/tepe seviyelerini cluster halinde grupla
+                lows = sorted([r['price'] for r in all_reactions if r['type'] == 'low'])
+                highs = sorted([r['price'] for r in all_reactions if r['type'] == 'high'], reverse=True)
+
+                lines.append("")
+                lines.append("📍 *MA Tepki Bölgeleri* (gerçek dip/tepe noktaları)")
+                lines.append("```")
+
+                # Direnç tepeleri (yukarısı)
+                if highs:
+                    above = [h for h in highs if h > current_price]
+                    if above:
+                        # En yakın 3 direnç
+                        above_clusters = []
+                        prev = None
+                        for h in sorted(above):
+                            if prev is None or h - prev > atr_val * 0.5:
+                                above_clusters.append([h])
+                            else:
+                                above_clusters[-1].append(h)
+                            prev = h
+                        for cl in above_clusters[:3]:
+                            avg = sum(cl)/len(cl)
+                            lines.append(f"🔴 ~{fmt_price(avg)} ({len(cl)}x tepe)")
+
+                lines.append(f"━━ FIYAT: {fmt_price(current_price)} ━━")
+
+                # Destek dipleri (aşağısı)
+                if lows:
+                    below = [l for l in lows if l < current_price]
+                    if below:
+                        below_clusters = []
+                        prev = None
+                        for l in sorted(below, reverse=True):
+                            if prev is None or prev - l > atr_val * 0.5:
+                                below_clusters.append([l])
+                            else:
+                                below_clusters[-1].append(l)
+                            prev = l
+                        for cl in below_clusters[:3]:
+                            avg = sum(cl)/len(cl)
+                            lines.append(f"🟢 ~{fmt_price(avg)} ({len(cl)}x dip)")
+
+                lines.append("```")
+                lines.append("_(MA touch'larından ±10 bar lokal dip/tepe analizi)_")
+        except Exception as e:
+            pass  # Tepki bolgesi opsiyonel, hata cikarsa sessizce gec
 
     return '\n'.join(lines)
 
