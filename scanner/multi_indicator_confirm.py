@@ -128,42 +128,181 @@ def fetch_data(ticker, source='borsapy', days=400):
 
 # === Vote sistemi ===
 
-def vote_rsi(rsi_now, rsi_prev, side='LONG'):
-    """RSI vote:
-    LONG: oversold (<30) ve yukselmeye basladi -> +1
-    SHORT: overbought (>70) ve dusmeye basladi -> -1
-    """
+def rsi_ma(rsi_series, period=9):
+    """RSI'in hareketli ortalamasi (sinyal cizgisi gibi)."""
+    return rsi_series.ewm(span=period, adjust=False).mean()
+
+
+def detect_rsi_divergence(close, rsi_series, lookback=20):
+    """Bullish/Bearish divergence tespiti."""
+    if len(close) < lookback + 5:
+        return None
+    p = close.values[-lookback:]
+    r = rsi_series.values[-lookback:]
+    half = lookback // 2
+    p_recent_low = p[-half:].min()
+    p_old_low = p[:half].min()
+    r_recent_low = r[-half + np.argmin(p[-half:])]
+    r_old_low = r[np.argmin(p[:half])]
+    if p_recent_low < p_old_low * 0.98 and r_recent_low > r_old_low + 3:
+        return 'bullish_divergence'
+    p_recent_high = p[-half:].max()
+    p_old_high = p[:half].max()
+    r_recent_high = r[-half + np.argmax(p[-half:])]
+    r_old_high = r[np.argmax(p[:half])]
+    if p_recent_high > p_old_high * 1.02 and r_recent_high < r_old_high - 3:
+        return 'bearish_divergence'
+    return None
+
+
+def vote_rsi(rsi_now, rsi_prev, rsi_ma_now=None, rsi_ma_prev=None,
+              divergence=None, side='LONG'):
+    """RSI profesyonel vote - cross, divergence, asiri al/sat dahil."""
     if pd.isna(rsi_now) or pd.isna(rsi_prev):
         return 0, 'N/A'
+
+    # Temel seviye yorumu
+    if rsi_now > 80:
+        level = f"{rsi_now:.0f} EXTREM ASIRI ALIM"
+    elif rsi_now > 70:
+        level = f"{rsi_now:.0f} asiri alim (isiniyor)"
+    elif rsi_now < 20:
+        level = f"{rsi_now:.0f} EXTREM ASIRI SATIM"
+    elif rsi_now < 30:
+        level = f"{rsi_now:.0f} asiri satim"
+    elif rsi_now > 50:
+        level = f"{rsi_now:.0f} bullish bolge"
+    else:
+        level = f"{rsi_now:.0f} bearish bolge"
+
+    # MA kesişimi
+    cross = ""
+    if rsi_ma_now is not None and not pd.isna(rsi_ma_now):
+        if rsi_prev <= rsi_ma_prev and rsi_now > rsi_ma_now:
+            cross = " + MA yukari kesti"
+        elif rsi_prev >= rsi_ma_prev and rsi_now < rsi_ma_now:
+            cross = " + MA asagi kesti"
+
+    # Divergence
+    div = ""
+    if divergence == 'bullish_divergence':
+        div = " + BULLISH DIVERGENCE"
+    elif divergence == 'bearish_divergence':
+        div = " + BEARISH DIVERGENCE"
+
+    desc = level + cross + div
+
+    # Vote logic - detayli
     if side == 'LONG':
+        # Guclu LONG: bullish div veya extrem oversold + yukari kesim
+        if divergence == 'bullish_divergence':
+            return 2, desc  # ekstra puan
+        if rsi_now < 30 and "yukari kesti" in cross:
+            return 2, desc
         if rsi_now < 35 and rsi_now > rsi_prev:
-            return 1, f"Oversold dönüş ({rsi_now:.0f})"
+            return 1, desc
+        if "yukari kesti" in cross and rsi_now > 45:
+            return 1, desc
         if rsi_now > 70:
-            return -1, f"Overbought ({rsi_now:.0f})"
-        return 0, f"Nötr ({rsi_now:.0f})"
+            return -1, desc
+        return 0, desc
     else:  # SHORT
+        if divergence == 'bearish_divergence':
+            return 2, desc
+        if rsi_now > 70 and "asagi kesti" in cross:
+            return 2, desc
         if rsi_now > 65 and rsi_now < rsi_prev:
-            return 1, f"Overbought dönüş ({rsi_now:.0f})"
+            return 1, desc
+        if "asagi kesti" in cross and rsi_now < 55:
+            return 1, desc
         if rsi_now < 30:
-            return -1, f"Oversold ({rsi_now:.0f})"
-        return 0, f"Nötr ({rsi_now:.0f})"
+            return -1, desc
+        return 0, desc
 
 
-def vote_macd(hist_now, hist_prev, side='LONG'):
-    """MACD histogram dönüş işareti"""
+def vote_macd(macd_line_now, macd_line_prev, signal_now, signal_prev,
+               hist_now, hist_prev, hist_3ago=None, side='LONG'):
+    """MACD profesyonel vote - cross, sifir bolgesi, histogram pikleri."""
     if pd.isna(hist_now) or pd.isna(hist_prev):
         return 0, 'N/A'
-    if side == 'LONG':
-        if hist_now > hist_prev and hist_now > 0:
-            return 1, f"Pozitif momentum ({hist_now:+.2f})"
-        if hist_now < hist_prev and hist_now < 0:
-            return -1, f"Negatif momentum ({hist_now:+.2f})"
+
+    above_signal = macd_line_now > signal_now
+    macd_pos = macd_line_now > 0
+    signal_pos = signal_now > 0
+    hist_pos = hist_now > 0
+
+    # Cross detection
+    bull_cross = macd_line_prev <= signal_prev and macd_line_now > signal_now
+    bear_cross = macd_line_prev >= signal_prev and macd_line_now < signal_now
+
+    # Histogram pikleri (sadece 3 bar varsa)
+    hist_growing = hist_3ago is not None and abs(hist_now) > abs(hist_prev) > abs(hist_3ago)
+    hist_shrinking = hist_3ago is not None and abs(hist_now) < abs(hist_prev) < abs(hist_3ago)
+
+    # Durum etiketi
+    if above_signal and macd_pos and signal_pos and hist_pos:
+        state = "TUM POZITIF (guclu bullish)"
+        long_score = 2
+        short_score = -2
+    elif not above_signal and not macd_pos and not signal_pos and not hist_pos:
+        state = "TUM NEGATIF (guclu bearish)"
+        long_score = -2
+        short_score = 2
+    elif above_signal and not macd_pos:
+        state = "Dipten donus baslangici"
+        long_score = 1
+        short_score = -1
+    elif not above_signal and macd_pos:
+        state = "Tepeden dusus baslangici"
+        long_score = -1
+        short_score = 1
+    elif above_signal and macd_pos:
+        state = "Bullish gelisiyor"
+        long_score = 1
+        short_score = -1
+    elif not above_signal and not macd_pos:
+        state = "Bearish gelisiyor"
+        long_score = -1
+        short_score = 1
     else:
-        if hist_now < hist_prev and hist_now < 0:
-            return 1, f"Negatif momentum ({hist_now:+.2f})"
-        if hist_now > hist_prev and hist_now > 0:
-            return -1, f"Pozitif momentum ({hist_now:+.2f})"
-    return 0, f"Nötr ({hist_now:+.2f})"
+        state = "Karisik"
+        long_score = 0
+        short_score = 0
+
+    # Cross bonusu
+    extras = []
+    if bull_cross:
+        extras.append("yukari cross")
+        if side == 'LONG': long_score += 1
+        else: short_score -= 1
+    if bear_cross:
+        extras.append("asagi cross")
+        if side == 'LONG': long_score -= 1
+        else: short_score += 1
+
+    # Histogram pikleri - momentum yorumu
+    if hist_pos and hist_shrinking:
+        extras.append("Hist pikler azaliyor (bullish zayifliyor)")
+        if side == 'LONG': long_score -= 1
+    elif not hist_pos and hist_shrinking:
+        extras.append("Hist neg pikler azaliyor (LONG firsati)")
+        if side == 'LONG': long_score += 1
+    elif hist_pos and hist_growing:
+        extras.append("Hist buyuyor (bullish guclu)")
+    elif not hist_pos and hist_growing:
+        extras.append("Hist neg buyuyor (bearish guclu)")
+        if side == 'SHORT': short_score += 1
+
+    desc = state
+    if extras:
+        desc += " | " + ", ".join(extras)
+
+    # Vote (clamp -2..+2)
+    if side == 'LONG':
+        v = max(-2, min(2, long_score))
+    else:
+        v = max(-2, min(2, short_score))
+    return v, desc
 
 
 def vote_bb(close, upper, middle, lower, side='LONG'):
@@ -273,10 +412,21 @@ def analyze_ticker(ticker, ma_value, side, source='borsapy'):
     # Distance to MA
     distance_atr = (current_price - ma_value) / current_atr if not pd.isna(ma_value) else None
 
-    # Vote'lar
+    # RSI MA ve divergence hesabi (profesyonel analiz)
+    rsi_ma_v = rsi_ma(rsi_v)
+    divergence = detect_rsi_divergence(close, rsi_v, lookback=20)
+
+    # Vote'lar - detayli
     votes = {}
-    votes['RSI'] = vote_rsi(rsi_v.iloc[last], rsi_v.iloc[prev], side)
-    votes['MACD'] = vote_macd(macd_h.iloc[last], macd_h.iloc[prev], side)
+    votes['RSI'] = vote_rsi(rsi_v.iloc[last], rsi_v.iloc[prev],
+                              rsi_ma_v.iloc[last] if not pd.isna(rsi_ma_v.iloc[last]) else None,
+                              rsi_ma_v.iloc[prev] if not pd.isna(rsi_ma_v.iloc[prev]) else None,
+                              divergence, side)
+    votes['MACD'] = vote_macd(macd_l.iloc[last], macd_l.iloc[prev],
+                                macd_s.iloc[last], macd_s.iloc[prev],
+                                macd_h.iloc[last], macd_h.iloc[prev],
+                                macd_h.iloc[-4] if len(macd_h) > 3 else None,
+                                side)
     votes['Bollinger'] = vote_bb(close.iloc[last], bb_u.iloc[last], bb_m.iloc[last], bb_l.iloc[last], side)
     votes['Ichimoku'] = vote_ichimoku(close.iloc[last], tenkan.iloc[last], kijun.iloc[last],
                                        sa.iloc[last], sb.iloc[last], side)
@@ -321,7 +471,7 @@ def generate_html(setups: list, output: str):
         '.badge-neg{background:#e74c3c;color:#fff;}',
         '</style></head><body>',
         f'<h1>Multi-Indicator Confirmation — {datetime.now():%Y-%m-%d %H:%M}</h1>',
-        f'<p>{len(setups)} setup analiz edildi. Score = (-6, +6) aralığında.</p>',
+        f'<p>{len(setups)} setup analiz edildi. Score = (-8, +8) aralığında. RSI ve MACD profesyonel analizle +2/-2 verebiliyor.</p>',
     ]
 
     # Skora göre sırala (yüksekten düşüğe)
@@ -360,10 +510,12 @@ def generate_html(setups: list, output: str):
 
     html.append('<div style="margin-top:30px;padding:15px;background:#1a1f29;border-radius:8px;">')
     html.append('<strong>Yorum kılavuzu:</strong><br>')
-    html.append('• Score +4..+6 (🥇 altın): 4+ indikatör onaylıyor → güçlü setup<br>')
-    html.append('• Score +2..+3 (🥈 gümüş): 2-3 confirmation → trade edilebilir, ama ek inceleme yap<br>')
+    html.append('• Score +5..+8 (🥇 altın): RSI/MACD profesyonel + 3+ indikatör onayı → güçlü setup<br>')
+    html.append('• Score +2..+4 (🥈 gümüş): Çoğunluk onaylıyor → trade edilebilir, ek inceleme yap<br>')
     html.append('• Score 0..+1: Zayıf veya karışık sinyal → beklemek daha iyi<br>')
     html.append('• Score negatif: Indikatörler ters yönde → BU TRADE\'I ALMA<br>')
+    html.append('<br><strong>RSI:</strong> divergence varsa +2, sadece kesim +1, asiri al/sat -1<br>')
+    html.append('<strong>MACD:</strong> TUM POZITIF +2, dipten donus +1, cross bonus +1, hist zayifliyor -1<br>')
     html.append('</div></body></html>')
 
     with open(output, 'w', encoding='utf-8') as f:
