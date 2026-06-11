@@ -236,16 +236,27 @@ def generate_html_report(strategies: list, portfolio: float, risk_pct: float, pa
         # Setup'lar tablosu
         html.append('<table class="trade-table">')
         html.append('<tr><th>#</th><th>MA</th><th>Per</th><th>Değer</th>'
-                    '<th>Uzak (ATR)</th><th>Durum</th><th>Yön</th>'
+                    '<th>Uzak (ATR)</th><th>Durum</th><th>Yön</th><th>Etiket</th>'
                     '<th>WR</th><th>Exp</th><th>ADR</th><th>Setup</th></tr>')
 
         actionable = []
+        ma_clusters = {'destek': [], 'direnc': []}  # Cluster icin (Cengiz: tum dosyalarda DESTEK/DIRENC)
         for i, row in enumerate(rows, 1):
             ma_val = row['current_ma_value']
             ma_type = row['ma_type']
             period = row['period']
             setup = evaluate_setup(current['price'], ma_val, current['atr'])
             side_class = 'long-side' if setup['side'] == 'LONG' else 'short-side'
+
+            # YENI: DESTEK/DIRENC etiketi
+            if ma_val < current['price']:
+                etiket = 'DESTEK'
+                etiket_cls = 'long-side'
+                ma_clusters['destek'].append((ma_type, period, ma_val))
+            else:
+                etiket = 'DIRENC'
+                etiket_cls = 'short-side'
+                ma_clusters['direnc'].append((ma_type, period, ma_val))
 
             html.append(f'<tr>')
             html.append(f'<td>{i}</td>')
@@ -254,6 +265,7 @@ def generate_html_report(strategies: list, portfolio: float, risk_pct: float, pa
             html.append(f'<td>{setup["distance_atr"]:+.2f}</td>')
             html.append(f'<td class="status-{setup["action"]}">{setup["status"]}</td>')
             html.append(f'<td class="{side_class}">{setup["side"]}</td>')
+            html.append(f'<td class="{etiket_cls}">{etiket}</td>')
             html.append(f'<td>{row["wr_pct"]:.0f}%</td>')
             html.append(f'<td>{row["expectancy"]:+.2f}</td>')
             html.append(f'<td>{row.get("adr", 0):.2f}</td>')
@@ -264,6 +276,54 @@ def generate_html_report(strategies: list, portfolio: float, risk_pct: float, pa
                 actionable.append((row, setup))
 
         html.append('</table>')
+
+        # MA Kumeleri haritasi (Destek/Direnc) - Cengiz: tum dosyalarda olsun
+        if ma_clusters['destek'] or ma_clusters['direnc']:
+            html.append('<h3 style="color:#7be2ff;margin-top:15px;">🎯 MA Kümeleri (Destek/Direnç)</h3>')
+            html.append('<div style="background:#0f1419;padding:10px;border-radius:6px;font-family:monospace;">')
+
+            atr_v = current['atr']
+            curr_price = current['price']
+
+            def fmt(p):
+                if curr_price < 10: return f"{p:.4f}"
+                elif curr_price < 100: return f"{p:.3f}"
+                else: return f"{p:.2f}"
+
+            def cluster_mas(mas, threshold_atr=0.5):
+                if not mas: return []
+                sorted_mas = sorted(mas, key=lambda x: x[2])
+                clusters = [[sorted_mas[0]]]
+                for ma in sorted_mas[1:]:
+                    if abs(ma[2] - clusters[-1][-1][2]) <= threshold_atr * atr_v:
+                        clusters[-1].append(ma)
+                    else:
+                        clusters.append([ma])
+                return clusters
+
+            # Direnclar
+            direnc_clusters = cluster_mas(ma_clusters['direnc'])
+            for cl in sorted(direnc_clusters, key=lambda c: c[0][2]):
+                vals = [m[2] for m in cl]
+                tags = ', '.join(f"{m[0]}{m[1]}" for m in cl)
+                if len(cl) > 1:
+                    html.append(f'<div style="color:#ff8c69;">🔴 {fmt(min(vals))}-{fmt(max(vals))}: {tags} <strong>({len(cl)} MA cluster)</strong></div>')
+                else:
+                    html.append(f'<div style="color:#ff8c69;">🔴 {fmt(vals[0])}: {tags}</div>')
+
+            html.append(f'<div style="color:#7be2ff;font-weight:bold;border-top:1px solid #5fb3ff;border-bottom:1px solid #5fb3ff;padding:4px 0;margin:8px 0;">━━ FIYAT: {fmt(curr_price)} ━━</div>')
+
+            # Destekler (asagidan yukariya en yakin)
+            destek_clusters = cluster_mas(ma_clusters['destek'])
+            for cl in sorted(destek_clusters, key=lambda c: -c[0][2]):
+                vals = [m[2] for m in cl]
+                tags = ', '.join(f"{m[0]}{m[1]}" for m in cl)
+                if len(cl) > 1:
+                    html.append(f'<div style="color:#7fc97f;">🟢 {fmt(min(vals))}-{fmt(max(vals))}: {tags} <strong>({len(cl)} MA cluster)</strong></div>')
+                else:
+                    html.append(f'<div style="color:#7fc97f;">🟢 {fmt(vals[0])}: {tags}</div>')
+
+            html.append('</div>')
 
         # Aksiyon alinabilecek setup'lar icin detay
         if actionable:
