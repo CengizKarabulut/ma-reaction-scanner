@@ -437,7 +437,7 @@ def _detect_instrument_type(symbol: str) -> str:
     return 'bist'
 
 
-def fetch_data(ticker, period='3y', source='yfinance'):
+def fetch_data(ticker, period='3y', source='yfinance', interval='1d'):
     """Veri çek - Multi-instrument destekli
 
     borsapy: BIST + (varsa) crypto, FX, metal
@@ -448,10 +448,20 @@ def fetch_data(ticker, period='3y', source='yfinance'):
 
     if source == 'borsapy' and HAS_BORSAPY:
         try:
-            start_date = _period_to_start_date(period)
-            # Default: bp.Ticker - BIST + büyük olasılıkla diğerleri için de çalışır
-            t = bp.Ticker(base_symbol)
-            df = t.history(start=start_date)
+            # Intraday icin 60-120 gun veri yeterli
+            if interval in ('1h', '4h'):
+                from datetime import timedelta as _td
+                days_intraday = 60 if interval == '1h' else 120
+                start_date = (datetime.now() - _td(days=days_intraday)).strftime('%Y-%m-%d')
+                t = bp.Ticker(base_symbol)
+                try:
+                    df = t.history(start=start_date, interval=interval)
+                except TypeError:
+                    df = t.history(start=start_date)
+            else:
+                start_date = _period_to_start_date(period)
+                t = bp.Ticker(base_symbol)
+                df = t.history(start=start_date)
 
             # Yetersiz veri ise enstrüman tipine göre alternatif sınıf dene
             if (df is None or df.empty or len(df) < 50):
@@ -502,7 +512,14 @@ def fetch_data(ticker, period='3y', source='yfinance'):
         else:
             symbol = base_symbol
 
-        df = yf.download(symbol, period=period, progress=False, auto_adjust=True)
+        if interval == '1h':
+            df = yf.download(symbol, period='60d', interval='1h', progress=False, auto_adjust=True)
+        elif interval == '4h':
+            df = yf.download(symbol, period='120d', interval='1h', progress=False, auto_adjust=True)
+            if not df.empty:
+                df = df.resample('4h').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
+        else:
+            df = yf.download(symbol, period=period, progress=False, auto_adjust=True)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.droplevel(1)
         return df
@@ -741,8 +758,8 @@ def main():
                        choices=['yfinance', 'borsapy'],
                        help='Veri kaynağı: borsapy (TradingView, BIST için tavsiye) veya yfinance')
     parser.add_argument('--interval', type=str, default='1d',
-                       choices=['1d', '1wk', '1mo'],
-                       help='Zaman dilimi: 1d (gunluk), 1wk (haftalik), 1mo (aylik)')
+                       choices=['1h', '4h', '1d', '1wk', '1mo'],
+                       help='Zaman dilimi: 1h, 4h (intraday), 1d, 1wk, 1mo')
     parser.add_argument('--min_touches', type=int, default=10)
     parser.add_argument('--min_hma_period', type=int, default=20,
                        help='HMA icin minimum periyot (kisa HMA fiyata yapisik olur)')
