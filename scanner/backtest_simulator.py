@@ -340,7 +340,7 @@ def compute_stats(trades: list, portfolio: float) -> dict:
     }
 
 
-def generate_html(all_trades: list, stats_per_combo: dict, overall_stats: dict, portfolio: float, output: str):
+def generate_html(all_trades: list, stats_per_combo: dict, overall_stats: dict, portfolio: float, output: str, per_ticker_info: dict = None):
     html = [
         '<!DOCTYPE html>',
         '<html lang="tr"><head><meta charset="utf-8">',
@@ -398,6 +398,64 @@ def generate_html(all_trades: list, stats_per_combo: dict, overall_stats: dict, 
                     f'<td>{s["max_drawdown_pct"]:.1f}%</td></tr>')
     html.append('</table>')
 
+    # YENI: Her hisse icin ANLIK DURUM + MA CLUSTER (Cengiz: tum taramalarda olsun)
+    if per_ticker_info:
+        html.append('<h2>📊 Anlık Durum — Fiyat + MA Cluster (Destek/Direnç)</h2>')
+        for tk, info in per_ticker_info.items():
+            curr_p = info['price']
+            atr_v = info['atr']
+            mas = info['robust_mas']
+
+            def fmt_p(p, ref=curr_p):
+                if ref < 10: return f"{p:.4f}"
+                elif ref < 100: return f"{p:.3f}"
+                else: return f"{p:.2f}"
+
+            html.append(f'<div style="background:#1a1f29;padding:12px;border-radius:6px;margin:12px 0;">')
+            html.append(f'<h3 style="margin:0 0 8px 0;color:#7be2ff;">{tk} — Fiyat: {fmt_p(curr_p)} TL | ATR: {atr_v:.2f}</h3>')
+
+            if mas and len(mas) >= 1:
+                destek_mas = [m for m in mas if m['value'] < curr_p]
+                direnc_mas = [m for m in mas if m['value'] >= curr_p]
+
+                html.append('<div style="background:#0f1419;padding:8px;border-radius:4px;font-family:monospace;font-size:13px;">')
+
+                # Cluster algoritmasi
+                def cluster_local(items, threshold_atr=0.5):
+                    if not items: return []
+                    sorted_i = sorted(items, key=lambda x: x['value'])
+                    clusters = [[sorted_i[0]]]
+                    for i in sorted_i[1:]:
+                        if abs(i['value'] - clusters[-1][-1]['value']) <= threshold_atr * atr_v:
+                            clusters[-1].append(i)
+                        else:
+                            clusters.append([i])
+                    return clusters
+
+                # Direncler
+                for cl in sorted(cluster_local(direnc_mas), key=lambda c: c[0]['value']):
+                    vals = [m['value'] for m in cl]
+                    tags = ', '.join(f"{m['ma_type']}{m['period']}" for m in cl)
+                    if len(cl) > 1:
+                        html.append(f'<div style="color:#ff8c69;">🔴 {fmt_p(min(vals))}-{fmt_p(max(vals))}: {tags} <strong>({len(cl)} MA)</strong></div>')
+                    else:
+                        html.append(f'<div style="color:#ff8c69;">🔴 {fmt_p(vals[0])}: {tags}</div>')
+
+                html.append(f'<div style="color:#7be2ff;font-weight:bold;border-top:1px solid #5fb3ff;border-bottom:1px solid #5fb3ff;padding:3px 0;margin:5px 0;">━━ FIYAT: {fmt_p(curr_p)} ━━</div>')
+
+                # Destekler
+                for cl in sorted(cluster_local(destek_mas), key=lambda c: -c[0]['value']):
+                    vals = [m['value'] for m in cl]
+                    tags = ', '.join(f"{m['ma_type']}{m['period']}" for m in cl)
+                    if len(cl) > 1:
+                        html.append(f'<div style="color:#7fc97f;">🟢 {fmt_p(min(vals))}-{fmt_p(max(vals))}: {tags} <strong>({len(cl)} MA)</strong></div>')
+                    else:
+                        html.append(f'<div style="color:#7fc97f;">🟢 {fmt_p(vals[0])}: {tags}</div>')
+
+                html.append('</div>')
+
+            html.append('</div>')
+
     # Trade listesi
     if all_trades:
         html.append('<h2>Trade Geçmişi (son 50)</h2>')
@@ -452,6 +510,7 @@ def main():
 
     all_trades = []
     stats_per_combo = {}
+    per_ticker_info = {}  # YENI: her hisse icin fiyat + robust MA degerleri (cluster icin)
 
     for tk in tickers:
         sub = df[df['ticker'] == tk]
@@ -466,12 +525,30 @@ def main():
         if price_df is None:
             continue
 
+        # YENI: ANLIK FIYAT + ATR + Robust MA degerleri
+        curr_price = float(price_df['Close'].iloc[-1])
+        atr_s = compute_atr(price_df)
+        curr_atr = float(atr_s.iloc[-1]) if not pd.isna(atr_s.iloc[-1]) else curr_price * 0.02
+        all_robust_mas = []
+
         for _, row in top.iterrows():
             ma_type = row['ma_type']
             period = int(row['period'])
             ma = compute_ma(ma_type, price_df['Close'], price_df['Volume'], period)
             if ma is None:
                 continue
+
+            # YENI: Bu MA'nin SON degeri (cluster icin)
+            ma_last = float(ma.iloc[-1]) if not pd.isna(ma.iloc[-1]) else None
+            if ma_last is not None:
+                all_robust_mas.append({
+                    'ma_type': ma_type,
+                    'period': period,
+                    'value': ma_last,
+                    'wr_pct': row['wr_pct'],
+                    'touches': int(row.get('touches', 0)),
+                })
+
             trades = simulate_trades(
                 price_df, ma, ma_type, period, tk,
                 portfolio=args.portfolio, risk_pct=args.risk_pct,
@@ -483,8 +560,15 @@ def main():
                 print(f"  {tk} {ma_type}{period}: {len(trades)} trade, "
                       f"PnL={sum(t['pnl'] for t in trades):+,.0f}")
 
+        # Hisse seviyesi anlik bilgi
+        per_ticker_info[tk] = {
+            'price': curr_price,
+            'atr': curr_atr,
+            'robust_mas': all_robust_mas,
+        }
+
     overall = compute_stats(all_trades, args.portfolio)
-    generate_html(all_trades, stats_per_combo, overall, args.portfolio, args.output)
+    generate_html(all_trades, stats_per_combo, overall, args.portfolio, args.output, per_ticker_info)
     print(f"\n✓ Toplam {len(all_trades)} trade, Net PnL: {overall.get('total_pnl', 0):+,.0f} TL")
 
 
