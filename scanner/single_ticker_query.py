@@ -70,21 +70,22 @@ def fetch_data(ticker, source='borsapy', period_days=1100, interval='1d'):
     base = ticker.replace('.IS', '').upper()
     inst_type = detect_instrument_type(base)
 
+    # KRİTİK: borsapy intraday DESTEKLEMİYOR - direkt yfinance'a yönlendir
+    if interval in ('1h', '4h'):
+        if not HAS_YFINANCE:
+            raise RuntimeError(
+                f"Intraday tarama (1h/4h) icin yfinance gerekli. "
+                f"borsapy intraday desteklemiyor."
+            )
+        source = 'yfinance'
+        print(f"  ⏱ {base}: {interval} icin yfinance kullaniliyor (borsapy intraday yok)")
+
     if source == 'borsapy' and HAS_BORSAPY:
         try:
             start = (datetime.now() - timedelta(days=period_days)).strftime('%Y-%m-%d')
-            # borsapy bp.Ticker tüm enstrümanları (BIST/FX/crypto) destekliyor olabilir
-            # Eğer ayrı sınıflar gerekiyorsa burada dispatch yap
+            # borsapy SADECE günlük çeker (intraday yok)
             t = bp.Ticker(base)
-            if interval in ('1h', '4h'):
-                from datetime import timedelta as _td
-                short_start = (datetime.now() - _td(days=60 if interval == '1h' else 120)).strftime('%Y-%m-%d')
-                try:
-                    df = t.history(start=short_start, interval=interval)
-                except TypeError:
-                    df = t.history(start=short_start)
-            else:
-                df = t.history(start=start)
+            df = t.history(start=start)
 
             if df is None or df.empty or len(df) < 50:
                 # FX/Crypto için alternatif sınıf dene
@@ -382,7 +383,21 @@ def mini_scan(ticker, source='borsapy', interval='1d', strict=False):
     if df is None:
         return None, None, None
 
-    print(f"  Veri: {len(df)} bar, {df.index[0].date()} - {df.index[-1].date()}")
+    # KRİTİK: 1wk/1mo için günlük veriyi resample et
+    if interval == '1wk':
+        df = df.resample('W').agg({
+            'Open':'first', 'High':'max', 'Low':'min',
+            'Close':'last', 'Volume':'sum'
+        }).dropna()
+        print(f"  ⟲ Gunluk→Haftalik resample: {len(df)} hafta")
+    elif interval == '1mo':
+        df = df.resample('ME').agg({
+            'Open':'first', 'High':'max', 'Low':'min',
+            'Close':'last', 'Volume':'sum'
+        }).dropna()
+        print(f"  ⟲ Gunluk→Aylik resample: {len(df)} ay")
+
+    print(f"  Veri: {len(df)} bar, {df.index[0].date()} - {df.index[-1].date()}, interval={interval}")
     atr_v = atr_calc(df)
     close = df['Close'].values
     volume = df['Volume'].values
