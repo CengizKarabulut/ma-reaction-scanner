@@ -18,8 +18,12 @@ import pandas as pd
 import requests
 
 
-def send_telegram(token: str, chat_id: str, text: str, parse_mode: str = "Markdown"):
-    """Telegram'a mesaj gönder (uzunsa parçala — limit 4096)"""
+def send_telegram(token: str, chat_id: str, text: str, parse_mode: str = "Markdown") -> bool:
+    """Telegram'a mesaj gönder (uzunsa parçala — limit 4096).
+
+    Markdown parse hatasi olursa otomatik plain text fallback yapar.
+    Returns: True if all chunks sent successfully, False otherwise.
+    """
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
     MAX = 4000
@@ -42,17 +46,42 @@ def send_telegram(token: str, chat_id: str, text: str, parse_mode: str = "Markdo
         if current:
             chunks.append('\n'.join(current))
 
+    import re
+    all_ok = True
+
     for i, chunk in enumerate(chunks):
         if i > 0:
-            chunk = f"_(devam {i+1}/{len(chunks)})_\n" + chunk
+            chunk = f"(devam {i+1}/{len(chunks)})\n" + chunk
+
+        # 1. ONCE Markdown ile dene
         resp = requests.post(url, json={
             'chat_id': chat_id,
             'text': chunk,
             'parse_mode': parse_mode,
             'disable_web_page_preview': True,
         }, timeout=20)
-        if not resp.ok:
-            print(f"Telegram error: {resp.status_code} {resp.text}", file=sys.stderr)
+
+        if resp.ok:
+            print(f"  ✓ Chunk {i+1}/{len(chunks)} Markdown OK ({len(chunk)} char)", file=sys.stderr)
+            continue
+
+        # 2. Markdown basarisizsa - markdown karakterlerini TEMIZLE ve plain dene
+        print(f"  ⚠️ Markdown hatasi chunk {i+1}: {resp.text[:200]}", file=sys.stderr)
+        plain = chunk.replace('*', '').replace('`', '')
+        plain = re.sub(r'_([^_\n]+)_', r'\1', plain)  # _xxx_ → xxx
+
+        resp2 = requests.post(url, json={
+            'chat_id': chat_id,
+            'text': plain,
+            'disable_web_page_preview': True,
+        }, timeout=20)
+        if resp2.ok:
+            print(f"  ✓ Chunk {i+1}/{len(chunks)} plain text OK", file=sys.stderr)
+        else:
+            print(f"  ✗ Chunk {i+1} plain text de basarisiz: {resp2.status_code} {resp2.text[:300]}", file=sys.stderr)
+            all_ok = False
+
+    return all_ok
 
 
 def _format_cross_stock_top(df: pd.DataFrame, n: int = 20) -> list:
@@ -83,7 +112,7 @@ def _format_ma_family_stats(df: pd.DataFrame, n: int = 12) -> list:
     lines.append(f"🎯 *En Yaygın MA Aileleri (hisse başı top 5'te görünme)*")
     top_per_stock = (
         df.groupby('ticker', group_keys=False)
-        .apply(lambda g: g.nlargest(5, 'composite_score'))
+        .apply(lambda g: g.nlargest(5, 'composite_score'), include_groups=False)
     )
     pop = (
         top_per_stock.groupby(['ma_type', 'period']).size()
@@ -168,9 +197,9 @@ def format_daily(df: pd.DataFrame) -> str:
                             if curr_price < 10: vf = f"{ma_val:.4f}"
                             elif curr_price < 100: vf = f"{ma_val:.3f}"
                             else: vf = f"{ma_val:.2f}"
-                            etiket = 'D' if ma_val < curr_price else 'R'
-                            lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
-                                         f"@{vf} [{etiket}] "
+                            etiket = '🟢' if ma_val < curr_price else '🔴'
+                            lines.append(f"  {etiket} {r['ma_type']:<5} {r['period']:<4} "
+                                         f"@{vf} "
                                          f"WR={r['wr_pct']:.0f}% Exp={r['expectancy']:+.2f}")
                         else:
                             lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
@@ -209,9 +238,10 @@ def format_daily(df: pd.DataFrame) -> str:
                     if curr_price < 10: vf = f"{ma_val:.4f}"
                     elif curr_price < 100: vf = f"{ma_val:.3f}"
                     else: vf = f"{ma_val:.2f}"
-                    etiket = 'D' if ma_val < curr_price else 'R'
-                    lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
-                                 f"@{vf} [{etiket}] "
+                    # [D]/[R] yerine emoji - Markdown link sozdizimi sorunu olmaz
+                    etiket = '🟢' if ma_val < curr_price else '🔴'
+                    lines.append(f"  {etiket} {r['ma_type']:<5} {r['period']:<4} "
+                                 f"@{vf} "
                                  f"WR={r['wr_pct']:.0f}% Skor={r['composite_score']:.1f} {robust_mark}")
                 else:
                     lines.append(f"  {r['ma_type']:<5} {r['period']:<4} "
@@ -258,29 +288,53 @@ def format_weekly(df: pd.DataFrame) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--csv', required=True)
+    parser.add_argument('--csv', required=False)
     parser.add_argument('--mode', choices=['daily', 'weekly'], default='daily')
+    parser.add_argument('--test', action='store_true',
+                       help='Sadece basit test mesaji gonder (CSV gerekmez)')
     args = parser.parse_args()
 
     token = os.environ.get('TELEGRAM_BOT_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
 
     if not token or not chat_id:
-        print("Hata: TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID env gerekli", file=sys.stderr)
+        print("✗ Hata: TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID env gerekli", file=sys.stderr)
+        sys.exit(1)
+
+    # Test modu
+    if args.test:
+        test_msg = "🧪 Test mesajı — Telegram bağlantısı çalışıyor!\n\n" \
+                   "Eğer bu mesajı görüyorsan secrets doğru, bot aktif."
+        success = send_telegram(token, chat_id, test_msg, parse_mode=None)
+        if success:
+            print("✓ Test mesajı gönderildi")
+            sys.exit(0)
+        else:
+            print("✗ Test mesajı GİTMEDİ", file=sys.stderr)
+            sys.exit(1)
+
+    if not args.csv:
+        print("✗ Hata: --csv gerekli (test için --test kullan)", file=sys.stderr)
         sys.exit(1)
 
     if not os.path.exists(args.csv):
-        print(f"Hata: CSV bulunamadı: {args.csv}", file=sys.stderr)
+        print(f"✗ Hata: CSV bulunamadı: {args.csv}", file=sys.stderr)
         sys.exit(1)
 
     df = pd.read_csv(args.csv)
     if len(df) == 0:
-        send_telegram(token, chat_id, "⚠️ BIST tarama sonucu boş — veri çekme sorunu olabilir.")
+        send_telegram(token, chat_id, "⚠️ BIST tarama sonucu boş — veri çekme sorunu olabilir.",
+                       parse_mode=None)
         return
 
     text = format_daily(df) if args.mode == 'daily' else format_weekly(df)
-    send_telegram(token, chat_id, text)
-    print(f"Telegram gönderildi ({args.mode}, {df['ticker'].nunique()} hisse, {len(df)} kayıt)")
+    print(f"Mesaj uzunlugu: {len(text)} char, {text.count(chr(10))} satir")
+    success = send_telegram(token, chat_id, text)
+    if success:
+        print(f"✓ Telegram BAŞARILI ({args.mode}, {df['ticker'].nunique()} hisse, {len(df)} kayıt)")
+    else:
+        print(f"✗ Telegram BAŞARISIZ — log'larda hata detayına bak", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':
