@@ -43,17 +43,28 @@ except ImportError:
     HAS_YFINANCE = False
 
 
+def is_bist_index(symbol):
+    """BIST endeks sembolu algilama (X ile baslar, 4+ karakter)."""
+    s = symbol.upper().replace('.IS', '')
+    return s.startswith('X') and len(s) >= 4
+
+
 def fetch_current_data(ticker: str, source: str = 'borsapy') -> dict:
-    """Hissenin guncel fiyatini ve ATR'sini cek."""
+    """Hissenin guncel fiyatini ve ATR'sini cek. BIST endeksleri icin bp.Index() kullanir."""
     base = ticker.replace('.IS', '')
+    is_index = is_bist_index(base)
 
     try:
         if source == 'borsapy' and HAS_BORSAPY:
             from datetime import datetime, timedelta
             start = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
-            df = bp.Ticker(base).history(start=start)
+            if is_index and hasattr(bp, 'Index'):
+                df = bp.Index(base).history(start=start)
+            else:
+                df = bp.Ticker(base).history(start=start)
         elif HAS_YFINANCE:
-            df = yf.download(f"{base}.IS", period='2mo', progress=False, auto_adjust=True)
+            symbol = f"^{base}" if is_index else f"{base}.IS"
+            df = yf.download(symbol, period='2mo', progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
         else:
@@ -61,6 +72,10 @@ def fetch_current_data(ticker: str, source: str = 'borsapy') -> dict:
 
         if df is None or len(df) < 14:
             return None
+
+        # Endekslerde Volume olmayabilir
+        if 'Volume' not in df.columns or df['Volume'].isna().all():
+            df['Volume'] = 1.0
 
         # ATR (14 period)
         high = df['High'].values
