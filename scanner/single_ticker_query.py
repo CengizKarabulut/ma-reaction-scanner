@@ -368,11 +368,16 @@ def atr_calc(df, p=14):
 
 # === Mini scan (CSV yoksa) ===
 
-def mini_scan(ticker, source='borsapy', interval='1d'):
-    """Tek hisse için tüm MA kombinasyonlarını tara."""
+def mini_scan(ticker, source='borsapy', interval='1d', strict=False):
+    """Tek hisse için tüm MA kombinasyonlarını tara.
+
+    strict=True: Sadece normal filter (walk-forward seviyesinde sıkı)
+    strict=False (default): Normal + fallback (gevşek mod) — hicbir sey bulamazsa gevsek dener
+    """
     interval_label = {'1h':'1 saatlik', '4h':'4 saatlik', '1d':'günlük',
                        '1wk':'haftalık', '1mo':'aylık'}.get(interval, interval)
     print(f"  {ticker} için {interval_label} canlı tarama başlıyor...")
+    print(f"  Mod: {'SIKI (sadece robust)' if strict else 'NORMAL (fallback dahil)'}")
     df, inst_type = fetch_data(ticker, source=source, interval=interval)
     if df is None:
         return None, None, None
@@ -499,6 +504,10 @@ def mini_scan(ticker, source='borsapy', interval='1d'):
         print(f"  Hicbir MA filtreyi gecmedi. Atlanan nedenler: {skipped_reasons}")
         print(f"  Min touches: {min_touches_eff}, Min ADR: {min_adr_eff}")
 
+        if strict:
+            print(f"  STRICT mod: fallback yapilmiyor, bos sonuc")
+            return pd.DataFrame(results), df, inst_type
+
         # FALLBACK MODE: Cok gevsek filtre ile tekrar dene
         # Tek hisse merak edildiginde en azindan bir bilgi gostermek icin
         print(f"  FALLBACK: Cok gevsek filtre ile tekrar deniyor...")
@@ -579,7 +588,8 @@ def mini_scan(ticker, source='borsapy', interval='1d'):
 
 # === Ana fonksiyon ===
 
-def analyze_ticker(ticker, csv_path=None, source='borsapy', interval='1d', portfolio=100000, risk_pct=1.0):
+def analyze_ticker(ticker, csv_path=None, source='borsapy', interval='1d',
+                    portfolio=100000, risk_pct=1.0, strict=False):
     ticker = ticker.upper().strip()
 
     # 1. MA listesi al (CSV varsa filtreleyerek, yoksa canli tarama)
@@ -596,7 +606,7 @@ def analyze_ticker(ticker, csv_path=None, source='borsapy', interval='1d', portf
 
     scan_df = None
     if not csv_path:
-        scan_df, price_df, inst_type = mini_scan(ticker, source=source, interval=interval)
+        scan_df, price_df, inst_type = mini_scan(ticker, source=source, interval=interval, strict=strict)
         if scan_df is None:
             # Veri çekme tamamen başarısız
             print(f"  {ticker}: veri kaynağına erişilemedi")
@@ -804,6 +814,8 @@ def main():
     p.add_argument('--interval', type=str, default='1d',
                    choices=['1h', '4h', '1d', '1wk', '1mo'],
                    help='Zaman dilimi (1h, 4h intraday icin)')
+    p.add_argument('--strict', action='store_true',
+                   help='Sadece robust MA goster (gevsek fallback filter kapali)')
     p.add_argument('--portfolio', type=float, default=100000)
     p.add_argument('--risk_pct', type=float, default=1.0)
     p.add_argument('--scan-fresh', action='store_true', help='CSV varsa bile yeniden tara')
@@ -814,7 +826,8 @@ def main():
     csv = '' if args.scan_fresh else args.csv
     result = analyze_ticker(args.ticker, csv_path=csv, source=args.source,
                             interval=args.interval,
-                            portfolio=args.portfolio, risk_pct=args.risk_pct)
+                            portfolio=args.portfolio, risk_pct=args.risk_pct,
+                            strict=args.strict)
     if not result:
         print(f"HATA: {args.ticker} için veri çekilemedi")
         sys.exit(1)
