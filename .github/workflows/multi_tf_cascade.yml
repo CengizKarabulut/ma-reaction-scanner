@@ -29,6 +29,10 @@ on:
         description: 'Walk-forward analizi atla (hızlı test için)'
         required: false
         default: 'false'
+      cascade_type:
+        description: 'Cascade tipi: daily (1d+1wk+1mo) veya intraday (1h+4h+1d)'
+        required: false
+        default: 'daily'
 
 jobs:
   cascade-scan:
@@ -76,15 +80,42 @@ jobs:
             echo "wf_arg=" >> $GITHUB_OUTPUT
           fi
 
-      - name: 1️⃣ Daily Tarama (1d)
+      - name: Cascade interval'larını belirle
+        id: cascade
+        run: |
+          # cascade_type: daily (1d+1wk+1mo) veya intraday (1h+4h+1d)
+          CT="${{ github.event.inputs.cascade_type || 'daily' }}"
+          if [ "$CT" = "intraday" ]; then
+            echo "interval_1=1h" >> $GITHUB_OUTPUT
+            echo "interval_2=4h" >> $GITHUB_OUTPUT
+            echo "interval_3=1d" >> $GITHUB_OUTPUT
+            echo "period_1=60d" >> $GITHUB_OUTPUT
+            echo "period_2=120d" >> $GITHUB_OUTPUT
+            echo "period_3=2y" >> $GITHUB_OUTPUT
+            echo "label_1=1 Saatlik" >> $GITHUB_OUTPUT
+            echo "label_2=4 Saatlik" >> $GITHUB_OUTPUT
+            echo "label_3=Günlük" >> $GITHUB_OUTPUT
+          else
+            echo "interval_1=1d" >> $GITHUB_OUTPUT
+            echo "interval_2=1wk" >> $GITHUB_OUTPUT
+            echo "interval_3=1mo" >> $GITHUB_OUTPUT
+            echo "period_1=${{ github.event.inputs.period || '3y' }}" >> $GITHUB_OUTPUT
+            echo "period_2=${{ github.event.inputs.period || '3y' }}" >> $GITHUB_OUTPUT
+            echo "period_3=5y" >> $GITHUB_OUTPUT
+            echo "label_1=Günlük" >> $GITHUB_OUTPUT
+            echo "label_2=Haftalık" >> $GITHUB_OUTPUT
+            echo "label_3=Aylık" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 1️⃣ TF1 Tarama (${{ steps.cascade.outputs.label_1 }})
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             ${{ steps.prep.outputs.tickers_arg }} \
-            --source ${{ github.event.inputs.source || 'borsapy' }} --interval 1d \
-            --period ${{ github.event.inputs.period || '3y' }} \
+            --source ${{ github.event.inputs.source || 'borsapy' }} --interval ${{ steps.cascade.outputs.interval_1 }} \
+            --period ${{ steps.cascade.outputs.period_1 }} \
             --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             ${{ steps.wf.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
             --report html --top_n 20
 
       # ============================================================
@@ -95,7 +126,7 @@ jobs:
         run: |
           python -c "
           import pandas as pd
-          df = pd.read_csv('reports/scan_${{ steps.prep.outputs.ts }}_1d.csv')
+          df = pd.read_csv('reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv')
           if 'wf_robust' in df.columns:
               robust = df[df['wf_robust']==True]
               top_tickers = robust.groupby('ticker').size().nlargest(50).index.tolist()
@@ -103,41 +134,41 @@ jobs:
               top_tickers = df.nlargest(100, 'composite_score')['ticker'].unique()[:50].tolist()
           with open('robust_tickers.txt', 'w') as f:
               f.write(','.join(top_tickers))
-          print(f'Daily robust: {len(top_tickers)} hisse')
+          print(f'TF1 robust: {len(top_tickers)} hisse')
           "
           ROBUST_LIST=$(cat robust_tickers.txt)
           echo "robust_list=$ROBUST_LIST" >> $GITHUB_OUTPUT
 
       # ============================================================
-      # STEP 3: WEEKLY TARAMA
+      # STEP 3: TF2 TARAMA (cascade_type'a bağlı: 4h veya 1wk)
       # ============================================================
-      - name: 3️⃣ Weekly Tarama (1wk)
+      - name: 3️⃣ TF2 Tarama (${{ steps.cascade.outputs.label_2 }})
         if: steps.filter.outputs.robust_list != ''
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             --tickers "${{ steps.filter.outputs.robust_list }}" \
-            --source ${{ github.event.inputs.source || 'borsapy' }} --interval 1wk \
-            --period ${{ github.event.inputs.period || '3y' }} \
+            --source ${{ github.event.inputs.source || 'borsapy' }} --interval ${{ steps.cascade.outputs.interval_2 }} \
+            --period ${{ steps.cascade.outputs.period_2 }} \
             --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             ${{ steps.wf.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}_1wk.csv \
+            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.csv \
             --report html --top_n 20 \
             --min_touches 8 \
             --separation_mult 2.0
 
       # ============================================================
-      # STEP 4: MONTHLY TARAMA (FIX: walk-forward AÇIK, daha gevsek)
+      # STEP 4: TF3 TARAMA (cascade_type'a bağlı: 1d veya 1mo)
       # ============================================================
-      - name: 4️⃣ Monthly Tarama (1mo)
+      - name: 4️⃣ TF3 Tarama (${{ steps.cascade.outputs.label_3 }})
         if: steps.filter.outputs.robust_list != ''
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             --tickers "${{ steps.filter.outputs.robust_list }}" \
-            --source ${{ github.event.inputs.source || 'borsapy' }} --interval 1mo \
-            --period 5y \
+            --source ${{ github.event.inputs.source || 'borsapy' }} --interval ${{ steps.cascade.outputs.interval_3 }} \
+            --period ${{ steps.cascade.outputs.period_3 }} \
             --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             ${{ steps.wf.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}_1mo.csv \
+            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.csv \
             --report html --top_n 20 \
             --min_touches 3 \
             --separation_mult 1.5 \
@@ -151,20 +182,20 @@ jobs:
       - name: 5️⃣ Cross-Timeframe Consensus
         run: |
           python scanner/cross_tf_consensus.py \
-            --daily reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
-            --weekly reports/scan_${{ steps.prep.outputs.ts }}_1wk.csv \
-            --monthly reports/scan_${{ steps.prep.outputs.ts }}_1mo.csv \
+            --daily reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
+            --weekly reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.csv \
+            --monthly reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.csv \
             --output reports/consensus_${{ steps.prep.outputs.ts }}.html \
             --csv-out reports/consensus_${{ steps.prep.outputs.ts }}.csv
         continue-on-error: true
 
       # ============================================================
-      # STEP 6: STRATEGY GENERATOR (sadece consensus altın+gümüş için)
+      # STEP 6: STRATEGY GENERATOR (TF1 CSV'sinden somut trade onerileri)
       # ============================================================
       - name: 6️⃣ Strategy Raporu
         run: |
           python scanner/strategy_generator.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
             --all-robust --top_ma 5 \
             --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
             --output reports/strategies_${{ steps.prep.outputs.ts }}.html
@@ -176,7 +207,7 @@ jobs:
       - name: 7️⃣ Backtest Simulator
         run: |
           python scanner/backtest_simulator.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
             --all-robust --top_ma 3 \
             --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
             --output reports/backtest_${{ steps.prep.outputs.ts }}.html
@@ -188,7 +219,7 @@ jobs:
       - name: 8️⃣ Multi-Indicator Confirmation
         run: |
           python scanner/multi_indicator_confirm.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
             --all-robust --n_tickers 20 \
             --output reports/confirm_${{ steps.prep.outputs.ts }}.html
         continue-on-error: true
@@ -203,7 +234,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python scanner/notifier.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
             --mode daily
         continue-on-error: true
 
