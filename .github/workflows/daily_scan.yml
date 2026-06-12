@@ -33,6 +33,10 @@ on:
         description: 'Strateji raporu için portföy büyüklüğü (TL)'
         required: false
         default: '100000'
+      min_volume_tl:
+        description: 'Min günlük TL hacim (likidite filtresi, 10M=10000000)'
+        required: false
+        default: '10000000'
 
 jobs:
   scan:
