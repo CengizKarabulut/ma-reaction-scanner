@@ -440,28 +440,31 @@ def _detect_instrument_type(symbol: str) -> str:
 def fetch_data(ticker, period='3y', source='yfinance', interval='1d'):
     """Veri çek - Multi-instrument destekli
 
-    borsapy: BIST + (varsa) crypto, FX, metal
-    yfinance: BIST + crypto + forex
+    borsapy: BIST + (varsa) crypto, FX, metal - SADECE GÜNLÜK VERİ
+    yfinance: BIST + crypto + forex - intraday DESTEKLİ
+
+    Intraday (1h, 4h) için borsapy desteklenmez — otomatik yfinance kullanılır.
     """
     base_symbol = ticker.replace('.IS', '') if ticker.endswith('.IS') else ticker
     inst_type = _detect_instrument_type(base_symbol)
 
+    # === KRİTİK: borsapy intraday DESTEKLEMİYOR ===
+    # 1h ve 4h için doğrudan yfinance'a zorla, borsapy'yi atla
+    if interval in ('1h', '4h'):
+        if not HAS_YFINANCE:
+            raise RuntimeError(
+                f"Intraday tarama (1h/4h) için yfinance gerekli — "
+                f"borsapy intraday desteklemiyor. pip install yfinance"
+            )
+        source = 'yfinance'  # Force yfinance for intraday
+        print(f"  ⏱ {base_symbol}: {interval} icin yfinance kullaniliyor (borsapy intraday yok)")
+
     if source == 'borsapy' and HAS_BORSAPY:
         try:
-            # Intraday icin 60-120 gun veri yeterli
-            if interval in ('1h', '4h'):
-                from datetime import timedelta as _td
-                days_intraday = 60 if interval == '1h' else 120
-                start_date = (datetime.now() - _td(days=days_intraday)).strftime('%Y-%m-%d')
-                t = bp.Ticker(base_symbol)
-                try:
-                    df = t.history(start=start_date, interval=interval)
-                except TypeError:
-                    df = t.history(start=start_date)
-            else:
-                start_date = _period_to_start_date(period)
-                t = bp.Ticker(base_symbol)
-                df = t.history(start=start_date)
+            # borsapy SADECE günlük veri çeker (intraday yok)
+            start_date = _period_to_start_date(period)
+            t = bp.Ticker(base_symbol)
+            df = t.history(start=start_date)
 
             # Yetersiz veri ise enstrüman tipine göre alternatif sınıf dene
             if (df is None or df.empty or len(df) < 50):
@@ -535,12 +538,33 @@ def scan_stock(ticker, period='3y', source='yfinance', interval='1d',
                do_walk_forward=True):
     """Tek hisse için tüm 140 MA + walk-forward analizi"""
     try:
-        df = fetch_data(ticker, period, source)
+        df = fetch_data(ticker, period=period, source=source, interval=interval)
     except Exception as e:
         return None, f"Veri çekme hatası: {e}"
 
-    if df is None or len(df) < 300:
-        return None, f"Yetersiz veri ({0 if df is None else len(df)} bar)"
+    if df is None or len(df) < 100:
+        return None, f"Yetersiz veri ({0 if df is None else len(df)} bar, interval={interval})"
+
+    # === KRİTİK: Haftalık/Aylık resample ===
+    # fetch_data günlük veri döndü → 1wk/1mo için DÖNÜŞTÜR
+    if interval == '1wk':
+        df = df.resample('W').agg({
+            'Open':'first', 'High':'max', 'Low':'min',
+            'Close':'last', 'Volume':'sum'
+        }).dropna()
+        print(f"  ⟲ {ticker}: gunluk → haftalik resample ({len(df)} hafta)")
+    elif interval == '1mo':
+        df = df.resample('ME').agg({  # ME = Month End (pandas 2.0+)
+            'Open':'first', 'High':'max', 'Low':'min',
+            'Close':'last', 'Volume':'sum'
+        }).dropna()
+        print(f"  ⟲ {ticker}: gunluk → aylik resample ({len(df)} ay)")
+
+    # Final veri kontrolü
+    if len(df) < 50:
+        return None, f"Resample sonrasi yetersiz ({len(df)} bar, interval={interval})"
+
+    print(f"  ✓ {ticker}: {len(df)} bar (interval={interval}, son={df.index[-1].strftime('%Y-%m-%d %H:%M')})")
 
     # v6.2: Volume kolonu yoksa veya 0 ise (endeks olabilir), 1 ile doldur
     if 'Volume' not in df.columns:
