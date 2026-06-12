@@ -3,6 +3,8 @@ name: BIST Endeks Tarama
 # BIST endekslerinin KENDİSİNİ tarar (bileşenlerini değil)
 # XBANK endeksi (12000 puan) kendi MA'larına saygı duyuyor mu?
 # Makro trend filtresi için kullanılır.
+#
+# Tam pipeline: tarama + strategy + backtest + multi-indicator confirm + zengin Telegram
 
 on:
   schedule:
@@ -29,7 +31,7 @@ on:
 jobs:
   scan-indices:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Repo checkout
@@ -53,9 +55,6 @@ jobs:
           echo "ts=$TS" >> $GITHUB_OUTPUT
           mkdir -p reports
 
-      # ============================================================
-      # ENDEKS TARAMA — BIST_ENDEKSLER grubu (35+ endeks)
-      # ============================================================
       - name: Walk-forward bayrağı ayarla
         id: wf
         run: |
@@ -65,7 +64,10 @@ jobs:
             echo "wf_arg=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Endeks Tarama
+      # ============================================================
+      # STEP 1: ENDEKS TARAMA — BIST_ENDEKSLER grubu (35+ endeks)
+      # ============================================================
+      - name: 1️⃣ Endeks Tarama (MA-Saygı)
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             --all-bist --bist-list BIST_ENDEKSLER \
@@ -78,9 +80,9 @@ jobs:
             --min_touches 8
 
       # ============================================================
-      # ENDEKS STRATEGY (her endeks için top 5 MA + setup)
+      # STEP 2: STRATEJİ RAPORU (her endeks için fiyat + MA değer + cluster)
       # ============================================================
-      - name: Endeks Stratejileri
+      - name: 2️⃣ Endeks Stratejileri (cluster + DESTEK/DIRENC)
         run: |
           python scanner/strategy_generator.py \
             --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
@@ -90,48 +92,49 @@ jobs:
         continue-on-error: true
 
       # ============================================================
-      # TELEGRAM ÖZET
+      # STEP 3: BACKTEST (her robust endeks MA için tarihi PnL)
       # ============================================================
-      - name: Telegram Özet
+      - name: 3️⃣ Endeks Backtest (tarihi performans)
+        run: |
+          python scanner/backtest_simulator.py \
+            --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
+            --all-robust --top_ma 3 \
+            --portfolio 100000 \
+            --output reports/index_backtest_${{ steps.prep.outputs.ts }}.html
+        continue-on-error: true
+
+      # ============================================================
+      # STEP 4: MULTI-INDICATOR CONFIRMATION
+      # (her endeksin RSI/MACD/BB/İchimoku/OBV/SMI durumu)
+      # ============================================================
+      - name: 4️⃣ Multi-Indicator Confirmation (RSI/MACD/BB/...)
+        run: |
+          python scanner/multi_indicator_confirm.py \
+            --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
+            --all-robust --n_tickers 20 \
+            --output reports/index_confirm_${{ steps.prep.outputs.ts }}.html
+        continue-on-error: true
+
+      # ============================================================
+      # STEP 5: ZENGIN TELEGRAM ÖZETİ (notifier ile — fiyat + MA değer + 🟢🔴)
+      # ============================================================
+      - name: 5️⃣ Telegram Zengin Özet
         if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python -c "
-          import os, requests, pandas as pd
-
-          df = pd.read_csv('reports/index_scan_${{ steps.prep.outputs.ts }}.csv')
-          robust = df[df['wf_robust']==True] if 'wf_robust' in df.columns else df
-
-          msg = ['📊 *BIST Endeks MA-Saygı Tarama*',
-                 f'_${{ steps.prep.outputs.ts }}_', '',
-                 f'*Endeks sayısı:* {df[\"ticker\"].nunique()}',
-                 f'*Aday MA:* {len(df):,}',
-                 f'*Robust:* {len(robust):,} ({100*len(robust)/max(len(df),1):.1f}%)',
-                 '',
-                 '🏆 *Robust Top 15 Endeks Setupları*',
-                 '\`\`\`']
-          if not robust.empty:
-              top = robust.nlargest(15, 'composite_score')
-              msg.append(f'{\"Endeks\":<8} {\"MA\":<6} {\"Per\":<4} {\"WR\":<5} {\"Exp\":<6}')
-              msg.append('-' * 33)
-              for _, r in top.iterrows():
-                  msg.append(f'{r[\"ticker\"]:<8} {r[\"ma_type\"]:<6} {r[\"period\"]:<4} {r[\"wr_pct\"]:<5.1f} {r[\"expectancy\"]:+.2f}')
-          msg.append('\`\`\`')
-          msg.append('')
-          msg.append('_Detay: GitHub Actions artifact_')
-
-          text = '\n'.join(msg)
-          requests.post(
-              f'https://api.telegram.org/bot{os.environ[\"TELEGRAM_BOT_TOKEN\"]}/sendMessage',
-              json={'chat_id': os.environ['TELEGRAM_CHAT_ID'], 'text': text, 'parse_mode': 'Markdown'},
-              timeout=20
-          )
-          "
+          # Notifier ile zengin format (image tablo + DESTEK/DIRENC renkleri)
+          python scanner/notifier.py \
+            --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
+            --label "BIST Endeks Tarama" \
+            --mode daily
         continue-on-error: true
 
-      - name: Artifact yükle
+      # ============================================================
+      # STEP 6: ARTIFACT
+      # ============================================================
+      - name: 6️⃣ Artifact yükle (tüm raporlar)
         if: always()
         uses: actions/upload-artifact@v4
         with:
