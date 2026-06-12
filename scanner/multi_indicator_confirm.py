@@ -107,20 +107,35 @@ def atr(high, low, close, period=14):
 
 # === Veri çekme ===
 
+def is_bist_index(symbol):
+    """BIST endeks sembolu algilama (X ile baslar, 4+ karakter)."""
+    s = symbol.upper().replace('.IS', '')
+    return s.startswith('X') and len(s) >= 4
+
+
 def fetch_data(ticker, source='borsapy', days=400):
     base = ticker.replace('.IS', '')
+    is_index = is_bist_index(base)
     try:
         if source == 'borsapy' and HAS_BORSAPY:
             start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-            df = bp.Ticker(base).history(start=start)
+            if is_index and hasattr(bp, 'Index'):
+                # BIST endeksi: bp.Index() kullan
+                df = bp.Index(base).history(start=start)
+            else:
+                df = bp.Ticker(base).history(start=start)
         elif HAS_YFINANCE:
-            df = yf.download(f"{base}.IS", period='1y', progress=False, auto_adjust=True)
+            symbol = f"^{base}" if is_index else f"{base}.IS"
+            df = yf.download(symbol, period='1y', progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
         else:
             return None
         if df is None or len(df) < 60:
             return None
+        # Endekslerde Volume olmayabilir
+        if 'Volume' not in df.columns or df['Volume'].isna().all():
+            df['Volume'] = 1.0
         return df
     except Exception:
         return None
