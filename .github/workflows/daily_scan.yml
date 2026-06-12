@@ -136,6 +136,7 @@ jobs:
         run: |
           python scanner/notifier.py \
             --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
+            --label "BIST Daily Tarama (${{ steps.prep.outputs.interval }})" \
             --mode daily
         continue-on-error: true
 
