@@ -492,13 +492,77 @@ def generate_html(setups: list, output: str):
 
         html.append(f'<div class="setup {cls}">')
         html.append(f'<h2>{s["ticker"]} <span class="score-badge {badge}">'
-                    f'Score: {score:+d} / +6</span></h2>')
+                    f'Score: {score:+d} / +8</span></h2>')
         dist = s.get('distance_atr', 0)
         dist_str = f"{dist:+.2f} ATR" if dist is not None else "—"
-        html.append(f'<p><strong>Fiyat:</strong> {s["current_price"]:.2f} | '
-                    f'<strong>Yön önerisi:</strong> <span class="{"pos" if s["side"]=="LONG" else "neg"}">{s["side"]}</span> | '
-                    f'<strong>MA Uzaklık:</strong> {dist_str} | '
-                    f'<strong>ATR:</strong> {s["atr"]:.2f}</p>')
+        curr_p = s["current_price"]
+        atr_v = s["atr"]
+
+        # Fiyat formati
+        def fmt_p(p):
+            if curr_p < 10: return f"{p:.4f}"
+            elif curr_p < 100: return f"{p:.3f}"
+            else: return f"{p:.2f}"
+
+        # Top MA'nin etiketi (DESTEK/DIRENC)
+        top_ma_val = s.get('top_ma_value', None)
+        if top_ma_val is not None:
+            top_etiket = 'DESTEK' if top_ma_val < curr_p else 'DIRENC'
+            top_etiket_cls = 'pos' if top_ma_val < curr_p else 'neg'
+        else:
+            top_etiket = '—'
+            top_etiket_cls = ''
+
+        html.append(f'<p><strong>Fiyat:</strong> {fmt_p(curr_p)} | '
+                    f'<strong>Top MA:</strong> {s.get("top_ma", "—")} @{fmt_p(top_ma_val) if top_ma_val else "—"} '
+                    f'<span class="{top_etiket_cls}">({top_etiket})</span> | '
+                    f'<strong>Yön:</strong> <span class="{"pos" if s["side"]=="LONG" else "neg"}">{s["side"]}</span> | '
+                    f'<strong>Uzaklık:</strong> {dist_str} | '
+                    f'<strong>ATR:</strong> {atr_v:.2f}</p>')
+
+        # YENI: MA Kümeleri (Destek/Direnc) - tum robust MA'lardan
+        all_mas = s.get('all_robust_mas', [])
+        if all_mas and len(all_mas) >= 2:
+            destek_mas = [m for m in all_mas if m['value'] < curr_p]
+            direnc_mas = [m for m in all_mas if m['value'] >= curr_p]
+
+            html.append('<div style="background:#0f1419;padding:10px;border-radius:6px;font-family:monospace;margin:10px 0;">')
+            html.append('<strong style="color:#7be2ff;">🎯 MA Kümeleri (Destek/Direnç)</strong><br>')
+
+            # Cluster algoritmasi
+            def cluster_mas_local(mas, threshold_atr=0.5):
+                if not mas: return []
+                sorted_mas = sorted(mas, key=lambda x: x['value'])
+                clusters = [[sorted_mas[0]]]
+                for ma in sorted_mas[1:]:
+                    if abs(ma['value'] - clusters[-1][-1]['value']) <= threshold_atr * atr_v:
+                        clusters[-1].append(ma)
+                    else:
+                        clusters.append([ma])
+                return clusters
+
+            # Direncler (yukaridakiler)
+            direnc_clusters = cluster_mas_local(direnc_mas)
+            for cl in sorted(direnc_clusters, key=lambda c: c[0]['value']):
+                vals = [m['value'] for m in cl]
+                tags = ', '.join(f"{m['ma_type']}{m['period']}" for m in cl)
+                if len(cl) > 1:
+                    html.append(f'<div style="color:#ff8c69;">🔴 {fmt_p(min(vals))}-{fmt_p(max(vals))}: {tags} <strong>({len(cl)} MA)</strong></div>')
+                else:
+                    html.append(f'<div style="color:#ff8c69;">🔴 {fmt_p(vals[0])}: {tags}</div>')
+
+            html.append(f'<div style="color:#7be2ff;font-weight:bold;border-top:1px solid #5fb3ff;border-bottom:1px solid #5fb3ff;padding:4px 0;margin:6px 0;">━━ FIYAT: {fmt_p(curr_p)} ━━</div>')
+
+            # Destekler (asagidakiler)
+            destek_clusters = cluster_mas_local(destek_mas)
+            for cl in sorted(destek_clusters, key=lambda c: -c[0]['value']):
+                vals = [m['value'] for m in cl]
+                tags = ', '.join(f"{m['ma_type']}{m['period']}" for m in cl)
+                if len(cl) > 1:
+                    html.append(f'<div style="color:#7fc97f;">🟢 {fmt_p(min(vals))}-{fmt_p(max(vals))}: {tags} <strong>({len(cl)} MA)</strong></div>')
+                else:
+                    html.append(f'<div style="color:#7fc97f;">🟢 {fmt_p(vals[0])}: {tags}</div>')
+            html.append('</div>')
 
         html.append('<table><tr><th>Indikatör</th><th>Vote</th><th>Açıklama</th></tr>')
         for ind, (v, expl) in s['votes'].items():
@@ -570,11 +634,28 @@ def main():
         current_price = price_data['Close'].iloc[-1]
         side = 'LONG' if current_price > ma_val else 'SHORT'
 
+        # YENI: Bu hissenin TOP 5 robust MA'sini topla (cluster + DESTEK/DIRENC icin)
+        top5 = sub.nlargest(5, 'composite_score')
+        all_mas = []
+        for _, r in top5.iterrows():
+            mv = r.get('current_ma_value', np.nan)
+            if not pd.isna(mv):
+                all_mas.append({
+                    'ma_type': r['ma_type'],
+                    'period': int(r['period']),
+                    'value': float(mv),
+                    'wr_pct': r['wr_pct'],
+                    'touches': int(r.get('touches', 0)),
+                    'composite_score': r['composite_score'],
+                })
+
         result = analyze_ticker(tk, ma_val, side, source=args.source)
         if result:
             result['top_ma'] = f"{top['ma_type']} {top['period']}"
+            result['top_ma_value'] = float(ma_val)
+            result['all_robust_mas'] = all_mas  # YENI: cluster gosterim icin
             setups.append(result)
-            print(f"  {tk}: score={result['total_score']:+d} ({side})")
+            print(f"  {tk}: score={result['total_score']:+d} ({side}), {len(all_mas)} robust MA")
 
     generate_html(setups, args.output)
     print(f"\n✓ {len(setups)} hisse analiz edildi")
