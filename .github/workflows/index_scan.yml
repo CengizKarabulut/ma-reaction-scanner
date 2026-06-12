@@ -14,9 +14,17 @@ on:
         required: false
         default: '5y'
       interval:
-        description: 'Zaman dilimi (1d, 1wk, 1mo)'
+        description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
         required: false
         default: '1d'
+      source:
+        description: 'Veri kaynağı (borsapy / yfinance)'
+        required: false
+        default: 'borsapy'
+      no_walk_forward:
+        description: 'Walk-forward analizi atla (hızlı test için)'
+        required: false
+        default: 'false'
 
 jobs:
   scan-indices:
@@ -48,13 +56,23 @@ jobs:
       # ============================================================
       # ENDEKS TARAMA — BIST_ENDEKSLER grubu (35+ endeks)
       # ============================================================
+      - name: Walk-forward bayrağı ayarla
+        id: wf
+        run: |
+          if [ "${{ github.event.inputs.no_walk_forward || 'false' }}" = "true" ]; then
+            echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT
+          else
+            echo "wf_arg=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Endeks Tarama
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             --all-bist --bist-list BIST_ENDEKSLER \
-            --source borsapy \
+            --source ${{ github.event.inputs.source || 'borsapy' }} \
             --interval ${{ github.event.inputs.interval || '1d' }} \
             --period ${{ github.event.inputs.period || '5y' }} \
+            ${{ steps.wf.outputs.wf_arg }} \
             --output reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
             --report html --top_n 20 \
             --min_touches 8
