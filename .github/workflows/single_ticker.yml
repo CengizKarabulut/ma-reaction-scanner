@@ -27,9 +27,13 @@ on:
         required: false
         default: 'borsapy'
       interval:
-        description: 'Zaman dilimi: 1h, 4h (intraday), 1d, 1wk, 1mo'
+        description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
         required: false
         default: '1d'
+      strict_mode:
+        description: 'Sadece robust MA (gevşek fallback kapalı). false=zayıf sinyalleri de göster'
+        required: false
+        default: 'false'
 
 jobs:
   analyze:
@@ -81,6 +85,11 @@ jobs:
 
       - name: Analiz
         run: |
+          STRICT_FLAG=""
+          if [ "${{ github.event.inputs.strict_mode || 'false' }}" = "true" ]; then
+            STRICT_FLAG="--strict"
+          fi
+
           python scanner/single_ticker_query.py \
             --ticker "${{ steps.prep.outputs.ticker }}" \
             ${{ steps.prep.outputs.csv_flag }} \
@@ -88,6 +97,7 @@ jobs:
             --interval "${{ github.event.inputs.interval || '1d' }}" \
             --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
             --risk_pct ${{ github.event.inputs.risk_pct || '1.0' }} \
+            $STRICT_FLAG \
             --output reports/${{ steps.prep.outputs.ticker }}_${{ steps.prep.outputs.ts }}.html \
             --summary-text reports/${{ steps.prep.outputs.ticker }}_${{ steps.prep.outputs.ts }}.txt
 
