@@ -21,6 +21,14 @@ on:
         description: 'Min günlük TL hacim (likidite filtresi, 0=filtre yok, 10M=10000000)'
         required: false
         default: '10000000'
+      source:
+        description: 'Veri kaynağı (borsapy / yfinance)'
+        required: false
+        default: 'borsapy'
+      no_walk_forward:
+        description: 'Walk-forward analizi atla (hızlı test için)'
+        required: false
+        default: 'false'
 
 jobs:
   cascade-scan:
@@ -59,13 +67,23 @@ jobs:
       # ============================================================
       # STEP 1: DAILY TARAMA (likidite filtresi aktif)
       # ============================================================
+      - name: Walk-forward bayrağı ayarla
+        id: wf
+        run: |
+          if [ "${{ github.event.inputs.no_walk_forward || 'false' }}" = "true" ]; then
+            echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT
+          else
+            echo "wf_arg=" >> $GITHUB_OUTPUT
+          fi
+
       - name: 1️⃣ Daily Tarama (1d)
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             ${{ steps.prep.outputs.tickers_arg }} \
-            --source borsapy --interval 1d \
+            --source ${{ github.event.inputs.source || 'borsapy' }} --interval 1d \
             --period ${{ github.event.inputs.period || '3y' }} \
             --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
+            ${{ steps.wf.outputs.wf_arg }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_1d.csv \
             --report html --top_n 20
 
@@ -98,9 +116,10 @@ jobs:
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             --tickers "${{ steps.filter.outputs.robust_list }}" \
-            --source borsapy --interval 1wk \
+            --source ${{ github.event.inputs.source || 'borsapy' }} --interval 1wk \
             --period ${{ github.event.inputs.period || '3y' }} \
             --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
+            ${{ steps.wf.outputs.wf_arg }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_1wk.csv \
             --report html --top_n 20 \
             --min_touches 8 \
@@ -114,9 +133,10 @@ jobs:
         run: |
           python scanner/bist_ma_reaction_scanner.py \
             --tickers "${{ steps.filter.outputs.robust_list }}" \
-            --source borsapy --interval 1mo \
+            --source ${{ github.event.inputs.source || 'borsapy' }} --interval 1mo \
             --period 5y \
             --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
+            ${{ steps.wf.outputs.wf_arg }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_1mo.csv \
             --report html --top_n 20 \
             --min_touches 3 \
