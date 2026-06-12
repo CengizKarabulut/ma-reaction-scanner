@@ -1,194 +1,122 @@
-# BIST MA Reaction Scanner — Tam Trade Platformu
+# BIST MA Reaction Scanner — Kullanım Kılavuzu
 
-BIST hisselerinin **hareketli ortalamalara saygısını** istatistiksel olarak analiz eden ve trade önerisi üreten kapsamlı sistem.
+Bu repo BIST hisselerinin **hareketli ortalama saygısını** tarayıp trade fırsatlarına çeviren bir otomasyon sistemidir. **4 farklı workflow** var, hangisini ne zaman kullanacağın net olsun:
 
-## Pipeline Mimarisi
+## Workflow'lar Arası Fark
+
+| Workflow | Ne Zaman | Ne Yapar | Süre |
+|---|---|---|---|
+| **Daily Scan** | Hızlı pulse — tek TF | 1 timeframe seçtiğin (1h/4h/1d/1wk/1mo) | 5-30 dk |
+| **Multi-TF Cascade** | Derin analiz — 3 TF konsensüsü | 3 timeframe cascade, tümünde robust = altın | 45-90 dk |
+| **Index Scan** | Sektör/makro trend | 4 ana endeks taraması | 15-30 dk |
+| **Single Ticker** | Tek bir hisseyi her açıdan | Tek hisse derin analiz + mobile rapor | 30 sn |
+
+## "Daily" vs "Multi-TF" — Cengiz'in Sorduğu Soru
+
+**"Daily'de farklı zaman aralıkları seçebiliyorsam Multi-TF'ye gerek var mı?"**
+
+**Cevap:** Evet, ÇOK farklı işler. İşte ayrım:
+
+### Daily Scan — Tek TF
+"BIST'te BU bir zaman diliminde ne var?"
+
+- Sadece seçtiğin TF'de tarar
+- 1d seçersen → sadece günlük
+- 4h seçersen → sadece 4 saatlik
+- **Multi-TF konsensüsü YOK**
+- Hızlı, günlük takip
+
+### Multi-TF Cascade — 3 TF + Konsensüs
+"BIST'te 3 zaman diliminde DE robust olan setup'lar hangileri?"
+
+- **3 TF'yi birden** tarar (cascade ile filtreli)
+- TF1 → robust olanları al → TF2'yi sadece onlarda yap → TF3 aynı şekilde
+- **Cross-TF Consensus** raporu = D+W+M üçünde de tutarlı → 🥇 ALTIN setup
+- Backtest + Multi-Indicator Confirm raporu da otomatik
+- 1h+4h+1d (intraday) veya 1d+1wk+1mo (daily) seçeneği var
+
+**Sonuç:**
+- Daily = "1 TF kontrol" (hızlı pulse)
+- Multi-TF = "3 TF konsensüs" (yatırım kararı)
+
+## Multi-TF Intraday Modu — Nasıl Çalıştırılır?
+
+Sırasıyla:
+1. GitHub repo → **Actions** tab
+2. Sol menüden **Multi-Timeframe Cascade Scan** seç
+3. Sağ üstte **Run workflow** mavi butonuna tıkla
+4. Açılan formda:
+   - **Tickers:** `BIST_100` veya istediğin
+   - **Cascade tipi:** dropdown'dan **`intraday`** seç
+   - **no_walk_forward:** `true` (intraday hızlı için)
+   - Diğer alanlar default
+5. **Run workflow** yeşil butona bas
+
+~30-45 dakika sonra:
+- Telegram'a **image-rich tablo** düşer (1h cascade sonuçları)
+- Artifact'ta 4 HTML rapor (strategies, backtest, confirm, consensus)
+- HTML'lerde her hisse için cluster + DESTEK/DIRENC + RSI/MACD
+
+## Single Ticker (Tek Hisse)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ STEP 1: Daily Scan (BIST_TUM / BIST_100 / sektör endeksleri)│
-│         → reports/scan_DATE_1d.csv                          │
-└────────────────────┬────────────────────────────────────────┘
-                     │ daily-robust hisseler
-                     ↓
-┌─────────────────────────────────────────────────────────────┐
-│ STEP 2: Weekly + Monthly Scan (sadece daily-robust hisseler)│
-│         → reports/scan_DATE_1wk.csv, _1mo.csv               │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ↓
-┌─────────────────────────────────────────────────────────────┐
-│ STEP 3: Cross-TF Consensus                                  │
-│         🥇 Altın: D+W+M üçünde de robust olan kombinasyonlar│
-│         🥈 Gümüş: İki TF'de robust olanlar                  │
-│         → reports/consensus_DATE.html                       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-        ┌────────────┼────────────┐
-        ↓            ↓            ↓
-┌──────────┐  ┌──────────┐  ┌────────────┐
-│ Strategy │  │ Backtest │  │ Multi-Ind  │
-│Generator │  │Simulator │  │Confirmation│
-└──────────┘  └──────────┘  └────────────┘
-   somut         tarihi         RSI+MACD+BB+
-   entry/exit    PnL/DD         İchimoku+OBV+SMI
-   her hisse     her MA         confirmation score
+Single Ticker → Run
+  Ticker: ASELS
+  Interval: 4h (1h scalp / 1d klasik / 1wk vs)
+  use_latest_csv: false
+  strict_mode: false
 ```
 
-## Modüller
+Telegram'a zengin rapor: fiyat + MA değerleri + cluster + RSI/MACD + MA tepki bölgeleri.
 
-### 1. Scanner (`scanner/bist_ma_reaction_scanner.py`)
-- 7 MA türü × 20 periyot = 140 MA per hisse
-- v6.1 metodoloji: pre-touch separation, breakthrough, respect ratio, ADR
-- Walk-forward analizi (sıkı kriter: train×0.5 ≤ test, WR %20 düşmez, ≥5 test touch)
-- Multi-timeframe: `--interval 1d|1wk|1mo`
+## Telegram Format — Yeni Image Modu
 
-### 2. Tickers (`scanner/tickers.py`)
-- Dinamik endeks bileşenleri (borsapy ile)
-- `BIST_30`, `BIST_50`, `BIST_100`, **`BIST_TUM` (500+ hisse)**
-- Sektör endeksleri: `XBANK`, `XUSIN`, `XUMAL`, `XK030` (Katılım), vs
+`notifier.py` artık iki modda:
+- **Image-rich (default):** PNG tablo olarak gönderir. DESTEK/DIRENC renkli arka plan. Mükemmel hizalama.
+- **Text-only:** `--text-only` flag ile eski yöntem.
 
-### 3. Strategy Generator (`scanner/strategy_generator.py`)
-- Her robust hisse için somut entry/stop/TP1/TP2/trailing önerisi
-- Position sizing (portföy %1 risk per trade)
-- Setup durumu: WATCH / WAIT_FOR_TOUCH / NO_TRADE
-- HTML rapor
+## BIST Endeks Tarama — Neden 4 Endeks?
 
-### 4. Cross-TF Consensus (`scanner/cross_tf_consensus.py`)
-- D + W + M tarama sonuçlarını birleştir
-- "Süper-robust" = üç timeframe'de de geçerli olan kombinasyonlar
-- HTML + CSV çıktı
+borsapy kütüphanesi sadece XU030, XU050, XU100, XUTUM destekliyor. Sektör endeksleri (XBANK, XKMYA, XGIDA vs.) `bp.Index()`'te yok. Bu **kütüphane sınırlaması**, kodumuzun değil.
 
-### 5. Backtest Simulator (`scanner/backtest_simulator.py`)
-- Robust MA'lar için tarihi trade simülasyonu
-- TP1 → TP2 → Trailing → Stop logic, komisyon + slippage dahil
-- Win rate, Profit Factor, Max Drawdown, Total Return
+**Sektörel analiz için:** Multi-TF Cascade'le `BIST_100` tara, ardından strategies.html'den sektör hisselerini incele.
 
-### 6. Multi-Indicator Confirmation (`scanner/multi_indicator_confirm.py`)
-- RSI, MACD, Bollinger Bands, İchimoku, OBV, SMI
-- Her indikatör vote: -1 / 0 / +1
-- Confirmation score: -6..+6
-- 🥇 Altın setup'lar: score +4 veya üstü
+## Sorun Giderme
 
-### 7. Telegram Notifier (`scanner/notifier.py`)
-- Hisse sayısına göre adaptive format
-- BIST_30: her hisse top 3 MA
-- BIST_100: en çok robust MA'lı 15 hisse + detayları
-- BIST_TUM: cross-stock top 30 + MA family stats
+**"Telegram mesajı gelmiyor"**
+1. Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` doğru mu
+2. Test: `python scanner/notifier.py --test`
+3. Log'da `✓ Telegram BAŞARILI` ara
 
-### 8. Pine v6.2 (`pine/ma_trade_signals.pine`)
-- TradingView'da görsel entry/exit ok'ları
-- Stop, TP1, TP2, Trailing çizgileri
-- Setup durum tablosu (state machine: SEARCHING / READY / IN POSITION)
-- LONG/SHORT alert conditions
+**"Multi-TF cascade çalışıyor ama Telegram boş"**
+- `multi_tf_cascade.yml` repo'da güncel mi?
+- Step 9 (Telegram Özet) log'una bak
 
-## Tipik Kullanım
+**"Image üretilmiyor, sadece text"**
+- `requirements.txt`'te `matplotlib` var mı?
+- `pip install matplotlib`
 
-### A. Otomatik (Workflow)
-```bash
-# Multi-TF Cascade (önerilen, her hafta sonu)
-Actions → Multi-Timeframe Cascade Scan → Run workflow
-  Tickers: BIST_100
-  Period: 3y
-  Portfolio: 100000
-```
-
-90 dakika içinde elinizde olur:
-- 3 ayrı CSV (D, W, M)
-- Consensus raporu (altın/gümüş kombinasyonlar)
-- Strategy raporu (somut trade önerileri)
-- Backtest sonuçları (tarihi performans)
-- Confirmation raporu (RSI/MACD/BB doğrulama)
-- Telegram özeti
-
-### B. Manuel (CLI)
-```bash
-# 1. Daily tarama
-python scanner/bist_ma_reaction_scanner.py \
-    --all-bist --bist-list BIST_100 \
-    --source borsapy --interval 1d --period 3y \
-    --output reports/scan_today_1d.csv
-
-# 2. Strategy raporu
-python scanner/strategy_generator.py \
-    --csv reports/scan_today_1d.csv \
-    --tickers ASELS,BRSAN,GARAN \
-    --portfolio 100000 --risk_pct 1.0 \
-    --output reports/strategies.html
-
-# 3. Backtest
-python scanner/backtest_simulator.py \
-    --csv reports/scan_today_1d.csv \
-    --tickers ASELS \
-    --top_ma 3 --output reports/backtest_asels.html
-
-# 4. Confirmation
-python scanner/multi_indicator_confirm.py \
-    --csv reports/scan_today_1d.csv \
-    --all-robust --n_tickers 15 \
-    --output reports/confirm.html
-```
-
-### C. TradingView (Pine)
-1. Pine Editor'a `pine/ma_trade_signals.pine`'i yapıştır
-2. Save → Add to chart
-3. Hisse aç (örn. BRSAN)
-4. İndikatör ayarlarında scanner'dan bulduğun MA'yı gir (örn. HMA 21)
-5. Avg MFE %'ini ayarla (CSV'den)
-6. Portföy + risk %'ini gir
-7. Tablo + ok'lar + Stop/TP çizgileri otomatik
-
-## Trade Akışı (Önerilen)
-
-1. **Hafta sonu:** Cascade workflow çalıştır
-2. **Consensus raporunda altın listeyi gör** — D+W+M'de tutarlı kombinasyonlar
-3. **Confirmation raporunda score +4 olanları seç** — multi-indicator doğrulamalı
-4. **Backtest raporunda PnL > 0 ve Profit Factor > 1.5 olanları öne çıkar**
-5. **TradingView'da Pine indikatörünü çalıştır** — canlı setup takibi
-6. **Setup geldiğinde** strategy_generator.py'nin önerdiği lot ile pozisyon aç
-7. **TP1/TP2/Trailing/Stop**'u takip et — duygusal karar vermeden çık
-
-## Risk Notları
-
-- Algoritma tarihi veriye dayanır, gelecek garanti değil
-- Walk-forward yapsak da overfitting riski var
-- Slippage + komisyon backtest'te dahil, ama gerçekte daha yüksek olabilir
-- WR %85 olsa bile 3-4 üst üste kayıp serisi olabilir (psikolojik dayanma şart)
-- Önce **paper trade** ile 20-30 setup'ı dene, sonra canlı paraya geç
-- Bir hisseye birden fazla MA için aynı anda pozisyon açma (korelasyon)
-
-## Dosya Yapısı
+## Repo Yapısı
 
 ```
 ma-reaction-scanner/
-├── pine/
-│   ├── ma_reaction_profile_v6.pine    # Ana tarayıcı (140 MA matrix tablo)
-│   └── ma_trade_signals.pine          # Trade sinyalleri (entry/exit)
-├── scanner/
-│   ├── bist_ma_reaction_scanner.py    # Ana tarayıcı
-│   ├── tickers.py                     # Endeks bileşenleri (borsapy dinamik)
-│   ├── strategy_generator.py          # Trade önerisi raporu
-│   ├── cross_tf_consensus.py          # D+W+M consensus
-│   ├── backtest_simulator.py          # Tarihi PnL simülasyonu
-│   ├── multi_indicator_confirm.py     # RSI/MACD/BB/İchimoku/OBV/SMI
-│   └── notifier.py                    # Telegram bildirimi
 ├── .github/workflows/
-│   ├── daily_scan.yml                 # Günlük tarama
-│   ├── multi_tf_cascade.yml           # Multi-TF + tüm modüller
-│   └── weekly_robustness.yml          # Haftalık robust analizi
-└── requirements.txt
+│   ├── daily_scan.yml
+│   ├── multi_tf_cascade.yml
+│   ├── index_scan.yml
+│   └── single_ticker.yml
+├── scanner/
+│   ├── bist_ma_reaction_scanner.py
+│   ├── tickers.py
+│   ├── strategy_generator.py
+│   ├── backtest_simulator.py
+│   ├── multi_indicator_confirm.py
+│   ├── cross_tf_consensus.py
+│   ├── single_ticker_query.py
+│   └── notifier.py
+├── pine/
+│   ├── ma_reaction_profile_v6.pine
+│   └── ma_trade_signals.pine
+├── requirements.txt
+└── README.md
 ```
-
-## Bağımlılıklar
-
-```
-borsapy>=0.5.0     # TradingView WebSocket (BIST için tavsiye)
-yfinance>=0.2.30   # Yahoo Finance (fallback)
-pandas>=2.0.0
-numpy>=1.24.0
-requests>=2.31.0
-```
-
-## License
-
-MIT
