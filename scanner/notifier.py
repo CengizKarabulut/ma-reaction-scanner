@@ -10,6 +10,7 @@ Kullanım:
 """
 
 import argparse
+import io
 import os
 import sys
 from datetime import datetime
@@ -82,6 +83,116 @@ def send_telegram(token: str, chat_id: str, text: str, parse_mode: str = "Markdo
             all_ok = False
 
     return all_ok
+
+
+def send_photo(token: str, chat_id: str, photo_bytes: bytes, caption: str = "") -> bool:
+    """Telegram'a fotograf gonder. Tablo image'lerini gondermek icin."""
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    files = {'photo': ('table.png', photo_bytes, 'image/png')}
+    data = {'chat_id': chat_id, 'caption': caption}
+    try:
+        resp = requests.post(url, files=files, data=data, timeout=30)
+        if resp.ok:
+            print(f"  ✓ Photo gonderildi ({len(photo_bytes)/1024:.1f} KB)", file=sys.stderr)
+            return True
+        else:
+            print(f"  ✗ Photo hata: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
+            return False
+    except Exception as e:
+        print(f"  ✗ Photo exception: {e}", file=sys.stderr)
+        return False
+
+
+def render_table_image(headers: list, rows: list, title: str = "",
+                        col_colors: dict = None) -> bytes:
+    """Matplotlib ile tablo image uret. Sayfa = PIL bytes dondur.
+
+    Args:
+        headers: ['Hisse', 'MA', 'Per', 'Değer', 'WR', 'Exp']
+        rows: [['ODAS', 'SMA', '144', '6.09', '93%', '+6.51'], ...]
+        title: Üst başlık (emoji icermesin)
+        col_colors: {0: ['#7fc97f', ...]} ticker satir renkleri (DESTEK=yesil, DIRENC=kirmizi)
+    Returns:
+        PNG bytes or None
+    """
+    try:
+        import matplotlib
+        matplotlib.use('Agg')  # Headless
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    # Emoji ve özel karakterleri temizle (matplotlib font sorunu)
+    import re
+    def clean_text(s):
+        if not isinstance(s, str):
+            return str(s)
+        # Emoji (Unicode emojiler 0x1F000+) ve unicode kalp/etiketler temizle
+        return re.sub(r'[\U0001F300-\U0001FAFF\U00002600-\U000027BF]+', '', s).strip()
+
+    title_clean = clean_text(title)
+    clean_rows = [[clean_text(c) for c in r] for r in rows]
+    clean_headers = [clean_text(h) for h in headers]
+
+    n_rows = len(clean_rows)
+    n_cols = len(clean_headers)
+    if n_rows == 0:
+        return None
+
+    # Dinamik figür boyutu - row sayısına göre
+    fig_w = max(8, n_cols * 1.4)
+    fig_h = max(2, 0.40 * (n_rows + 2))
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=150)
+    ax.axis('off')
+
+    if title_clean:
+        plt.title(title_clean, fontsize=13, fontweight='bold', loc='left',
+                  color='#5fb3ff', pad=12)
+
+    # Tablo
+    table = ax.table(cellText=clean_rows, colLabels=clean_headers,
+                      cellLoc='center', loc='center',
+                      colColours=['#2a2f39'] * n_cols)
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.6)
+
+    # Header rengi
+    for i in range(n_cols):
+        cell = table[0, i]
+        cell.set_text_props(color='#5fb3ff', fontweight='bold')
+        cell.set_facecolor('#1a1f29')
+
+    # Veri satır renkleri (her ikinci satır vurgu) + ticker sütununa DESTEK/DIRENC arka plan
+    for i in range(1, n_rows + 1):
+        for j in range(n_cols):
+            cell = table[i, j]
+            bg = '#0f1419' if i % 2 == 0 else '#1a1f29'
+            # Ticker sütunu için özel: yeşil/kırmızı arka plan
+            if j == 0 and col_colors and 0 in col_colors and i - 1 < len(col_colors[0]):
+                tag_color = col_colors[0][i - 1]
+                if tag_color == '#7fc97f':  # Yeşil = DESTEK
+                    bg = '#1a2f1f'
+                    cell.set_text_props(color='#7fc97f', fontweight='bold')
+                elif tag_color == '#ff8c69':  # Kırmızı = DIRENC
+                    bg = '#2f1a1a'
+                    cell.set_text_props(color='#ff8c69', fontweight='bold')
+                else:
+                    cell.set_text_props(color='#e6e6e6')
+            else:
+                cell.set_text_props(color='#e6e6e6')
+            cell.set_facecolor(bg)
+
+    fig.patch.set_facecolor('#0a0e14')
+    plt.tight_layout()
+
+    # PNG bytes'a yaz
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', facecolor='#0a0e14', bbox_inches='tight', dpi=150)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
 
 
 def _format_cross_stock_top(df: pd.DataFrame, n: int = 20) -> list:
@@ -305,12 +416,178 @@ def format_weekly(df: pd.DataFrame) -> str:
     return '\n'.join(lines)
 
 
+def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama'):
+    """Image-rich daily özet gönderir. Büyük tablolar image olarak,
+    açıklamalar text olarak gider. Image üretilemezse fallback'le text gönderir."""
+
+    n_stocks = df['ticker'].nunique()
+    n_total = len(df)
+    n_robust = 0
+    robust_pct = 0
+    if 'wf_robust' in df.columns:
+        n_robust = int(df['wf_robust'].sum())
+        robust_pct = 100 * n_robust / max(n_total, 1)
+
+    # 1. KISA TEXT ÖZET
+    header_text = (
+        f"📊 *{label}*\n"
+        f"{pd.Timestamp.now():%Y-%m-%d %H:%M}\n\n"
+        f"📈 Hisse/Endeks: *{n_stocks}* | Toplam MA: *{n_total:,}*\n"
+        f"✅ Robust: *{n_robust:,}* ({robust_pct:.1f}%)\n"
+    )
+    send_telegram(token, chat_id, header_text, parse_mode='Markdown')
+
+    # 2. CROSS-STOCK TOP 20 - IMAGE TABLO
+    if 'wf_robust' in df.columns and df['wf_robust'].sum() > 0:
+        top20 = df[df['wf_robust'] == True].nlargest(20, 'composite_score')
+        title = "🏆 Robust Top 20 (Cross-Stock)"
+    else:
+        top20 = df.nlargest(20, 'composite_score')
+        title = "🏆 Top 20 (Composite Score)"
+
+    rows = []
+    colors_col = {0: []}  # ticker sütunu için renk listesi
+    for _, r in top20.iterrows():
+        ma_val = r.get('current_ma_value', None)
+        curr_price = r.get('current_close', None)
+
+        if ma_val is not None and not pd.isna(ma_val) and curr_price is not None:
+            if curr_price < 10:
+                vf = f"{ma_val:.4f}"
+            elif curr_price < 100:
+                vf = f"{ma_val:.3f}"
+            else:
+                vf = f"{ma_val:.2f}"
+            etiket = '🟢' if ma_val < curr_price else '🔴'
+            tcolor = '#7fc97f' if ma_val < curr_price else '#ff8c69'
+        else:
+            vf = '—'
+            etiket = ' '
+            tcolor = None
+
+        rows.append([
+            f"{etiket} {r['ticker']}",
+            r['ma_type'],
+            str(int(r['period'])),
+            vf,
+            f"{r['wr_pct']:.0f}%",
+            f"{r['expectancy']:+.2f}",
+        ])
+        colors_col[0].append(tcolor)
+
+    headers = ['Hisse', 'MA', 'Per', 'MA Değer', 'WR', 'Exp']
+    img_bytes = render_table_image(headers, rows, title=title, col_colors=colors_col)
+    if img_bytes:
+        send_photo(token, chat_id, img_bytes, caption=f"{title} — {n_stocks} hisse arasından")
+    else:
+        # Fallback - text gönder
+        text_lines = [title, '```']
+        text_lines.append(f"{'Hisse':<8} {'MA':<5} {'Per':<4} {'Değer':<10} {'WR':<5} {'Exp'}")
+        text_lines.append('-' * 45)
+        for row in rows:
+            text_lines.append(f"{row[0]:<8} {row[1]:<5} {row[2]:<4} {row[3]:<10} {row[4]:<5} {row[5]}")
+        text_lines.append('```')
+        send_telegram(token, chat_id, '\n'.join(text_lines), parse_mode='Markdown')
+
+    # 3. EN YAYGIN MA AİLELERİ (kısa text)
+    fam_lines = _format_ma_family_stats(df, n=10)
+    send_telegram(token, chat_id, '\n'.join(fam_lines), parse_mode='Markdown')
+
+    # 4. EN ÇOK ROBUST HİSSE - HER BİRİ İÇİN AYRI IMAGE TABLO
+    if 'wf_robust' in df.columns and n_robust > 0:
+        # Hisse başı robust MA sayısına göre sırala, top 12
+        robust_per_stock = (
+            df[df['wf_robust'] == True]
+            .groupby('ticker', group_keys=False)
+            .size().sort_values(ascending=False).head(12)
+        )
+
+        # Tüm hisselerin tek bir image'da kombinasyonu (daha sade)
+        all_rows = []
+        all_colors = {0: []}
+        for tk, cnt in robust_per_stock.items():
+            top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
+            curr_price = top5.iloc[0].get('current_close', None)
+            for idx, (_, r) in enumerate(top5.iterrows()):
+                ma_val = r.get('current_ma_value', None)
+                if ma_val is not None and not pd.isna(ma_val) and curr_price is not None:
+                    if curr_price < 10:
+                        vf = f"{ma_val:.4f}"
+                        pf = f"{curr_price:.4f}"
+                    elif curr_price < 100:
+                        vf = f"{ma_val:.3f}"
+                        pf = f"{curr_price:.3f}"
+                    else:
+                        vf = f"{ma_val:.2f}"
+                        pf = f"{curr_price:.2f}"
+                    etiket = '🟢' if ma_val < curr_price else '🔴'
+                    tcolor = '#7fc97f' if ma_val < curr_price else '#ff8c69'
+                else:
+                    vf = '—'; pf = '—'; etiket = ' '; tcolor = None
+
+                # İlk satırda hisse adı + fiyat, diğer satırlar boş
+                tk_label = f"{tk} ({pf})" if idx == 0 else ""
+                all_rows.append([
+                    tk_label,
+                    f"{etiket} {r['ma_type']}",
+                    str(int(r['period'])),
+                    vf,
+                    f"{r['wr_pct']:.0f}%",
+                    f"{r['expectancy']:+.2f}",
+                ])
+                all_colors[0].append(tcolor)
+
+        headers2 = ['Hisse (Fiyat)', 'MA', 'Per', 'MA Değer', 'WR', 'Exp']
+        img2 = render_table_image(
+            headers2, all_rows,
+            title="💎 En Çok Robust MA'lı 12 Hisse — Her Birinin Top 5'i",
+            col_colors=all_colors
+        )
+        if img2:
+            send_photo(token, chat_id, img2, caption="💎 Top 12 Hisse Detay")
+        else:
+            # Fallback - mevcut text format
+            text2 = _build_large_mode_text(df, robust_per_stock)
+            send_telegram(token, chat_id, text2, parse_mode='Markdown')
+
+
+def _build_large_mode_text(df, robust_per_stock):
+    """Image render edemezse fallback text format."""
+    lines = ["💎 *En Çok Robust MA'lı 12 Hisse*", "```"]
+    for tk, cnt in robust_per_stock.items():
+        top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
+        curr_price = top5.iloc[0].get('current_close', None)
+        if curr_price and not pd.isna(curr_price):
+            if curr_price < 10: pf = f"{curr_price:.4f}"
+            elif curr_price < 100: pf = f"{curr_price:.3f}"
+            else: pf = f"{curr_price:.2f}"
+            lines.append(f"{tk} ({pf}):")
+        else:
+            lines.append(f"{tk}:")
+        for _, r in top5.iterrows():
+            ma_val = r.get('current_ma_value', None)
+            if ma_val and not pd.isna(ma_val) and curr_price:
+                if curr_price < 10: vf = f"{ma_val:.4f}"
+                elif curr_price < 100: vf = f"{ma_val:.3f}"
+                else: vf = f"{ma_val:.2f}"
+                etiket = '🟢' if ma_val < curr_price else '🔴'
+                lines.append(f"  {etiket} {r['ma_type']:<5} {int(r['period']):<4} @{vf} WR={r['wr_pct']:.0f}%")
+            else:
+                lines.append(f"  {r['ma_type']:<5} {int(r['period']):<4} WR={r['wr_pct']:.0f}%")
+    lines.append("```")
+    return '\n'.join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv', required=False)
     parser.add_argument('--mode', choices=['daily', 'weekly'], default='daily')
+    parser.add_argument('--label', type=str, default='BIST MA Reaction Scan',
+                       help='Mesaj başlığı (ör: "BIST Endeks Tarama")')
     parser.add_argument('--test', action='store_true',
                        help='Sadece basit test mesaji gonder (CSV gerekmez)')
+    parser.add_argument('--text-only', action='store_true',
+                       help='Sadece text gonder (image yok)')
     args = parser.parse_args()
 
     token = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -346,14 +623,29 @@ def main():
                        parse_mode=None)
         return
 
-    text = format_daily(df) if args.mode == 'daily' else format_weekly(df)
-    print(f"Mesaj uzunlugu: {len(text)} char, {text.count(chr(10))} satir")
-    success = send_telegram(token, chat_id, text)
-    if success:
-        print(f"✓ Telegram BAŞARILI ({args.mode}, {df['ticker'].nunique()} hisse, {len(df)} kayıt)")
+    print(f"Mesaj hazirlaniyor: {df['ticker'].nunique()} hisse, {len(df)} kayit")
+
+    if args.text_only:
+        # ESKI YONTEM: sadece text
+        text = format_daily(df) if args.mode == 'daily' else format_weekly(df)
+        print(f"Text uzunlugu: {len(text)} char")
+        success = send_telegram(token, chat_id, text)
+        if success:
+            print(f"✓ Telegram BAŞARILI (text-only, {args.mode})")
+        else:
+            print(f"✗ Telegram BAŞARISIZ", file=sys.stderr)
+            sys.exit(1)
     else:
-        print(f"✗ Telegram BAŞARISIZ — log'larda hata detayına bak", file=sys.stderr)
-        sys.exit(1)
+        # YENI YONTEM: image-rich daily ozet
+        try:
+            send_rich_daily(token, chat_id, df, label=args.label)
+            print(f"✓ Telegram BAŞARILI (image-rich, {args.mode})")
+        except Exception as e:
+            print(f"⚠️ Rich mode hata: {e} - text fallback", file=sys.stderr)
+            text = format_daily(df) if args.mode == 'daily' else format_weekly(df)
+            success = send_telegram(token, chat_id, text)
+            if not success:
+                sys.exit(1)
 
 
 if __name__ == '__main__':
