@@ -82,21 +82,37 @@ def compute_ma(ma_type, close, volume, period):
     return None
 
 
+def is_bist_index(symbol):
+    """BIST endeks sembolu algilama (X ile baslar, 4+ karakter)."""
+    s = symbol.upper().replace('.IS', '')
+    return s.startswith('X') and len(s) >= 4
+
+
 def fetch_data(ticker, period_days=1100, source='borsapy'):
-    """3 yil veri cek."""
+    """3 yil veri cek. BIST endeksleri icin bp.Index() kullanir."""
     base = ticker.replace('.IS', '')
+    is_index = is_bist_index(base)
     try:
         if source == 'borsapy' and HAS_BORSAPY:
             start = (datetime.now() - timedelta(days=period_days)).strftime('%Y-%m-%d')
-            df = bp.Ticker(base).history(start=start)
+            if is_index and hasattr(bp, 'Index'):
+                # BIST endeksi: bp.Index() kullan
+                df = bp.Index(base).history(start=start)
+            else:
+                df = bp.Ticker(base).history(start=start)
         elif HAS_YFINANCE:
-            df = yf.download(f"{base}.IS", period='3y', progress=False, auto_adjust=True)
+            # yfinance: endeks icin ^ prefix veya .IS suffix dene
+            symbol = f"^{base}" if is_index else f"{base}.IS"
+            df = yf.download(symbol, period='3y', progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
         else:
             return None
         if df is None or len(df) < 100:
             return None
+        # Endekslerde Volume olmayabilir, NaN ise 1 ile doldur
+        if 'Volume' not in df.columns or df['Volume'].isna().all():
+            df['Volume'] = 1.0
         return df
     except Exception as e:
         print(f"  {ticker}: hata {e}")
