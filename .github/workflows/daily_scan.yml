@@ -109,6 +109,25 @@ jobs:
             --output reports/strategies_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
         continue-on-error: true
 
+      - name: Backtest Simülasyonu (tarihi PnL)
+        if: success()
+        run: |
+          python scanner/backtest_simulator.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
+            --all-robust --top_ma 3 \
+            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
+            --output reports/backtest_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
+        continue-on-error: true
+
+      - name: Multi-Indicator Confirmation (RSI/MACD/BB/Ichimoku/OBV/SMI)
+        if: success()
+        run: |
+          python scanner/multi_indicator_confirm.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
+            --all-robust --n_tickers 20 \
+            --output reports/confirm_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
+        continue-on-error: true
+
       - name: Telegram özet
         if: success()
         env:
