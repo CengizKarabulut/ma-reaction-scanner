@@ -1,10 +1,13 @@
-# === Veri kaynakları ===
-# Önerilen: borsapy (TradingView WebSocket, BIST için birebir senkron)
-borsapy>=0.5.0
-# Fallback: yfinance (Yahoo Finance, .IS suffix gerekir)
-yfinance>=0.2.30
+# Veri kaynakları
+borsapy
+yfinance
 
-# === Temel kütüphaneler ===
-pandas>=2.0.0
-numpy>=1.24.0
-requests>=2.31.0
+# Veri işleme
+pandas>=2.0
+numpy
+
+# Plot ve image üretimi (notifier image-rich mod için)
+matplotlib
+
+# PDF, rapor
+reportlab
