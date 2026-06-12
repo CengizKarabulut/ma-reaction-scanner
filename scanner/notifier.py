@@ -85,7 +85,7 @@ def send_telegram(token: str, chat_id: str, text: str, parse_mode: str = "Markdo
 
 
 def _format_cross_stock_top(df: pd.DataFrame, n: int = 20) -> list:
-    """Cross-stock top N (robust öncelikli)"""
+    """Cross-stock top N (robust öncelikli) — fiyat + MA değer + 🟢🔴 etiket dahil"""
     lines = []
     if 'wf_robust' in df.columns and df['wf_robust'].sum() > 0:
         lines.append(f"🏆 *Robust Top {n} (cross-stock)*")
@@ -95,13 +95,32 @@ def _format_cross_stock_top(df: pd.DataFrame, n: int = 20) -> list:
         top = df.nlargest(n, 'composite_score')
 
     lines.append("```")
-    lines.append(f"{'Hisse':<7} {'MA':<6} {'Per':<4} {'WR':<5} {'Exp':<6}")
-    lines.append("-" * 35)
+    # YENI: Fiyat + MA Değer + Etiket sütunları
+    lines.append(f"{'Hisse':<7} {'MA':<5} {'Per':<3} {'MA-Değ':<8} {'WR':<4} {'Exp'}")
+    lines.append("-" * 40)
     for _, r in top.iterrows():
-        lines.append(
-            f"{r['ticker']:<7} {r['ma_type']:<6} {r['period']:<4} "
-            f"{r['wr_pct']:<5.1f} {r['expectancy']:+.2f}"
-        )
+        ma_val = r.get('current_ma_value', None)
+        curr_price = r.get('current_close', None)
+
+        # MA değer + DESTEK/DIRENC etiketi
+        if ma_val is not None and not pd.isna(ma_val) and curr_price is not None and not pd.isna(curr_price):
+            if curr_price < 10:
+                vf = f"{ma_val:.4f}"
+            elif curr_price < 100:
+                vf = f"{ma_val:.3f}"
+            else:
+                vf = f"{ma_val:.2f}"
+            etiket = '🟢' if ma_val < curr_price else '🔴'
+            lines.append(
+                f"{etiket}{r['ticker']:<6} {r['ma_type']:<5} {int(r['period']):<3} "
+                f"{vf:<8} {r['wr_pct']:<4.0f} {r['expectancy']:+.2f}"
+            )
+        else:
+            # Fallback (eski format) — fiyat yoksa
+            lines.append(
+                f" {r['ticker']:<6} {r['ma_type']:<5} {int(r['period']):<3} "
+                f"{'—':<8} {r['wr_pct']:<4.0f} {r['expectancy']:+.2f}"
+            )
     lines.append("```")
     return lines
 
