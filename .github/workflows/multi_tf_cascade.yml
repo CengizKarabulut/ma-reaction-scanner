@@ -31,8 +31,12 @@ on:
         default: 'false'
       cascade_type:
         description: 'Cascade tipi: daily (1d+1wk+1mo) veya intraday (1h+4h+1d)'
-        required: false
+        required: true
         default: 'daily'
+        type: choice
+        options:
+          - daily
+          - intraday
 
 jobs:
   cascade-scan:
@@ -235,6 +239,7 @@ jobs:
         run: |
           python scanner/notifier.py \
             --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
+            --label "Multi-TF Cascade (${{ github.event.inputs.cascade_type || 'daily' }})" \
             --mode daily
         continue-on-error: true
 
