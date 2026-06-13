@@ -10,10 +10,41 @@ on:
         description: 'Sembol kodu (BIST: ASELS, Kripto: BTCUSD, Altın: XAUUSD, Endeks: XU100)'
         required: true
         default: 'ASELS'
-      use_latest_csv:
-        description: "Son tarama CSV'sini kullan (false = canlı tara, daha güncel)"
+      interval:
+        description: 'Zaman dilimi'
         required: false
-        default: 'true'
+        default: '1d'
+        type: choice
+        options:
+          - 1h
+          - 4h
+          - 1d
+          - 1wk
+          - 1mo
+      source:
+        description: 'Veri kaynağı'
+        required: false
+        default: 'borsapy'
+        type: choice
+        options:
+          - borsapy
+          - yfinance
+      use_latest_csv:
+        description: "Son tarama CSV'sini kullan (false=canlı tara, true=hızlı)"
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      strict_mode:
+        description: 'Sadece robust MA (gevşek fallback kapalı)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
       portfolio:
         description: 'Portföy büyüklüğü (TL)'
         required: false
@@ -22,18 +53,6 @@ on:
         description: 'Trade başına risk (%)'
         required: false
         default: '1.0'
-      source:
-        description: 'Veri kaynağı (borsapy / yfinance)'
-        required: false
-        default: 'borsapy'
-      interval:
-        description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
-        required: false
-        default: '1d'
-      strict_mode:
-        description: 'Sadece robust MA (gevşek fallback kapalı). false=zayıf sinyalleri de göster'
-        required: false
-        default: 'false'
 
 jobs:
   analyze:
