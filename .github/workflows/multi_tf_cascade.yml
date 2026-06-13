@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tickers:
-        description: 'Liste (BIST_TUM, BIST_100, BIST_50, vs)'
+        description: 'Liste: BIST_TUM, BIST_100, BIST_BILES:XBANK (endeks bileşeni), BIST_SEKTOR:Bankacılık'
         required: false
         default: 'BIST_100'
       period:
