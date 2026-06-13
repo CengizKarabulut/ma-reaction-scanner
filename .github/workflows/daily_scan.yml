@@ -163,6 +163,15 @@ jobs:
             --output reports/strategies_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
         continue-on-error: true
 
+      - name: 🌐 BIST Panorama (TÜM hisseler - yakın/uzak ayırmadan)
+        if: success()
+        run: |
+          # Cengiz'in özel isteği: tüm hisseler için tam tablo, sadece robust olanlar değil
+          python scanner/panorama_report.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
+            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
+        continue-on-error: true
+
       - name: Backtest Simülasyonu (tarihi PnL)
         if: success()
         run: |
