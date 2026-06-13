@@ -65,6 +65,53 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: BIST Veri Tazeliği Kontrolü
+        id: data_check
+        run: |
+          cd scanner
+          # Cache yaşı kontrolü — 7 günden eskiyse uyar, 30 günden eskiyse FAIL
+          python -c "
+          from bist_data_fetcher import load_cache, get_index_age_days
+          from pathlib import Path
+          import json, sys
+
+          cache = load_cache()
+          indices = cache.get('indices', {})
+
+          if not indices:
+              print('⚠️ BIST veri cache YOK!')
+              print('   → İlk çalıştırma olabilir.')
+              print('   → Actions → \"BIST Veri Güncelleyici\" → Run workflow')
+              print('   → Veya manuel: python scanner/bist_data_fetcher.py --update-all')
+              sys.exit(0)  # Fail etmeyelim, sadece uyaralım
+
+          # En eski endeksin yaşı
+          ages = []
+          for sym, entry in indices.items():
+              if entry.get('fetched_at'):
+                  age = get_index_age_days(sym)
+                  ages.append((sym, age))
+
+          if not ages:
+              print('⚠️ Cache entries yok')
+              sys.exit(0)
+
+          max_age = max(a for _, a in ages)
+          oldest = max(ages, key=lambda x: x[1])
+          print(f'En eski cache: {oldest[0]} ({oldest[1]:.1f} gün önce)')
+
+          if max_age > 30:
+              print(f'✗ BIST verileri 30+ GÜN ESKİ! Yanlış sonuç riski yüksek.')
+              print(f'  → Actions → BIST Veri Güncelleyici → Run')
+              sys.exit(1)
+          elif max_age > 7:
+              print(f'⚠️ BIST verileri eskidi ({max_age:.0f} gün). Güncellemen önerilir.')
+              print(f'  → Actions → BIST Veri Güncelleyici → Run')
+          else:
+              print(f'✓ BIST verileri taze ({max_age:.1f} gün)')
+          " || echo "Data check fail, scanner devam edecek"
+        continue-on-error: true
+
       - name: Parametreler
         id: prep
         run: |
