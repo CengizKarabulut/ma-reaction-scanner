@@ -221,20 +221,63 @@ def _save_cache(lists: dict):
 
 
 def _fetch_from_borsapy(index_symbol: str) -> list:
-    """borsapy ile endeks bileşenlerini çek (cache yok)."""
+    """borsapy v0.10+ ile endeks bileşenlerini çek - defensive, çoklu yöntem.
+
+    Sırayla denenen yöntemler:
+    1. bp.Index(symbol).component_symbols  (v0.10 API)
+    2. bp.Index(symbol).components → liste/dict
+    3. bp.Index(symbol).component_list  (eski API)
+    """
     try:
         import borsapy as bp
-        idx = bp.Index(index_symbol)
-        components = idx.component_symbols
-        if components:
-            print(f"  borsapy: {index_symbol} → {len(components)} hisse")
-            return list(components)
-        return []
     except ImportError:
-        raise RuntimeError(
-            "borsapy yüklü değil. 'pip install borsapy' veya virgülle "
-            "ayrılmış özel ticker listesi verin."
-        )
+        print(f"  ⚠️ borsapy yüklü değil ({index_symbol})")
+        return []
+
+    try:
+        idx = bp.Index(index_symbol)
+
+        # Yöntem 1: component_symbols (v0.10 native)
+        if hasattr(idx, 'component_symbols'):
+            try:
+                symbols = idx.component_symbols
+                if symbols:
+                    syms = list(symbols) if not isinstance(symbols, list) else symbols
+                    print(f"  borsapy v0.10: {index_symbol} → {len(syms)} hisse (component_symbols)")
+                    return syms
+            except Exception as e:
+                print(f"  ⚠️ component_symbols hata ({index_symbol}): {e}")
+
+        # Yöntem 2: components (dict liste olabilir)
+        if hasattr(idx, 'components'):
+            try:
+                comps = idx.components
+                if comps is not None:
+                    if isinstance(comps, list) and len(comps) > 0:
+                        # [{'symbol': 'GARAN', 'name': '...'}, ...] formatı
+                        if isinstance(comps[0], dict):
+                            syms = [c.get('symbol', '') for c in comps if c.get('symbol')]
+                        else:
+                            syms = list(comps)
+                        if syms:
+                            print(f"  borsapy: {index_symbol} → {len(syms)} hisse (components)")
+                            return syms
+            except Exception as e:
+                print(f"  ⚠️ components hata ({index_symbol}): {e}")
+
+        # Yöntem 3: component_list (eski API)
+        if hasattr(idx, 'component_list'):
+            try:
+                comps = idx.component_list
+                if comps:
+                    print(f"  borsapy: {index_symbol} → {len(comps)} hisse (component_list - eski API)")
+                    return list(comps)
+            except Exception:
+                pass
+
+        print(f"  ⚠️ {index_symbol}: borsapy bileşen API bulunamadı")
+        return []
+
     except Exception as e:
         print(f"  borsapy hatası ({index_symbol}): {e}")
         return []
@@ -371,15 +414,81 @@ def get_list(name: str) -> list:
               f"(borsapy ulaşılamadı)")
         return cached
 
-    # 3) Tamamen başarısız
-    print(f"  HATA: {name} listesi alınamadı. borsapy çalışmıyor ve cache yok.")
+    # 3) Hardcoded fallback (en kritik endeksler için)
+    if index_symbol in _HARDCODED_FALLBACK:
+        hardcoded = _HARDCODED_FALLBACK[index_symbol]
+        print(f"  Hardcoded fallback: {index_symbol} → {len(hardcoded)} hisse "
+              f"(borsapy fail, statik liste kullanılıyor)")
+        # Cache'e de yaz ki sonraki seferler hızlı olsun
+        cache[index_symbol] = hardcoded
+        _save_cache(cache)
+        return hardcoded
+
+    # 4) Tamamen başarısız
+    print(f"  HATA: {name} listesi alınamadı. borsapy çalışmıyor ve cache/hardcoded yok.")
     print(f"  Çözüm: --tickers HISSE1,HISSE2,... şeklinde manuel liste verin.")
     return []
+
+
+# === HARDCODED FALLBACK LİSTELER ===
+# borsapy çalışmazsa kullanılır. ~2026 verisi, periyodik güncellemek gerekir.
+_HARDCODED_FALLBACK = {
+    'XU030': [  # BIST 30
+        'AKBNK', 'AKSEN', 'ALARK', 'ARCLK', 'ASELS', 'ASTOR', 'BIMAS',
+        'EKGYO', 'ENKAI', 'EREGL', 'FROTO', 'GARAN', 'HEKTS', 'ISCTR',
+        'KCHOL', 'KOZAL', 'KRDMD', 'MGROS', 'OYAKC', 'PETKM', 'PGSUS',
+        'SAHOL', 'SASA', 'SISE', 'TAVHL', 'TCELL', 'THYAO', 'TOASO',
+        'TUPRS', 'YKBNK',
+    ],
+    'XU050': [  # BIST 50 = XU30 + 20 ek hisse
+        'AKBNK', 'AKSEN', 'ALARK', 'ARCLK', 'ASELS', 'ASTOR', 'BIMAS',
+        'EKGYO', 'ENKAI', 'EREGL', 'FROTO', 'GARAN', 'HEKTS', 'ISCTR',
+        'KCHOL', 'KOZAL', 'KRDMD', 'MGROS', 'OYAKC', 'PETKM', 'PGSUS',
+        'SAHOL', 'SASA', 'SISE', 'TAVHL', 'TCELL', 'THYAO', 'TOASO',
+        'TUPRS', 'YKBNK',
+        # +20
+        'AEFES', 'AGHOL', 'AHGAZ', 'AKFGY', 'ALKIM', 'ANSGR', 'BERA',
+        'BRSAN', 'CCOLA', 'CIMSA', 'DOAS', 'DOHOL', 'ENJSA', 'GUBRF',
+        'KOZAA', 'KRDMA', 'MAVI', 'ODAS', 'TKFEN', 'ULKER',
+    ],
+    'XU100': [  # BIST 100 = XU50 + 50 ek
+        'AKBNK', 'AKSEN', 'ALARK', 'ARCLK', 'ASELS', 'ASTOR', 'BIMAS',
+        'EKGYO', 'ENKAI', 'EREGL', 'FROTO', 'GARAN', 'HEKTS', 'ISCTR',
+        'KCHOL', 'KOZAL', 'KRDMD', 'MGROS', 'OYAKC', 'PETKM', 'PGSUS',
+        'SAHOL', 'SASA', 'SISE', 'TAVHL', 'TCELL', 'THYAO', 'TOASO',
+        'TUPRS', 'YKBNK',
+        'AEFES', 'AGHOL', 'AHGAZ', 'AKFGY', 'ALKIM', 'ANSGR', 'BERA',
+        'BRSAN', 'CCOLA', 'CIMSA', 'DOAS', 'DOHOL', 'ENJSA', 'GUBRF',
+        'KOZAA', 'KRDMA', 'MAVI', 'ODAS', 'TKFEN', 'ULKER',
+        # +50
+        'ADESE', 'AGROT', 'AKCNS', 'AKFYE', 'ALBRK', 'ALCTL', 'ALFAS',
+        'ANGEN', 'ARTMS', 'AYDEM', 'BAGFS', 'BANVT', 'BFREN', 'BIOEN',
+        'BIZIM', 'BTCIM', 'CWENE', 'DEVA', 'DOGUB', 'DOKTA', 'EGEEN',
+        'EUREN', 'EUROPI', 'FENER', 'GENIL', 'GESAN', 'GLYHO', 'GOLTS',
+        'GWIND', 'IPEKE', 'KARSN', 'KARTN', 'KCAER', 'KORDS', 'KRVGD',
+        'MAGEN', 'MIATK', 'NTHOL', 'NUHCM', 'OTKAR', 'PAPIL', 'PENTA',
+        'POLHO', 'QUAGR', 'SDTTR', 'SMRTG', 'TUKAS', 'VAKBN', 'VESTL',
+        'YEOTK',
+    ],
+    'XBANK': [
+        'GARAN', 'AKBNK', 'ISCTR', 'YKBNK', 'HALKB', 'VAKBN',
+        'ALBRK', 'ICBCT', 'QNBTR', 'SKBNK', 'TSKB',
+    ],
+    'XHOLD': [
+        'SAHOL', 'KCHOL', 'SISE', 'ZOREN', 'DOHOL', 'ENKAI',
+        'GLYHO', 'IHLAS', 'TKFEN', 'ALARK', 'AGHOL', 'BERA', 'NTHOL',
+    ],
+}
 
 
 def list_available() -> list:
     """Desteklenen tüm isim/sembolleri döndür."""
     return sorted(INDEX_MAP.keys()) + ['Direkt sembol: XU100, XBANK, XKTUM, vs.']
+
+
+# === BACKWARD COMPATIBLE ALIAS ===
+# Bazı modüller/workflow'lar get_tickers() çağırıyor (eski isim)
+get_tickers = get_list
 
 
 if __name__ == '__main__':
