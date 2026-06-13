@@ -123,6 +123,32 @@ jobs:
             --report html --top_n 20
 
       # ============================================================
+      # STEP 1.5: CSV oluştu mu kontrol et — yoksa exit
+      # ============================================================
+      - name: 1.5️⃣ Tarama CSV kontrol
+        run: |
+          CSV="reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv"
+          if [ -f "$CSV" ]; then
+            LINES=$(wc -l < "$CSV")
+            echo "✓ Tarama CSV oluştu ($LINES satır): $CSV"
+            if [ "$LINES" -lt 2 ]; then
+              echo "✗ CSV boş veya sadece header var, devam edemez"
+              exit 1
+            fi
+          else
+            echo "✗ TARAMA CSV'Sİ OLUŞMADI: $CSV"
+            echo ""
+            echo "Olası nedenler:"
+            echo "  1. borsapy çalışmıyor (versiyon ve internet bağlantısı kontrol)"
+            echo "  2. Tickers listesi boş geldi (BIST_100 → boş)"
+            echo "  3. Filtre çok sıkı (min_volume_tl çok yüksek)"
+            echo ""
+            echo "Reports klasöründe ne var:"
+            ls -la reports/ || true
+            exit 1
+          fi
+
+      # ============================================================
       # STEP 2: Daily-robust hisseleri çıkar
       # ============================================================
       - name: 2️⃣ Robust hisseleri çıkar
