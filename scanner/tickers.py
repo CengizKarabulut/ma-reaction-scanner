@@ -83,42 +83,104 @@ INSTRUMENT_GROUPS = {
 
     # === BIST Endekslerinin KENDİSİ (bileşenleri değil) ===
     # Bu listede endeks sembolleri var. Her biri endeks fiyat geçmişi olarak çekilir.
-    # XBANK endeksinin (12000 puan) kendi MA'larına saygı pattern'i analiz edilir.
+    # NOT: borsapy SADECE 4 ana endeksi destekliyor (XU030, XU050, XU100, XUTUM).
+    # Sektör endeksleri (XBANK, XKMYA vs.) bp.Index() ile çekilemiyor — yfinance de Türk endekslerini desteklemiyor.
+    # Bu yüzden liste 4 endeksle sınırlı tutuldu.
+    # === BIST_ENDEKSLER ===
+    # borsapy v0.10+ ile 79 endeks erişilebilir.
+    # BIST_ENDEKSLER: Ana 4 endeks (kesin çalışan, hızlı test için)
+    # BIST_TUM_ENDEKSLER: get_list() ile 79 endeks dinamik (yukarıya bak)
     'BIST_ENDEKSLER': [
-        # Ana ulusal endeksler
+        'XU030',  # BIST 30
+        'XU050',  # BIST 50
+        'XU100',  # BIST 100
+        'XUTUM',  # BIST Tüm
+    ],
+
+    # Genişletilmiş statik liste — borsapy'nin desteklediği 36 ana endeks
+    # (BIST_TUM_ENDEKSLER ile aynı sonucu verir ama statik)
+    'BIST_ENDEKSLER_GENIS': [
+        # Ana endeksler
         'XU030', 'XU050', 'XU100', 'XUTUM',
-        # Katılım endeksleri
+        # Katılım
         'XKTUM', 'XK030', 'XK050', 'XK100',
-        # Sektör endeksleri (28 tane)
-        'XBANK',  # Banka
-        'XUSIN',  # Sınai
-        'XUMAL',  # Mali
-        'XUTEK',  # Teknoloji
-        'XHOLD',  # Holding
-        'XKMYA',  # Kimya, Petrol Kauçuk
-        'XGIDA',  # Gıda, İçecek
-        'XSGRT',  # Sigorta
-        'XYORT',  # GYO
-        'XTRZM',  # Turizm
-        'XELKT',  # Elektrik
-        'XILTM',  # İletişim
-        'XINSA',  # İnşaat
-        'XKAGT',  # Orman, Kağıt, Basım
-        'XMADN',  # Madencilik
-        'XMESY',  # Metal Eşya, Makine
-        'XSPOR',  # Spor
-        'XTAST',  # Taş Toprak
-        'XTCRT',  # Ticaret
-        'XTEKS',  # Tekstil, Deri
-        'XULAS',  # Ulaştırma
-        'XSVNM',  # Savunma
-        'XUHIZ',  # Hizmetler
-        'XMANA',  # Ana Metal
-        # Tema endeksleri
-        'XTMTU',  # Temettü
-        'XTM25',  # Temettü 25
-        'XYUZO',  # Yıldız
-        'XKURY',  # Kurumsal Yönetim
+        # Sektör (borsapy bp.Index() ile çalışıyor)
+        'XBANK', 'XUSIN', 'XUMAL', 'XUTEK', 'XHOLD',
+        'XKMYA', 'XGIDA', 'XSGRT', 'XYORT', 'XTRZM',
+        'XELKT', 'XILTM', 'XINSA', 'XKAGT', 'XMADN',
+        'XMESY', 'XSPOR', 'XTAST', 'XTCRT', 'XTEKS',
+        'XULAS', 'XSVNM', 'XUHIZ', 'XMANA',
+        'XTMTU', 'XTM25', 'XYUZO', 'XKURY',
+    ],
+
+    # === SEKTÖR HİSSE GRUPLARI ===
+    # Endeks taraması yapamıyoruz diye, sektörün BİLEŞEN HİSSELERİNİ topluca tara.
+    # Bu hisseler endeksi temsil eden ana oyuncular. Toplu davranışları = sektör trendi.
+
+    'BIST_BANKA': [
+        # XBANK endeksi yerine kullan
+        'GARAN', 'AKBNK', 'ISCTR', 'YKBNK', 'HALKB', 'VAKBN',
+        'KCMHL', 'ALBRK', 'ICBCT', 'QNBTR', 'SKBNK', 'TSKB',
+    ],
+
+    'BIST_HOLDING': [
+        # XHOLD endeksi yerine
+        'SAHOL', 'KCHOL', 'SISE', 'ZOREN', 'DOHOL', 'ENKAI',
+        'GLYHO', 'IHLAS', 'TKFEN', 'ALARK', 'AGHOL', 'KOZAA',
+        'KOZAL', 'IHGZT', 'NTHOL', 'BERA',
+    ],
+
+    'BIST_GIDA': [
+        # XGIDA endeksi yerine
+        'ULKER', 'ULUUN', 'BANVT', 'PNSUT', 'KENT', 'KERVT',
+        'CCOLA', 'TUKAS', 'KRSAN', 'KNFRT', 'AVOD', 'TATGD',
+        'GOLTS', 'MERKO', 'PETUN',
+    ],
+
+    'BIST_KIMYA': [
+        # XKMYA endeksi yerine
+        'AKSA', 'GUBRF', 'EGGUB', 'BAGFS', 'PETKM', 'TUPRS',
+        'BOSSA', 'DEVA', 'HEKTS', 'RTALB', 'SOKE', 'YATAS',
+        'ALKIM', 'ATATP', 'YUNSA',
+    ],
+
+    'BIST_TEKNOLOJI': [
+        # XUTEK endeksi yerine
+        'ASELS', 'TCELL', 'TTKOM', 'KAREL', 'LOGO', 'INDES',
+        'NETAS', 'ARENA', 'KAFEIN', 'ESCAR', 'PAPIL', 'DGATE',
+        'PENTA', 'MIATK', 'OTOSR',
+    ],
+
+    'BIST_INSAAT': [
+        # XINSA endeksi yerine
+        'ENKAI', 'TKFEN', 'YYAPI', 'SISE', 'AKCNS', 'CIMSA',
+        'BTCIM', 'KONYA', 'BOLUC', 'UNYEC', 'CMENT', 'BANVT',
+        'BIZIM', 'ASUZU',
+    ],
+
+    'BIST_ENERJI': [
+        # XELKT endeksi yerine
+        'AKSEN', 'AYDEM', 'AKENR', 'ENJSA', 'ZOREN', 'ODAS',
+        'GWIND', 'ASUZU', 'KARTN', 'POLHO', 'AKFGY', 'EKGYO',
+    ],
+
+    'BIST_GAYRIMENKUL': [
+        # XYORT endeksi yerine
+        'EKGYO', 'OZGYO', 'TRGYO', 'AKFGY', 'AGYO', 'AVGYO',
+        'KRGYO', 'NUGYO', 'OZKGY', 'PEGYO', 'SAFKR', 'SNGYO',
+        'TSGYO', 'YGYO', 'YGGYO', 'PSGYO',
+    ],
+
+    'BIST_OTOMOTIV': [
+        # Genel otomotiv & yan sanayi
+        'FROTO', 'TOASO', 'OTKAR', 'BFREN', 'TUMUS', 'KATMR',
+        'EGEEN', 'PRKAB', 'MARKA', 'JANTS', 'PINSU',
+    ],
+
+    'BIST_DEMIRCELIK': [
+        # XMANA + metal ana sanayi
+        'EREGL', 'KRDMD', 'KRDMA', 'CEMAS', 'CEMTS', 'BURVA',
+        'BMSCH', 'IZMDC', 'BNTAS', 'EGEEN',
     ],
 }
 
@@ -191,15 +253,84 @@ def _fetch_bist_tum() -> list:
 def get_list(name: str) -> list:
     """İsim ile hisse listesi döndür.
 
+    Özel prefix'ler (borsapy v0.10+):
+    - BIST_BILES:XBANK       → XBANK endeksinin bileşen hisseleri (borsapy direkt)
+    - BIST_SEKTOR:Bankacılık → Sektördeki tüm hisseler (cache'ten)
+    - BIST_TUM_ENDEKSLER     → 79 BIST endeksi (borsapy direkt)
+
     Sırayla denenir:
-    1. INSTRUMENT_GROUPS (BIST dışı: kripto, forex, metal)
-    2. borsapy ile canlı çekim (BIST endeksleri)
-    3. Cache (son 7 gün)
-    4. Hata fırlatma
+    1. Özel prefix'ler (BIST_BILES, BIST_SEKTOR)
+    2. BIST_TUM_ENDEKSLER → bp.all_indices() tümü
+    3. INSTRUMENT_GROUPS (BIST dışı + statik gruplar)
+    4. borsapy ile canlı endeks çekim (BIST endeksleri)
+    5. Cache (son 7 gün)
     """
     name_upper = name.upper().strip()
 
-    # Multi-instrument grup kontrolu (BIST disi)
+    # === YENİ 1: Endeks bileşenleri (borsapy direkt) ===
+    if name_upper.startswith('BIST_BILES:') or name_upper.startswith('BILES:'):
+        index_sym = name.split(':', 1)[1].strip().upper()
+        try:
+            import sys
+            from pathlib import Path
+            scanner_dir = Path(__file__).parent
+            if str(scanner_dir) not in sys.path:
+                sys.path.insert(0, str(scanner_dir))
+            from sector_resolver import get_tickers_by_index
+            tickers = get_tickers_by_index(index_sym)
+            if tickers:
+                print(f"  Endeks bileşenleri: {index_sym} → {len(tickers)} hisse (borsapy)")
+                return tickers
+            print(f"  ⚠️ {index_sym} bileşenleri alınamadı")
+            return []
+        except ImportError:
+            print(f"  ⚠️ sector_resolver.py bulunamadı")
+            return []
+
+    # === YENİ 2: Tüm BIST endeksleri (79 adet) ===
+    if name_upper in ('BIST_TUM_ENDEKSLER', 'TUM_ENDEKSLER', 'ALL_INDICES'):
+        try:
+            import sys
+            from pathlib import Path
+            scanner_dir = Path(__file__).parent
+            if str(scanner_dir) not in sys.path:
+                sys.path.insert(0, str(scanner_dir))
+            from sector_resolver import list_all_indices
+            idxs = list_all_indices(detailed=False)
+            if idxs:
+                # detailed=False'tan dict gelirse temizle
+                symbols = [d['symbol'] if isinstance(d, dict) else d for d in idxs]
+                print(f"  Tüm BIST endeksleri: {len(symbols)} adet (borsapy)")
+                return symbols
+            print(f"  ⚠️ Endeks listesi alınamadı")
+            return []
+        except ImportError:
+            print(f"  ⚠️ sector_resolver.py bulunamadı")
+            return []
+
+    # === Dinamik sektör grubu (cache'ten) ===
+    if name_upper.startswith('BIST_SEKTOR:') or name_upper.startswith('SEKTOR:'):
+        sector_name = name.split(':', 1)[1].strip()
+        try:
+            import sys
+            from pathlib import Path
+            scanner_dir = Path(__file__).parent
+            if str(scanner_dir) not in sys.path:
+                sys.path.insert(0, str(scanner_dir))
+            from sector_resolver import get_tickers_by_sector
+            tickers = get_tickers_by_sector(sector_name)
+            if tickers:
+                print(f"  Sektör grubu: '{sector_name}' → {len(tickers)} hisse (cache'den)")
+                return tickers
+            else:
+                print(f"  ⚠️ '{sector_name}' sektöründe hisse yok (cache boş olabilir)")
+                print(f"  → Önce: python scanner/sector_resolver.py --build-cache")
+                return []
+        except ImportError:
+            print(f"  ⚠️ sector_resolver.py bulunamadi")
+            return []
+
+    # Multi-instrument grup kontrolu (BIST disi + statik)
     if name_upper in INSTRUMENT_GROUPS:
         symbols = INSTRUMENT_GROUPS[name_upper]
         print(f"  Multi-instrument grup: {name_upper} → {len(symbols)} sembol")
@@ -213,7 +344,9 @@ def get_list(name: str) -> list:
         index_symbol = name_upper
     else:
         all_avail = list(INDEX_MAP.keys()) + list(INSTRUMENT_GROUPS.keys())
-        print(f"  HATA: '{name}' tanımlı değil. Geçerli: {', '.join(all_avail)}")
+        print(f"  HATA: '{name}' tanımlı değil.")
+        print(f"  Geçerli isim grupları: {', '.join(all_avail[:15])}...")
+        print(f"  Veya: 'BIST_SEKTOR:Banks', 'BIST_SEKTOR:Technology' (cache'ten)")
         return []
 
     # Cache'i yükle (varsa)
