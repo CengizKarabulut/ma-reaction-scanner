@@ -105,19 +105,29 @@ def fetch_data(ticker, period_days=1100, source='borsapy'):
 
     try:
         if source == 'borsapy' and HAS_BORSAPY:
+            # Borsapy period stringi yerine start_date kullan (3y'yi anlamıyor)
+            from datetime import datetime as _dt, timedelta as _td
+            _start = (_dt.now() - _td(days=period_days + 60)).strftime('%Y-%m-%d')
+
+            def _bp_h(obj):
+                try:
+                    return obj.history(start=_start, interval='1d')
+                except TypeError:
+                    return obj.history(period=bp_period, interval='1d')
+
             df = None
             if is_index and hasattr(bp, 'Index'):
                 try:
-                    df = bp.Index(base).history(period=bp_period, interval='1d')
+                    df = _bp_h(bp.Index(base))
                 except Exception:
                     df = None
                 if df is None or df.empty:
                     try:
-                        df = bp.Ticker(base).history(period=bp_period, interval='1d')
+                        df = _bp_h(bp.Ticker(base))
                     except Exception:
                         df = None
             else:
-                df = bp.Ticker(base).history(period=bp_period, interval='1d')
+                df = _bp_h(bp.Ticker(base))
         elif HAS_YFINANCE:
             symbol = f"^{base}" if is_index else f"{base}.IS"
             df = yf.download(symbol, period='3y', progress=False, auto_adjust=True)
