@@ -4,28 +4,29 @@ name: BIST Endeks Tarama
 # XBANK endeksi (12000 puan) kendi MA'larına saygı duyuyor mu?
 # Makro trend filtresi için kullanılır.
 #
+# DEFAULT: BIST_TUM_ENDEKSLER → borsapy.all_indices() ile dinamik 79 endeks
 # Tam pipeline: tarama + strategy + backtest + multi-indicator confirm + zengin Telegram
 
 on:
   schedule:
-    - cron: '30 16 * * 1-5'   # 19:30 İstanbul, hafta içi (daily scan'den 1 saat sonra)
+    - cron: '30 16 * * 1-5'   # 19:30 İstanbul, hafta içi
   workflow_dispatch:
     inputs:
       tickers:
-        description: 'Endeks listesi seç'
+        description: 'Endeks listesi seç (varsayılan: TÜM 79 endeks)'
         required: false
-        default: 'BIST_ENDEKSLER'
+        default: 'BIST_TUM_ENDEKSLER'
         type: choice
         options:
+          - BIST_TUM_ENDEKSLER       # 79 endeks (borsapy dinamik) - VARSAYILAN
+          - BIST_ENDEKSLER_GENIS     # 36 endeks (sektörler dahil, statik)
           - BIST_ENDEKSLER           # 4 ana endeks (hızlı test)
-          - BIST_ENDEKSLER_GENIS     # 36 endeks (sektörler dahil)
-          - BIST_TUM_ENDEKSLER       # 79 endeks (borsapy dinamik)
       period:
         description: 'Veri periyodu'
         required: false
         default: '5y'
       interval:
-        description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
+        description: 'Zaman dilimi'
         required: false
         default: '1d'
         type: choice
@@ -47,7 +48,7 @@ on:
 jobs:
   scan-indices:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90    # 79 endeks için uzun timeout (her endeks ~30-60 sn)
 
     steps:
       - name: Repo checkout
@@ -64,6 +65,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: BIST Veri Tazeliği (opsiyonel)
+        run: |
+          cd scanner
+          python -c "
+          from bist_data_fetcher import load_cache, get_index_age_days
+          cache = load_cache()
+          indices = cache.get('indices', {})
+          if not indices:
+              print('ℹ️ BIST veri cache henüz YOK. Endeks listesi borsapy üzerinden alınacak.')
+          else:
+              ages = [get_index_age_days(s) for s in indices if indices[s].get('fetched_at')]
+              if ages:
+                  print(f'✓ Cache: {len(indices)} endeks, en eski {max(ages):.1f} gün')
+          " || true
+        continue-on-error: true
+
       - name: Tarih hazırla
         id: prep
         run: |
@@ -71,7 +88,13 @@ jobs:
           echo "ts=$TS" >> $GITHUB_OUTPUT
           mkdir -p reports
 
-      - name: Walk-forward bayrağı ayarla
+          # workflow_dispatch yoksa (schedule), default tickers değeri kullan
+          TICKERS="${{ github.event.inputs.tickers }}"
+          [ -z "$TICKERS" ] && TICKERS="BIST_TUM_ENDEKSLER"
+          echo "tickers=$TICKERS" >> $GITHUB_OUTPUT
+          echo "Endeks listesi: $TICKERS"
+
+      - name: Walk-forward bayrağı
         id: wf
         run: |
           if [ "${{ github.event.inputs.no_walk_forward || 'false' }}" = "true" ]; then
@@ -81,12 +104,12 @@ jobs:
           fi
 
       # ============================================================
-      # STEP 1: ENDEKS TARAMA — BIST_ENDEKSLER grubu (35+ endeks)
+      # STEP 1: ENDEKS TARAMA — 79 endeksin hepsi (default)
       # ============================================================
-      - name: 1️⃣ Endeks Tarama (MA-Saygı)
+      - name: 1️⃣ Endeks Tarama (MA-Saygı, ${{ steps.prep.outputs.tickers }})
         run: |
           python scanner/bist_ma_reaction_scanner.py \
-            --all-bist --bist-list ${{ github.event.inputs.tickers || 'BIST_ENDEKSLER' }} \
+            --all-bist --bist-list ${{ steps.prep.outputs.tickers }} \
             --source ${{ github.event.inputs.source || 'borsapy' }} \
             --interval ${{ github.event.inputs.interval || '1d' }} \
             --period ${{ github.event.inputs.period || '5y' }} \
@@ -94,6 +117,25 @@ jobs:
             --output reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
             --report html --top_n 20 \
             --min_touches 8
+
+      # ============================================================
+      # STEP 1.5: CSV oluştu mu kontrol et
+      # ============================================================
+      - name: 1.5️⃣ Tarama CSV kontrol
+        run: |
+          CSV="reports/index_scan_${{ steps.prep.outputs.ts }}.csv"
+          if [ ! -f "$CSV" ]; then
+            echo "✗ TARAMA CSV'Sİ OLUŞMADI: $CSV"
+            echo "Olası sebep: borsapy çalışmıyor veya endeks listesi boş geldi"
+            ls -la reports/ || true
+            exit 1
+          fi
+          LINES=$(wc -l < "$CSV")
+          echo "✓ Tarama CSV oluştu: $LINES satır"
+          if [ "$LINES" -lt 2 ]; then
+            echo "⚠️ CSV boş veya sadece header — devam edilemez"
+            exit 1
+          fi
 
       # ============================================================
       # STEP 2: STRATEJİ RAPORU (her endeks için fiyat + MA değer + cluster)
@@ -121,18 +163,17 @@ jobs:
 
       # ============================================================
       # STEP 4: MULTI-INDICATOR CONFIRMATION
-      # (her endeksin RSI/MACD/BB/İchimoku/OBV/SMI durumu)
       # ============================================================
       - name: 4️⃣ Multi-Indicator Confirmation (RSI/MACD/BB/...)
         run: |
           python scanner/multi_indicator_confirm.py \
             --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
-            --all-robust --n_tickers 20 \
+            --all-robust --n_tickers 30 \
             --output reports/index_confirm_${{ steps.prep.outputs.ts }}.html
         continue-on-error: true
 
       # ============================================================
-      # STEP 5: ZENGIN TELEGRAM ÖZETİ (notifier ile — fiyat + MA değer + 🟢🔴)
+      # STEP 5: TELEGRAM ZENGIN ÖZET (image tablo)
       # ============================================================
       - name: 5️⃣ Telegram Zengin Özet
         if: success()
@@ -140,10 +181,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Notifier ile zengin format (image tablo + DESTEK/DIRENC renkleri)
           python scanner/notifier.py \
             --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
-            --label "BIST Endeks Tarama" \
+            --label "BIST Endeks Tarama (${{ steps.prep.outputs.tickers }})" \
             --mode daily
         continue-on-error: true
 
