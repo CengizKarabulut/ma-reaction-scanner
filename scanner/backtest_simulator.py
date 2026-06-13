@@ -89,19 +89,36 @@ def is_bist_index(symbol):
 
 
 def fetch_data(ticker, period_days=1100, source='borsapy'):
-    """3 yil veri cek. BIST endeksleri icin bp.Index() kullanir."""
+    """3 yil veri cek (borsapy v0.10+). BIST endeksleri icin bp.Index() kullanir."""
     base = ticker.replace('.IS', '')
     is_index = is_bist_index(base)
+
+    # period_days → borsapy period
+    if period_days >= 1825:
+        bp_period = '5y'
+    elif period_days >= 1100:
+        bp_period = '3y'
+    elif period_days >= 365:
+        bp_period = '1y'
+    else:
+        bp_period = f"{period_days}g"
+
     try:
         if source == 'borsapy' and HAS_BORSAPY:
-            start = (datetime.now() - timedelta(days=period_days)).strftime('%Y-%m-%d')
+            df = None
             if is_index and hasattr(bp, 'Index'):
-                # BIST endeksi: bp.Index() kullan
-                df = bp.Index(base).history(start=start)
+                try:
+                    df = bp.Index(base).history(period=bp_period, interval='1d')
+                except Exception:
+                    df = None
+                if df is None or df.empty:
+                    try:
+                        df = bp.Ticker(base).history(period=bp_period, interval='1d')
+                    except Exception:
+                        df = None
             else:
-                df = bp.Ticker(base).history(start=start)
+                df = bp.Ticker(base).history(period=bp_period, interval='1d')
         elif HAS_YFINANCE:
-            # yfinance: endeks icin ^ prefix veya .IS suffix dene
             symbol = f"^{base}" if is_index else f"{base}.IS"
             df = yf.download(symbol, period='3y', progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
@@ -110,7 +127,6 @@ def fetch_data(ticker, period_days=1100, source='borsapy'):
             return None
         if df is None or len(df) < 100:
             return None
-        # Endekslerde Volume olmayabilir, NaN ise 1 ile doldur
         if 'Volume' not in df.columns or df['Volume'].isna().all():
             df['Volume'] = 1.0
         return df
