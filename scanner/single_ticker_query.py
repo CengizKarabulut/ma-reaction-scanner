@@ -104,34 +104,50 @@ def fetch_data(ticker, source='borsapy', period_days=1100, interval='1d'):
                 bp_interval = '1d'
                 needs_resample = None
 
-            bp_period = _bp_period_for_interval(interval, period_days)
+            # KRİTİK: borsapy period stringi yerine start_date kullan (intraday hariç)
+            from datetime import datetime, timedelta
+            if interval in ('1m','3m','5m','15m','30m','45m','1h','4h'):
+                # Intraday için period kısa - period kullan
+                bp_period = _bp_period_for_interval(interval, period_days)
+                use_start, bp_start = False, None
+            else:
+                # Günlük+ için start_date kullan (borsapy '3y'yi anlamıyor!)
+                bp_start = (datetime.now() - timedelta(days=period_days + 60)).strftime('%Y-%m-%d')
+                bp_period = None
+                use_start = True
 
-            # Endeks için bp.Index() önce, sonra bp.Ticker() fallback
+            def _bp_hist(obj):
+                if use_start:
+                    try:
+                        return obj.history(start=bp_start, interval=bp_interval)
+                    except TypeError:
+                        return obj.history(period='1y', interval=bp_interval)
+                return obj.history(period=bp_period, interval=bp_interval)
+
             df = None
             if inst_type == 'bist_index' and hasattr(bp, 'Index'):
                 try:
-                    df = bp.Index(base).history(period=bp_period, interval=bp_interval)
+                    df = _bp_hist(bp.Index(base))
                     if df is not None and not df.empty:
                         print(f"  ✓ {base}: bp.Index({bp_interval}) → {len(df)} bar")
                 except Exception:
                     df = None
                 if df is None or df.empty or len(df) < 20:
                     try:
-                        df = bp.Ticker(base).history(period=bp_period, interval=bp_interval)
+                        df = _bp_hist(bp.Ticker(base))
                         if df is not None and not df.empty:
                             print(f"  ✓ {base}: bp.Ticker() fallback → {len(df)} bar")
                     except Exception:
                         df = None
             else:
-                t = bp.Ticker(base)
-                df = t.history(period=bp_period, interval=bp_interval)
+                df = _bp_hist(bp.Ticker(base))
                 if df is None or df.empty or len(df) < 20:
                     if inst_type == 'crypto' and hasattr(bp, 'Crypto'):
-                        df = bp.Crypto(base).history(period=bp_period, interval=bp_interval)
+                        df = _bp_hist(bp.Crypto(base))
                     elif inst_type == 'forex' and hasattr(bp, 'FX'):
-                        df = bp.FX(base).history(period=bp_period, interval=bp_interval)
+                        df = _bp_hist(bp.FX(base))
                     elif inst_type == 'metal' and hasattr(bp, 'Metal'):
-                        df = bp.Metal(base).history(period=bp_period, interval=bp_interval)
+                        df = _bp_hist(bp.Metal(base))
 
             if df is None or df.empty:
                 raise RuntimeError(f"borsapy bos veri: {base}")
