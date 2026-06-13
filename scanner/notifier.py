@@ -196,14 +196,27 @@ def render_table_image(headers: list, rows: list, title: str = "",
 
 
 def _format_cross_stock_top(df: pd.DataFrame, n: int = 20) -> list:
-    """Cross-stock top N (robust öncelikli) — fiyat + MA değer + 🟢🔴 etiket dahil"""
+    """Cross-stock top N (robust öncelikli) — fiyat + MA değer + 🟢🔴 etiket dahil.
+
+    n=0 → robust olanların TÜMÜNÜ göster (endeks taraması için faydalı).
+    """
     lines = []
     if 'wf_robust' in df.columns and df['wf_robust'].sum() > 0:
-        lines.append(f"🏆 *Robust Top {n} (cross-stock)*")
-        top = df[df['wf_robust'] == True].nlargest(n, 'composite_score')
+        robust_df = df[df['wf_robust'] == True]
+        if n == 0 or n >= len(robust_df):
+            # Tümünü göster (endeks taraması)
+            top = robust_df.sort_values('composite_score', ascending=False)
+            lines.append(f"🏆 *Robust TÜM ({len(top)} kayıt, cross-stock)*")
+        else:
+            top = robust_df.nlargest(n, 'composite_score')
+            lines.append(f"🏆 *Robust Top {n} (cross-stock)*")
     else:
-        lines.append(f"🏆 *Top {n} (cross-stock, composite skor)*")
-        top = df.nlargest(n, 'composite_score')
+        if n == 0 or n >= len(df):
+            top = df.sort_values('composite_score', ascending=False)
+            lines.append(f"🏆 *TÜM ({len(top)} kayıt, composite skor)*")
+        else:
+            top = df.nlargest(n, 'composite_score')
+            lines.append(f"🏆 *Top {n} (cross-stock, composite skor)*")
 
     lines.append("```")
     # YENI: Fiyat + MA Değer + Etiket sütunları
@@ -308,7 +321,7 @@ def format_daily(df: pd.DataFrame) -> str:
             if len(robust_per_stock) > 0:
                 lines.append(f"💎 *En Çok Robust MA'ya Sahip 12 Hisse — Her Birinin Top 5'i*")
                 lines.append("```")
-                for tk, cnt in robust_per_stock.head(12).items():
+                for tk, cnt in robust_per_stock.head(top_n_stocks).items():
                     sub = (
                         df[(df['ticker'] == tk) & (df['wf_robust'] == True)]
                         .nlargest(5, 'composite_score')
@@ -416,9 +429,17 @@ def format_weekly(df: pd.DataFrame) -> str:
     return '\n'.join(lines)
 
 
-def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama'):
+def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
+                     top_n_setups: int = 20, top_n_stocks: int = 12):
     """Image-rich daily özet gönderir. Büyük tablolar image olarak,
-    açıklamalar text olarak gider. Image üretilemezse fallback'le text gönderir."""
+    açıklamalar text olarak gider. Image üretilemezse fallback'le text gönderir.
+
+    Args:
+        top_n_setups: Cross-stock top tablosundaki satır sayısı (default 20).
+                      Endeks tarama için 100 vermek mantıklı (79 endeks dahil).
+        top_n_stocks: Hisse başı top 5 MA bölümünde gösterilecek hisse sayısı.
+                      Endeks için 80, normal hisse için 12.
+    """
 
     n_stocks = df['ticker'].nunique()
     n_total = len(df)
@@ -437,13 +458,22 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama'):
     )
     send_telegram(token, chat_id, header_text, parse_mode='Markdown')
 
-    # 2. CROSS-STOCK TOP 20 - IMAGE TABLO
+    # 2. CROSS-STOCK TOP — IMAGE TABLO (top_n_setups=0 → TÜMÜ göster)
     if 'wf_robust' in df.columns and df['wf_robust'].sum() > 0:
-        top20 = df[df['wf_robust'] == True].nlargest(20, 'composite_score')
-        title = "🏆 Robust Top 20 (Cross-Stock)"
+        robust_df = df[df['wf_robust'] == True]
+        if top_n_setups == 0 or top_n_setups >= len(robust_df):
+            top20 = robust_df.sort_values('composite_score', ascending=False)
+            title = f"🏆 Robust TÜM ({len(top20)})"
+        else:
+            top20 = robust_df.nlargest(top_n_setups, 'composite_score')
+            title = f"🏆 Robust Top {len(top20)} (Cross-Stock)"
     else:
-        top20 = df.nlargest(20, 'composite_score')
-        title = "🏆 Top 20 (Composite Score)"
+        if top_n_setups == 0 or top_n_setups >= len(df):
+            top20 = df.sort_values('composite_score', ascending=False)
+            title = f"🏆 TÜM ({len(top20)}, Composite Score)"
+        else:
+            top20 = df.nlargest(top_n_setups, 'composite_score')
+            title = f"🏆 Top {len(top20)} (Composite Score)"
 
     rows = []
     colors_col = {0: []}  # ticker sütunu için renk listesi
@@ -495,12 +525,16 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama'):
 
     # 4. EN ÇOK ROBUST HİSSE - HER BİRİ İÇİN AYRI IMAGE TABLO
     if 'wf_robust' in df.columns and n_robust > 0:
-        # Hisse başı robust MA sayısına göre sırala, top 12
-        robust_per_stock = (
+        # Hisse başı robust MA sayısına göre sırala (top_n_stocks=0 → tümü)
+        robust_per_stock_full = (
             df[df['wf_robust'] == True]
             .groupby('ticker', group_keys=False)
-            .size().sort_values(ascending=False).head(12)
+            .size().sort_values(ascending=False)
         )
+        if top_n_stocks == 0 or top_n_stocks >= len(robust_per_stock_full):
+            robust_per_stock = robust_per_stock_full
+        else:
+            robust_per_stock = robust_per_stock_full.head(top_n_stocks)
 
         # Tüm hisselerin tek bir image'da kombinasyonu (daha sade)
         all_rows = []
@@ -540,7 +574,7 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama'):
         headers2 = ['Hisse (Fiyat)', 'MA', 'Per', 'MA Değer', 'WR', 'Exp']
         img2 = render_table_image(
             headers2, all_rows,
-            title="💎 En Çok Robust MA'lı 12 Hisse — Her Birinin Top 5'i",
+            title=f"💎 En Çok Robust MA'lı {len(robust_per_stock)} Hisse — Her Birinin Top 5'i",
             col_colors=all_colors
         )
         if img2:
@@ -584,6 +618,10 @@ def main():
     parser.add_argument('--mode', choices=['daily', 'weekly'], default='daily')
     parser.add_argument('--label', type=str, default='BIST MA Reaction Scan',
                        help='Mesaj başlığı (ör: "BIST Endeks Tarama")')
+    parser.add_argument('--top_setups', type=int, default=20,
+                       help='Cross-stock tablo satır sayısı (endeks için 100 verebilirsin)')
+    parser.add_argument('--top_stocks', type=int, default=12,
+                       help='Hisse başı top 5 MA gösterilecek hisse sayısı')
     parser.add_argument('--test', action='store_true',
                        help='Sadece basit test mesaji gonder (CSV gerekmez)')
     parser.add_argument('--text-only', action='store_true',
@@ -638,7 +676,9 @@ def main():
     else:
         # YENI YONTEM: image-rich daily ozet
         try:
-            send_rich_daily(token, chat_id, df, label=args.label)
+            send_rich_daily(token, chat_id, df, label=args.label,
+                            top_n_setups=args.top_setups,
+                            top_n_stocks=args.top_stocks)
             print(f"✓ Telegram BAŞARILI (image-rich, {args.mode})")
         except Exception as e:
             print(f"⚠️ Rich mode hata: {e} - text fallback", file=sys.stderr)
