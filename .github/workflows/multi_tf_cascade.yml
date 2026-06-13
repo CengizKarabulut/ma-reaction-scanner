@@ -255,6 +255,33 @@ jobs:
         continue-on-error: true
 
       # ============================================================
+      # STEP 8.5: BIST PANORAMA — 3 TF için ayrı tablolar
+      # ============================================================
+      - name: 8.5️⃣ Panorama (Daily TF)
+        if: success()
+        run: |
+          python scanner/panorama_report.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
+            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.html
+        continue-on-error: true
+
+      - name: 8.5️⃣ Panorama (Weekly TF)
+        if: success()
+        run: |
+          python scanner/panorama_report.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.csv \
+            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.html
+        continue-on-error: true
+
+      - name: 8.5️⃣ Panorama (Monthly TF)
+        if: success()
+        run: |
+          python scanner/panorama_report.py \
+            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.csv \
+            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.html
+        continue-on-error: true
+
+      # ============================================================
       # STEP 9: TELEGRAM ÖZET
       # ============================================================
       - name: 9️⃣ Telegram Özet
