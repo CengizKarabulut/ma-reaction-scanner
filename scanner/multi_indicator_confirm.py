@@ -113,27 +113,86 @@ def is_bist_index(symbol):
     return s.startswith('X') and len(s) >= 4
 
 
-def fetch_data(ticker, source='borsapy', days=400):
+def fetch_data(ticker, source='borsapy', days=400, interval='1d'):
+    """borsapy v0.10+ ile veri çek.
+
+    Native interval'ler: 1m, 5m, 15m, 30m, 1h, 1d
+    Türetilen: 4h (1h+resample), 1wk (1d+W), 1mo (1d+ME)
+    """
     base = ticker.replace('.IS', '')
     is_index = is_bist_index(base)
+
+    # Interval → borsapy period mapping
+    def _bp_period(intv, def_days):
+        mp = {'1m':'1g','5m':'5g','15m':'5g','30m':'5g',
+              '1h':'1ay','4h':'3ay'}
+        if intv in mp:
+            return mp[intv]
+        # Günlük+ için days'i 'Xy' veya max yap
+        if def_days >= 1825:
+            return '5y'
+        if def_days >= 1100:
+            return '3y'
+        return f"{def_days}g"
+
+    BORSAPY_NATIVE = {'1m','5m','15m','30m','1h','1d'}
+
     try:
         if source == 'borsapy' and HAS_BORSAPY:
-            start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-            if is_index and hasattr(bp, 'Index'):
-                # BIST endeksi: bp.Index() kullan
-                df = bp.Index(base).history(start=start)
+            # Hangi interval'ı çekelim?
+            if interval in BORSAPY_NATIVE:
+                bp_int = interval
+                resample = None
+            elif interval == '4h':
+                bp_int, resample = '1h', '4h'
+            elif interval == '1wk':
+                bp_int, resample = '1d', '1wk'
+            elif interval == '1mo':
+                bp_int, resample = '1d', '1mo'
             else:
-                df = bp.Ticker(base).history(start=start)
+                bp_int, resample = '1d', None
+
+            bp_period = _bp_period(interval, days)
+
+            # Endeks için Index() önce, Ticker() fallback
+            df = None
+            if is_index and hasattr(bp, 'Index'):
+                try:
+                    df = bp.Index(base).history(period=bp_period, interval=bp_int)
+                except Exception:
+                    df = None
+                if df is None or df.empty:
+                    try:
+                        df = bp.Ticker(base).history(period=bp_period, interval=bp_int)
+                    except Exception:
+                        df = None
+            else:
+                df = bp.Ticker(base).history(period=bp_period, interval=bp_int)
+
+            if df is None or df.empty:
+                return None
+
+            # Resample
+            if resample == '4h':
+                df = df.resample('4h').agg({'Open':'first','High':'max','Low':'min',
+                    'Close':'last','Volume':'sum'}).dropna()
+            elif resample == '1wk':
+                df = df.resample('W').agg({'Open':'first','High':'max','Low':'min',
+                    'Close':'last','Volume':'sum'}).dropna()
+            elif resample == '1mo':
+                df = df.resample('ME').agg({'Open':'first','High':'max','Low':'min',
+                    'Close':'last','Volume':'sum'}).dropna()
+
         elif HAS_YFINANCE:
             symbol = f"^{base}" if is_index else f"{base}.IS"
-            df = yf.download(symbol, period='1y', progress=False, auto_adjust=True)
+            df = yf.download(symbol, period='1y', interval=interval, progress=False, auto_adjust=True)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
         else:
             return None
+
         if df is None or len(df) < 60:
             return None
-        # Endekslerde Volume olmayabilir
         if 'Volume' not in df.columns or df['Volume'].isna().all():
             df['Volume'] = 1.0
         return df
