@@ -22,13 +22,21 @@ on:
         required: false
         default: '10000000'
       source:
-        description: 'Veri kaynağı (borsapy / yfinance)'
+        description: 'Veri kaynağı'
         required: false
         default: 'borsapy'
+        type: choice
+        options:
+          - borsapy
+          - yfinance
       no_walk_forward:
-        description: 'Walk-forward analizi atla (hızlı test için)'
+        description: 'Walk-forward atla (hızlı test)'
         required: false
         default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
       cascade_type:
         description: 'Cascade tipi: daily (1d+1wk+1mo) veya intraday (1h+4h+1d)'
         required: true
@@ -175,6 +183,19 @@ jobs:
       - name: 3️⃣ TF2 Tarama (${{ steps.cascade.outputs.label_2 }})
         if: steps.filter.outputs.robust_list != ''
         run: |
+          # min_touches'i interval'a göre ayarla (intraday için daha düşük)
+          # 4h ile 3 ay = 78 bar → her MA ~5-10 touch yapabilir
+          # 1wk ile 5y = 260 bar → her MA ~15-30 touch yapabilir
+          INTV="${{ steps.cascade.outputs.interval_2 }}"
+          if [ "$INTV" = "4h" ] || [ "$INTV" = "1h" ]; then
+            MIN_T=4
+          elif [ "$INTV" = "1wk" ]; then
+            MIN_T=5
+          else
+            MIN_T=8
+          fi
+          echo "TF2 min_touches=$MIN_T (interval=$INTV)"
+
           python scanner/bist_ma_reaction_scanner.py \
             --tickers "${{ steps.filter.outputs.robust_list }}" \
             --source ${{ github.event.inputs.source || 'borsapy' }} --interval ${{ steps.cascade.outputs.interval_2 }} \
@@ -183,8 +204,9 @@ jobs:
             ${{ steps.wf.outputs.wf_arg }} \
             --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.csv \
             --report html --top_n 20 \
-            --min_touches 8 \
-            --separation_mult 2.0
+            --min_touches $MIN_T \
+            --separation_mult 1.8
+        continue-on-error: true
 
       # ============================================================
       # STEP 4: TF3 TARAMA (cascade_type'a bağlı: 1d veya 1mo)
