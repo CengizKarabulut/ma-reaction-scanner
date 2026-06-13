@@ -92,14 +92,14 @@ jobs:
         run: |
           WF_FLAG=""
           if [ "${{ github.event.inputs.no_walk_forward }}" = "true" ]; then
-            WF_FLAG="--no-walk-forward"
+            WF_FLAG="--no_walk_forward"
           fi
 
           python scanner/bist_ma_reaction_scanner.py ${{ steps.prep.outputs.tickers_arg }} \
             --source ${{ github.event.inputs.source || 'borsapy' }} \
             --period ${{ github.event.inputs.period || '5y' }} \
             --interval ${{ github.event.inputs.interval || '1d' }} \
-            --min-volume-tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
+            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
             --output reports/weekly_${{ steps.prep.outputs.ts }}.csv \
             $WF_FLAG
 
