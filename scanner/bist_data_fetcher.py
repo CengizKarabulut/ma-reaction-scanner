@@ -106,10 +106,20 @@ def fetch_isyatirim(index_symbol: str) -> tuple:
            f"Temel-Degerler-Ve-Oranlar.aspx?endeks={index_symbol}")
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
-                      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'tr-TR,tr;q=0.9',
+        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                       'AppleWebKit/537.36 (KHTML, like Gecko) '
+                       'Chrome/131.0.0.0 Safari/537.36'),
+        'Accept': ('text/html,application/xhtml+xml,application/xml;'
+                   'q=0.9,image/avif,image/webp,*/*;q=0.8'),
+        'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://www.isyatirim.com.tr/tr-tr/Sayfalar/default.aspx',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        'DNT': '1',
     }
 
     try:
@@ -162,7 +172,15 @@ def fetch_mynet(index_symbol: str) -> tuple:
 
     url = f"https://finans.mynet.com/borsa/endeks/{slug}/"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0',
+        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                       'AppleWebKit/537.36 (KHTML, like Gecko) '
+                       'Chrome/131.0.0.0 Safari/537.36'),
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'tr-TR,tr;q=0.9',
+        'Referer': 'https://finans.mynet.com/borsa/',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'DNT': '1',
     }
     try:
         with httpx.Client(timeout=20.0, follow_redirects=True) as client:
