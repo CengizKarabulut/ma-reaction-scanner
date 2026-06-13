@@ -65,49 +65,101 @@ def detect_instrument_type(symbol: str) -> str:
     return 'bist'
 
 
+def _bp_period_for_interval(interval, default_days=1100):
+    """borsapy interval'a göre uygun period stringi."""
+    mp = {
+        '1m': '1g', '3m': '5g', '5m': '5g', '15m': '5g',
+        '30m': '5g', '45m': '5g',
+        '1h': '1ay', '4h': '3ay',
+    }
+    if interval in mp:
+        return mp[interval]
+    # Günlük+ için 3y default
+    return '3y'
+
+
 def fetch_data(ticker, source='borsapy', period_days=1100, interval='1d'):
-    """Multi-instrument veri çek."""
+    """borsapy v0.10+ ile intraday destekli veri çekme."""
     base = ticker.replace('.IS', '').upper()
     inst_type = detect_instrument_type(base)
 
-    # KRİTİK: borsapy intraday DESTEKLEMİYOR - direkt yfinance'a yönlendir
-    if interval in ('1h', '4h'):
-        if not HAS_YFINANCE:
-            raise RuntimeError(
-                f"Intraday tarama (1h/4h) icin yfinance gerekli. "
-                f"borsapy intraday desteklemiyor."
-            )
-        source = 'yfinance'
-        print(f"  ⏱ {base}: {interval} icin yfinance kullaniliyor (borsapy intraday yok)")
+    BORSAPY_NATIVE = {'1m', '3m', '5m', '15m', '30m', '45m', '1h', '1d'}
 
     if source == 'borsapy' and HAS_BORSAPY:
         try:
-            start = (datetime.now() - timedelta(days=period_days)).strftime('%Y-%m-%d')
-            # borsapy SADECE günlük çeker (intraday yok)
-            t = bp.Ticker(base)
-            df = t.history(start=start)
+            # Hangi borsapy interval'ı isteyelim?
+            if interval in BORSAPY_NATIVE:
+                bp_interval = interval
+                needs_resample = None
+            elif interval == '4h':
+                bp_interval = '1h'
+                needs_resample = '4h'
+            elif interval == '1wk':
+                bp_interval = '1d'
+                needs_resample = '1wk'
+            elif interval == '1mo':
+                bp_interval = '1d'
+                needs_resample = '1mo'
+            else:
+                bp_interval = '1d'
+                needs_resample = None
 
-            if df is None or df.empty or len(df) < 50:
-                # FX/Crypto için alternatif sınıf dene
-                if inst_type == 'crypto' and hasattr(bp, 'Crypto'):
-                    t = bp.Crypto(base)
-                    df = t.history(start=start)
-                elif inst_type == 'forex' and hasattr(bp, 'FX'):
-                    t = bp.FX(base)
-                    df = t.history(start=start)
-                elif inst_type == 'metal' and hasattr(bp, 'Metal'):
-                    t = bp.Metal(base)
-                    df = t.history(start=start)
+            bp_period = _bp_period_for_interval(interval, period_days)
+
+            # Endeks için bp.Index() önce, sonra bp.Ticker() fallback
+            df = None
+            if inst_type == 'bist_index' and hasattr(bp, 'Index'):
+                try:
+                    df = bp.Index(base).history(period=bp_period, interval=bp_interval)
+                    if df is not None and not df.empty:
+                        print(f"  ✓ {base}: bp.Index({bp_interval}) → {len(df)} bar")
+                except Exception:
+                    df = None
+                if df is None or df.empty or len(df) < 20:
+                    try:
+                        df = bp.Ticker(base).history(period=bp_period, interval=bp_interval)
+                        if df is not None and not df.empty:
+                            print(f"  ✓ {base}: bp.Ticker() fallback → {len(df)} bar")
+                    except Exception:
+                        df = None
+            else:
+                t = bp.Ticker(base)
+                df = t.history(period=bp_period, interval=bp_interval)
+                if df is None or df.empty or len(df) < 20:
+                    if inst_type == 'crypto' and hasattr(bp, 'Crypto'):
+                        df = bp.Crypto(base).history(period=bp_period, interval=bp_interval)
+                    elif inst_type == 'forex' and hasattr(bp, 'FX'):
+                        df = bp.FX(base).history(period=bp_period, interval=bp_interval)
+                    elif inst_type == 'metal' and hasattr(bp, 'Metal'):
+                        df = bp.Metal(base).history(period=bp_period, interval=bp_interval)
 
             if df is None or df.empty:
                 raise RuntimeError(f"borsapy bos veri: {base}")
-            if len(df) < 50:
-                raise RuntimeError(f"borsapy yetersiz: {base} ({len(df)} bar)")
             if not isinstance(df.index, pd.DatetimeIndex):
                 df.index = pd.to_datetime(df.index)
+
+            # Resample (4h, 1wk, 1mo)
+            if needs_resample == '4h':
+                df = df.resample('4h').agg({
+                    'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'
+                }).dropna()
+                print(f"  ⟲ {base}: 1h → 4h ({len(df)} bar)")
+            elif needs_resample == '1wk':
+                df = df.resample('W').agg({
+                    'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'
+                }).dropna()
+                print(f"  ⟲ {base}: 1d → haftalik ({len(df)} hafta)")
+            elif needs_resample == '1mo':
+                df = df.resample('ME').agg({
+                    'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'
+                }).dropna()
+                print(f"  ⟲ {base}: 1d → aylik ({len(df)} ay)")
+
+            if len(df) < 20:
+                raise RuntimeError(f"Yetersiz: {base} ({len(df)} bar)")
             return df, inst_type
         except Exception as e:
-            print(f"  borsapy hatasi: {e}")
+            print(f"  borsapy hatasi ({base}: {e}), yfinance fallback")
             if HAS_YFINANCE and inst_type == 'bist':
                 source = 'yfinance'
             else:
@@ -382,20 +434,6 @@ def mini_scan(ticker, source='borsapy', interval='1d', strict=False):
     df, inst_type = fetch_data(ticker, source=source, interval=interval)
     if df is None:
         return None, None, None
-
-    # KRİTİK: 1wk/1mo için günlük veriyi resample et
-    if interval == '1wk':
-        df = df.resample('W').agg({
-            'Open':'first', 'High':'max', 'Low':'min',
-            'Close':'last', 'Volume':'sum'
-        }).dropna()
-        print(f"  ⟲ Gunluk→Haftalik resample: {len(df)} hafta")
-    elif interval == '1mo':
-        df = df.resample('ME').agg({
-            'Open':'first', 'High':'max', 'Low':'min',
-            'Close':'last', 'Volume':'sum'
-        }).dropna()
-        print(f"  ⟲ Gunluk→Aylik resample: {len(df)} ay")
 
     print(f"  Veri: {len(df)} bar, {df.index[0].date()} - {df.index[-1].date()}, interval={interval}")
     atr_v = atr_calc(df)
