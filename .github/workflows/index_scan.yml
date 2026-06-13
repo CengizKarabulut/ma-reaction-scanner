@@ -11,6 +11,15 @@ on:
     - cron: '30 16 * * 1-5'   # 19:30 İstanbul, hafta içi (daily scan'den 1 saat sonra)
   workflow_dispatch:
     inputs:
+      tickers:
+        description: 'Endeks listesi seç'
+        required: false
+        default: 'BIST_ENDEKSLER'
+        type: choice
+        options:
+          - BIST_ENDEKSLER           # 4 ana endeks (hızlı test)
+          - BIST_ENDEKSLER_GENIS     # 36 endeks (sektörler dahil)
+          - BIST_TUM_ENDEKSLER       # 79 endeks (borsapy dinamik)
       period:
         description: 'Veri periyodu'
         required: false
@@ -19,6 +28,13 @@ on:
         description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
         required: false
         default: '1d'
+        type: choice
+        options:
+          - 1h
+          - 4h
+          - 1d
+          - 1wk
+          - 1mo
       source:
         description: 'Veri kaynağı (borsapy / yfinance)'
         required: false
@@ -70,7 +86,7 @@ jobs:
       - name: 1️⃣ Endeks Tarama (MA-Saygı)
         run: |
           python scanner/bist_ma_reaction_scanner.py \
-            --all-bist --bist-list BIST_ENDEKSLER \
+            --all-bist --bist-list ${{ github.event.inputs.tickers || 'BIST_ENDEKSLER' }} \
             --source ${{ github.event.inputs.source || 'borsapy' }} \
             --interval ${{ github.event.inputs.interval || '1d' }} \
             --period ${{ github.event.inputs.period || '5y' }} \
