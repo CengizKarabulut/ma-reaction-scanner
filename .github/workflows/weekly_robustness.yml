@@ -134,6 +134,14 @@ jobs:
             --portfolio 100000 || true
         continue-on-error: true
 
+      - name: 4.5️⃣ BIST Panorama (TÜM hisseler tam tablo)
+        if: success()
+        run: |
+          python scanner/panorama_report.py \
+            --csv reports/weekly_${{ steps.prep.outputs.ts }}.csv \
+            --output reports/weekly_panorama_${{ steps.prep.outputs.ts }}.html
+        continue-on-error: true
+
       - name: 5️⃣ Telegram Image-Rich Özet
         if: success()
         env:
@@ -182,6 +190,7 @@ jobs:
             reports/weekly_analysis_${{ steps.prep.outputs.ts }}.html
             reports/weekly_summary_${{ steps.prep.outputs.ts }}.md
             reports/weekly_strategies_${{ steps.prep.outputs.ts }}.html
+            reports/weekly_panorama_${{ steps.prep.outputs.ts }}.html
           retention-days: 30
           if-no-files-found: warn
 
