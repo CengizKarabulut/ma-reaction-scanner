@@ -152,22 +152,37 @@ def fetch_data(ticker, source='borsapy', days=400, interval='1d'):
             else:
                 bp_int, resample = '1d', None
 
-            bp_period = _bp_period(interval, days)
+            # Borsapy period stringi yerine start_date (intraday hariç)
+            from datetime import datetime as _dt, timedelta as _td
+            if interval in ('1m','3m','5m','15m','30m','45m','1h','4h'):
+                bp_period = _bp_period(interval, days)
+                use_start, bp_start = False, None
+            else:
+                bp_start = (_dt.now() - _td(days=days + 60)).strftime('%Y-%m-%d')
+                bp_period = None
+                use_start = True
 
-            # Endeks için Index() önce, Ticker() fallback
+            def _bp_h(obj):
+                if use_start:
+                    try:
+                        return obj.history(start=bp_start, interval=bp_int)
+                    except TypeError:
+                        return obj.history(period='1y', interval=bp_int)
+                return obj.history(period=bp_period, interval=bp_int)
+
             df = None
             if is_index and hasattr(bp, 'Index'):
                 try:
-                    df = bp.Index(base).history(period=bp_period, interval=bp_int)
+                    df = _bp_h(bp.Index(base))
                 except Exception:
                     df = None
                 if df is None or df.empty:
                     try:
-                        df = bp.Ticker(base).history(period=bp_period, interval=bp_int)
+                        df = _bp_h(bp.Ticker(base))
                     except Exception:
                         df = None
             else:
-                df = bp.Ticker(base).history(period=bp_period, interval=bp_int)
+                df = _bp_h(bp.Ticker(base))
 
             if df is None or df.empty:
                 return None
