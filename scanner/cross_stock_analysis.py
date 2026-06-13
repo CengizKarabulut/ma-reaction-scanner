@@ -265,63 +265,81 @@ def generate_markdown_summary(metrics, top_stocks, top_setups_df, ma_freq,
     """Markdown özet (Telegram için)."""
     lines = []
     lines.append(f"📊 *Haftalık BIST Robustness Analizi*")
-    lines.append(f"_{datetime.now():%Y-%m-%d %H:%M}_\n")
+    lines.append(f"_{datetime.now():%Y-%m-%d %H:%M}_")
+    lines.append("")
 
     lines.append(f"📈 Hisse: *{metrics.get('n_stocks', 0)}* | "
                  f"Toplam MA: *{metrics.get('total_records', 0):,}*")
     if 'robust_count' in metrics:
         lines.append(f"✅ Robust: *{metrics['robust_count']:,}* "
-                     f"({metrics['robust_pct']:.1f}%)")
-        lines.append(f"   {metrics.get('robust_stocks', 0)} hissede robust setup var\n")
+                     f"({metrics['robust_pct']:.1f}%) — "
+                     f"{metrics.get('robust_stocks', 0)} hissede setup var")
+    lines.append("")
 
     # Bullish/Bearish denge
     if bb_split:
-        lines.append(f"⚖️ Denge: 🟢 Destek *{bb_split['n_support']}* ({bb_split['support_pct']:.0f}%) | "
-                     f"🔴 Direnç *{bb_split['n_resistance']}* ({bb_split['resistance_pct']:.0f}%)\n")
+        lines.append(f"⚖️ Denge: 🟢 Destek *{bb_split['n_support']}* ({bb_split['support_pct']:.0f}%)  |  "
+                     f"🔴 Direnç *{bb_split['n_resistance']}* ({bb_split['resistance_pct']:.0f}%)")
+        lines.append("")
 
     # Hafta üzeri değişim
     if wow:
-        if wow.get('change', 0) >= 0:
-            arrow = '📈'
-        else:
-            arrow = '📉'
-        lines.append(f"{arrow} Önceki haftaya: *{wow.get('curr_total', 0)}* "
+        arrow = '📈' if wow.get('change', 0) >= 0 else '📉'
+        lines.append(f"{arrow} *Önceki haftaya:* {wow.get('curr_total', 0)} "
                      f"(önceki {wow.get('prev_total', 0)}, fark {wow.get('change', 0):+})")
         if wow.get('new_robust'):
-            lines.append(f"   🆕 Yeni: {', '.join(wow['new_robust'][:8])}")
+            lines.append(f"   🆕 Yeni: `{', '.join(wow['new_robust'][:8])}`")
         if wow.get('lost_robust'):
-            lines.append(f"   ❌ Kaybedildi: {', '.join(wow['lost_robust'][:8])}")
+            lines.append(f"   ❌ Kaybedildi: `{', '.join(wow['lost_robust'][:8])}`")
         lines.append("")
 
-    # Top robust hisseler
+    # Top robust hisseler - CODE BLOCK ile hizalama korunsun
     if not top_stocks.empty:
         lines.append("💎 *En Çok Robust 10 Hisse*")
         lines.append("```")
-        lines.append(f"{'Hisse':<8} {'Robust':<7} {'Sektör'}")
+        lines.append(f"{'Hisse':<8} {'Robust':<7} {'Fiyat':<10} {'Sektör'}")
+        lines.append("─" * 45)
         for _, r in top_stocks.head(10).iterrows():
-            sector = str(r.get('sector', '?'))[:20]
-            lines.append(f"{r['ticker']:<8} {int(r['robust_count']):<7} {sector}")
-        lines.append("```\n")
+            sector = str(r.get('sector', '?'))[:18]
+            price = r.get('price', None)
+            if price and not pd.isna(price):
+                pf = f"{price:.2f}" if price >= 1 else f"{price:.4f}"
+            else:
+                pf = '-'
+            lines.append(f"{r['ticker']:<8} {int(r['robust_count']):<7} {pf:<10} {sector}")
+        lines.append("```")
+        lines.append("")
 
     # Top MA aileleri
     if not ma_freq.empty:
         lines.append("🎯 *En Yaygın MA Aileleri (cross-stock)*")
         lines.append("```")
-        lines.append(f"{'MA':<6} {'Per':<5} {'Hisse#':<7} {'WR%':<5}")
-        for _, r in ma_freq.head(8).iterrows():
+        lines.append(f"{'MA':<6} {'Per':<5} {'Hisse#':<7} {'WR':<5}")
+        lines.append("─" * 28)
+        for _, r in ma_freq.head(10).iterrows():
             lines.append(f"{r['ma_type']:<6} {int(r['period']):<5} {int(r['n_stocks']):<7} "
-                         f"{r['avg_wr']:.0f}")
-        lines.append("```\n")
+                         f"{r['avg_wr']:.0f}%")
+        lines.append("```")
+        lines.append("")
 
-    # Sektör dağılımı
+    # Sektör dağılımı - Unknown çok ise sektör cache yok demek, bölümü atla
     if not sector_df.empty:
-        lines.append("🏭 *En Aktif Sektörler*")
-        lines.append("```")
-        lines.append(f"{'Sektör':<25} {'Hisse':<6} {'Setup'}")
-        for _, r in sector_df.head(8).iterrows():
-            sector = str(r['sector'])[:24]
-            lines.append(f"{sector:<25} {int(r['n_stocks']):<6} {int(r['n_setups'])}")
-        lines.append("```")
+        # Eğer sadece Unknown sektörü varsa (sector_resolver cache yok), bölümü atla
+        non_unknown = sector_df[sector_df['sector'].str.lower() != 'unknown']
+        if not non_unknown.empty:
+            lines.append("🏭 *En Aktif Sektörler*")
+            lines.append("```")
+            lines.append(f"{'Sektör':<25} {'Hisse':<6} {'Setup':<7} {'WR'}")
+            lines.append("─" * 48)
+            for _, r in non_unknown.head(10).iterrows():
+                sector = str(r['sector'])[:24]
+                lines.append(f"{sector:<25} {int(r['n_stocks']):<6} {int(r['n_setups']):<7} "
+                             f"{r['avg_wr']:.0f}%")
+            lines.append("```")
+        else:
+            # Sektör cache yok - kullanıcıya bildir
+            lines.append("ℹ️ _Sektör analizi atlandı (sektör cache yok)._")
+            lines.append("_'Actions → Sektör Cache Oluştur' ile sektör bilgisini topla._")
 
     return '\n'.join(lines)
 
