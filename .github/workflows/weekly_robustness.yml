@@ -1,19 +1,55 @@
 name: Weekly BIST Robustness Analysis
 
-# Her Cumartesi sabah çalışır, hafta sonu derinlemesine analiz
+# Her Cumartesi 10:00 İstanbul (BIST kapalı) — derin haftalık analiz.
+# Tüm BIST (BIST_TUM ~500 hisse) günlük taranır, cross-stock metrikler,
+# sektör analizi, önceki haftaya karşılaştırma yapılır.
+# Çıktı: HTML rapor + image-rich Telegram özet + önceki hafta delta'sı.
+
 on:
   schedule:
-    - cron: '0 6 * * 6'   # 06:00 UTC = 09:00 İstanbul Cumartesi
+    - cron: '0 7 * * 6'   # Cumartesi 10:00 İstanbul (UTC+3)
   workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Liste: BIST_TUM, BIST_100, BIST_50, BIST_BILES:XBANK, BIST_SEKTOR:Bankacılık'
+        required: false
+        default: 'BIST_TUM'
+      period:
+        description: 'Veri periyodu (3y / 5y / max)'
+        required: false
+        default: '5y'
+      interval:
+        description: 'Zaman dilimi'
+        required: false
+        default: '1d'
+        type: choice
+        options:
+          - 1d
+          - 1wk
+          - 1mo
+      source:
+        description: 'Veri kaynağı'
+        required: false
+        default: 'borsapy'
+      min_volume_tl:
+        description: 'Min günlük TL hacim (0=filtre yok)'
+        required: false
+        default: '10000000'
+      no_walk_forward:
+        description: 'Walk-forward atla (hızlı test)'
+        required: false
+        default: 'false'
 
 jobs:
-  deep_analysis:
+  weekly-analysis:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    
+    timeout-minutes: 90
+
     steps:
       - name: Repo checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Önceki hafta dosyaları için
 
       - name: Python setup
         uses: actions/setup-python@v5
@@ -26,28 +62,79 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Tarih hazırla
+      - name: Hazırlık
         id: prep
         run: |
-          echo "ts=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Derinlemesine tarama (5y veri, walk-forward dahil)
-        run: |
           mkdir -p reports
-          python scanner/bist_ma_reaction_scanner.py \
-            --all-bist \
-            --period 5y \
-            --output reports/weekly_${{ steps.prep.outputs.ts }}.csv \
-            --report both \
-            --top_n 15
+          TS=$(date +%Y-%m-%d)
+          echo "ts=$TS" >> $GITHUB_OUTPUT
 
-      - name: Cross-stock pattern analizi
+          # Önceki hafta CSV'sini bul (varsa)
+          PREV_CSV=$(ls -t reports/weekly_*.csv 2>/dev/null | head -2 | tail -1 || echo "")
+          if [ -n "$PREV_CSV" ] && [ "$PREV_CSV" != "reports/weekly_$TS.csv" ]; then
+            echo "prev_csv=$PREV_CSV" >> $GITHUB_OUTPUT
+            echo "✓ Önceki hafta CSV: $PREV_CSV"
+          else
+            echo "prev_csv=" >> $GITHUB_OUTPUT
+            echo "ℹ️ Önceki hafta yok (ilk çalıştırma)"
+          fi
+
+          # Tickers parametresini parse et
+          TICKERS="${{ github.event.inputs.tickers || 'BIST_TUM' }}"
+          if [[ "$TICKERS" == BIST_* || "$TICKERS" == SEKTOR_* ]]; then
+            echo "tickers_arg=--all-bist --bist-list $TICKERS" >> $GITHUB_OUTPUT
+          else
+            echo "tickers_arg=$TICKERS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 1️⃣ Derin Tarama (BIST_TUM)
+        id: scan
         run: |
+          WF_FLAG=""
+          if [ "${{ github.event.inputs.no_walk_forward }}" = "true" ]; then
+            WF_FLAG="--no-walk-forward"
+          fi
+
+          python scanner/bist_ma_reaction_scanner.py ${{ steps.prep.outputs.tickers_arg }} \
+            --source ${{ github.event.inputs.source || 'borsapy' }} \
+            --period ${{ github.event.inputs.period || '5y' }} \
+            --interval ${{ github.event.inputs.interval || '1d' }} \
+            --min-volume-tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
+            --output reports/weekly_${{ steps.prep.outputs.ts }}.csv \
+            $WF_FLAG
+
+      - name: 2️⃣ Tarama dosyası kontrol
+        run: |
+          if [ -f reports/weekly_${{ steps.prep.outputs.ts }}.csv ]; then
+            echo "✓ Tarama CSV oluştu"
+            wc -l reports/weekly_${{ steps.prep.outputs.ts }}.csv
+          else
+            echo "✗ Tarama CSV oluşmadı — analiz devam edemez"
+            exit 1
+          fi
+
+      - name: 3️⃣ Cross-Stock Robustness Analiz
+        run: |
+          PREV_FLAG=""
+          if [ -n "${{ steps.prep.outputs.prev_csv }}" ]; then
+            PREV_FLAG="--prev ${{ steps.prep.outputs.prev_csv }}"
+          fi
+
           python scanner/cross_stock_analysis.py \
             --input reports/weekly_${{ steps.prep.outputs.ts }}.csv \
-            --output reports/cross_stock_${{ steps.prep.outputs.ts }}.html
+            --output-dir reports \
+            $PREV_FLAG
 
-      - name: Telegram'a haftalık rapor
+      - name: 4️⃣ Strateji Raporu (top 20)
+        run: |
+          python scanner/strategy_generator.py \
+            --csv reports/weekly_${{ steps.prep.outputs.ts }}.csv \
+            --top 20 \
+            --output reports/weekly_strategies_${{ steps.prep.outputs.ts }}.html \
+            --portfolio 100000 || true
+        continue-on-error: true
+
+      - name: 5️⃣ Telegram Image-Rich Özet
         if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -55,13 +142,62 @@ jobs:
         run: |
           python scanner/notifier.py \
             --csv reports/weekly_${{ steps.prep.outputs.ts }}.csv \
+            --label "Haftalık Robustness Analizi" \
             --mode weekly
         continue-on-error: true
 
-      - name: Artifact yükle
-        if: always()
+      - name: 6️⃣ Markdown Özet'i Telegram'a Ek Mesaj Olarak
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MD_FILE="reports/weekly_summary_${{ steps.prep.outputs.ts }}.md"
+          if [ -f "$MD_FILE" ]; then
+            # Telegram'a uzun mesaj göndermek için Python kullan
+            python -c "
+          import requests, os
+          token = os.environ['TELEGRAM_BOT_TOKEN']
+          chat_id = os.environ['TELEGRAM_CHAT_ID']
+          with open('$MD_FILE', 'r', encoding='utf-8') as f:
+              text = f.read()
+          # Telegram limit 4096 char
+          while text:
+              chunk = text[:4000]
+              text = text[4000:]
+              requests.post(f'https://api.telegram.org/bot{token}/sendMessage',
+                  data={'chat_id': chat_id, 'text': chunk, 'parse_mode': 'Markdown'})
+          print('Markdown özet Telegram\'a gönderildi')
+          "
+          fi
+        continue-on-error: true
+
+      - name: 7️⃣ Artifact yükle
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: weekly-analysis-${{ steps.prep.outputs.ts }}
-          path: reports/
-          retention-days: 365
+          path: |
+            reports/weekly_${{ steps.prep.outputs.ts }}.csv
+            reports/weekly_analysis_${{ steps.prep.outputs.ts }}.html
+            reports/weekly_summary_${{ steps.prep.outputs.ts }}.md
+            reports/weekly_strategies_${{ steps.prep.outputs.ts }}.html
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: 8️⃣ Eski raporları commit et (geçmiş için)
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/weekly_*.csv reports/weekly_summary_*.md 2>/dev/null || true
+          # Sadece son 10 hafta kaldır, eskileri sil
+          ls -t reports/weekly_*.csv 2>/dev/null | tail -n +11 | xargs -r rm 2>/dev/null || true
+          ls -t reports/weekly_summary_*.md 2>/dev/null | tail -n +11 | xargs -r rm 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Değişiklik yok"
+          else
+            git commit -m "Weekly raporlar güncelle: ${{ steps.prep.outputs.ts }}"
+            git push || echo "Push fail oldu (permission?), devam ediliyor"
+          fi
+        continue-on-error: true
