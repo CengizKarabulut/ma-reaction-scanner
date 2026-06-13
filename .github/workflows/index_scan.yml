@@ -36,13 +36,21 @@ on:
           - 1wk
           - 1mo
       source:
-        description: 'Veri kaynağı (borsapy / yfinance)'
+        description: 'Veri kaynağı'
         required: false
         default: 'borsapy'
+        type: choice
+        options:
+          - borsapy
+          - yfinance
       no_walk_forward:
-        description: 'Walk-forward analizi atla (hızlı test için)'
+        description: 'Walk-forward atla (hızlı test)'
         required: false
         default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   scan-indices:
@@ -151,10 +159,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Notifier ile zengin format (image tablo + DESTEK/DIRENC renkleri)
+          # Endeks tarama: TÜM endeksleri göster (top_setups=0 → hepsi)
           python scanner/notifier.py \
             --csv reports/index_scan_${{ steps.prep.outputs.ts }}.csv \
             --label "BIST Endeks Tarama" \
+            --top_setups 0 \
+            --top_stocks 0 \
             --mode daily
         continue-on-error: true
 
