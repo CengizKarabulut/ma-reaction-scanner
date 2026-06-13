@@ -1,6 +1,6 @@
 # Veri kaynakları
-borsapy
-yfinance
+borsapy>=0.10.0    # BIST + sektör + endeks bileşenleri + intraday (TradingView WS)
+yfinance>=0.2.0    # Yedek + sektör fallback
 
 # Veri işleme
 pandas>=2.0
