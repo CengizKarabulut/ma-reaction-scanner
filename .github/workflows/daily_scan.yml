@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tickers:
-        description: 'Liste: BIST_TUM, BIST_100, BIST_50, BIST_30, XBANK, XK030, virgülle özel liste'
+        description: 'Liste: BIST_TUM, BIST_100, BIST_30, BIST_BILES:XBANK (banka endeksi bileşeni), BIST_SEKTOR:Bankacılık, virgülle özel'
         required: false
         default: 'BIST_100'
       period:
@@ -17,6 +17,13 @@ on:
         description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
         required: false
         default: '1d'
+        type: choice
+        options:
+          - 1h
+          - 4h
+          - 1d
+          - 1wk
+          - 1mo
       no_walk_forward:
         description: 'Walk-forward atla (hızlı test)'
         required: false
