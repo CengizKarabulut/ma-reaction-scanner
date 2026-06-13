@@ -327,8 +327,41 @@ def compute_metrics(stats):
     adr = stats.get('adr', 1.0)
     # ADR'i clamp et: cok dusuk (yapisik) cezalandirir, cok yuksek capper
     adr_factor = max(0.3, min(adr, 2.0))
-    # v6.1: composite skor = expectancy × √touches × respect_ratio × adr_factor
-    composite_score = expectancy * np.sqrt(total_t) * respect_ratio * adr_factor
+
+    # === v6.3: WILSON SCORE (istatistiksel güven düzeltmesi) ===
+    # Küçük touch sayıları aşırı yüksek wr göstermesini engeller.
+    # Örnek: 5 touch/100% vs 80 touch/78% → Wilson scoring 2'yi öne çıkarır.
+    # Formula: Wilson lower bound (95% CI)
+    z = 1.96  # %95 güven aralığı
+    n = total_t
+    p = wr
+    if n > 0:
+        denominator = 1 + (z * z / n)
+        center = p + (z * z / (2 * n))
+        margin = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5)
+        wilson_lower = max(0.0, (center - margin) / denominator)
+        wilson_upper = min(1.0, (center + margin) / denominator)
+    else:
+        wilson_lower = 0.0
+        wilson_upper = 0.0
+
+    # Confidence skoru: 0-100 arası
+    # = wr × log-scaled touch count × respect_ratio × adr_factor
+    import math
+    touch_confidence = min(1.0, math.log10(max(total_t, 1) + 1) / 2.0)  # 100 touch → 1.0
+    confidence_score = (
+        0.40 * wilson_lower +              # İstatistiksel sağlamlık
+        0.25 * touch_confidence +          # Veri yoğunluğu
+        0.20 * respect_ratio +             # MA kırılmama oranı
+        0.15 * min(adr_factor / 1.5, 1.0)  # MA dest/dir kalitesi
+    ) * 100
+
+    # v6.3: composite skor → expectancy × Wilson × respect × adr
+    # Eski formül: expectancy * √touches → küçük touch yüksek puan veriyordu
+    # Yeni: Wilson lower bound küçük touch'ı kendiliğinden cezalandırır
+    composite_score = expectancy * wilson_lower * respect_ratio * adr_factor
+    # Backward compat: eski formül de tut
+    composite_score_legacy = expectancy * np.sqrt(total_t) * respect_ratio * adr_factor
 
     trend_wr = (tr / tt * 100) if tt > 0 else np.nan
     range_wr = (rr / rt * 100) if rt > 0 else np.nan
@@ -352,11 +385,16 @@ def compute_metrics(stats):
         'net_edge': net_edge,
         'breakthroughs': brk,
         'respect_ratio': respect_ratio,
-        'adr': adr,  # v6.1
+        'adr': adr,
         'trend_wr_pct': trend_wr,
         'range_wr_pct': range_wr,
         'grade': grade,
         'composite_score': composite_score,
+        'composite_score_legacy': composite_score_legacy,
+        # v6.3: Wilson Score istatistiği
+        'wilson_lower': wilson_lower * 100,
+        'wilson_upper': wilson_upper * 100,
+        'confidence': confidence_score,
     }
 
 # === WALK-FORWARD ANALİZİ ===
@@ -499,13 +537,37 @@ def fetch_data(ticker, period='3y', source='borsapy', interval='1d'):
                 bp_interval = '1d'
                 needs_resample = None
 
-            bp_period = _borsapy_period_for_interval(interval, period)
+            # === Borsapy period sorunu (kritik!) ===
+            # borsapy v0.10 "3y" gibi period string'lerini desteklemiyor → 30 bar default döner.
+            # Çözüm: Günlük/haftalık için 'start=YYYY-MM-DD' ile çağır.
+            # Intraday için period kısa (1ay/3ay), o yüzden period kullan.
+            if interval in ('1m', '3m', '5m', '15m', '30m', '45m', '1h', '4h'):
+                # Intraday: period kullan (kısa süre)
+                bp_period = _borsapy_period_for_interval(interval, period)
+                use_start = False
+                bp_start = None
+            else:
+                # Günlük/haftalık/aylık: start_date kullan
+                bp_start = _period_to_start_date(period)
+                bp_period = None
+                use_start = True
+
+            def _bp_history(obj):
+                """Hem start hem period yöntemini dener."""
+                if use_start:
+                    try:
+                        return obj.history(start=bp_start, interval=bp_interval)
+                    except TypeError:
+                        # start desteklenmiyorsa period dene (1y fallback)
+                        return obj.history(period='1y', interval=bp_interval)
+                else:
+                    return obj.history(period=bp_period, interval=bp_interval)
 
             # === Endeks için bp.Index() (bileşen değil, fiyat geçmişi) ===
             df = None
             if inst_type == 'bist_index' and hasattr(bp, 'Index'):
                 try:
-                    df = bp.Index(base_symbol).history(period=bp_period, interval=bp_interval)
+                    df = _bp_history(bp.Index(base_symbol))
                     if df is not None and not df.empty:
                         print(f"  ✓ {base_symbol}: bp.Index({bp_interval}) → {len(df)} bar")
                 except Exception as e:
@@ -515,7 +577,7 @@ def fetch_data(ticker, period='3y', source='borsapy', interval='1d'):
                 # bp.Index() çalışmadıysa bp.Ticker() dene
                 if df is None or df.empty or len(df) < 30:
                     try:
-                        df = bp.Ticker(base_symbol).history(period=bp_period, interval=bp_interval)
+                        df = _bp_history(bp.Ticker(base_symbol))
                         if df is not None and not df.empty:
                             print(f"  ✓ {base_symbol}: bp.Ticker() fallback → {len(df)} bar")
                     except Exception as e:
@@ -523,17 +585,16 @@ def fetch_data(ticker, period='3y', source='borsapy', interval='1d'):
                         df = None
             else:
                 # Normal hisse - Ticker
-                t = bp.Ticker(base_symbol)
-                df = t.history(period=bp_period, interval=bp_interval)
+                df = _bp_history(bp.Ticker(base_symbol))
 
                 # Yetersiz veri → enstrüman tipine göre alternatif sınıf
                 if (df is None or df.empty or len(df) < 30):
                     if inst_type == 'crypto' and hasattr(bp, 'Crypto'):
-                        df = bp.Crypto(base_symbol).history(period=bp_period, interval=bp_interval)
+                        df = _bp_history(bp.Crypto(base_symbol))
                     elif inst_type == 'forex' and hasattr(bp, 'FX'):
-                        df = bp.FX(base_symbol).history(period=bp_period, interval=bp_interval)
+                        df = _bp_history(bp.FX(base_symbol))
                     elif inst_type == 'metal' and hasattr(bp, 'Metal'):
-                        df = bp.Metal(base_symbol).history(period=bp_period, interval=bp_interval)
+                        df = _bp_history(bp.Metal(base_symbol))
 
             if df is None or df.empty:
                 raise RuntimeError(f"borsapy bos veri: {base_symbol}")
@@ -877,8 +938,10 @@ def main():
     if args.all_bist:
         # tickers.py'dan dinamik endeks bileseni cek (borsapy varsa)
         try:
-            import sys, os
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import os as _os
+            _scanner_dir = _os.path.dirname(_os.path.abspath(__file__))
+            if _scanner_dir not in sys.path:
+                sys.path.insert(0, _scanner_dir)
             from tickers import get_list
             tickers = get_list(args.bist_list)
             if not tickers:
@@ -889,7 +952,35 @@ def main():
             print(f"HATA: tickers.py yuklenemedi: {e}")
             return
     else:
-        tickers = [t.strip().upper() for t in args.tickers.split(',') if t.strip()]
+        # --tickers parametresi
+        raw_tickers = args.tickers.strip()
+        # YENİ: Grup prefix'leri (BIST_SEKTOR:xxx, BIST_BILES:xxx, BIST_TUM_ENDEKSLER)
+        if (':' in raw_tickers and ',' not in raw_tickers) or \
+           raw_tickers.upper() in ('BIST_TUM_ENDEKSLER', 'BIST_TUM', 'BIST_ALL',
+                                     'BIST_ENDEKSLER', 'BIST_ENDEKSLER_GENIS',
+                                     'BIST_100', 'BIST_50', 'BIST_30',
+                                     'BIST_BANKA', 'BIST_HOLDING', 'BIST_GIDA',
+                                     'BIST_KIMYA', 'BIST_TEKNOLOJI', 'BIST_INSAAT',
+                                     'BIST_ENERJI', 'BIST_GAYRIMENKUL',
+                                     'BIST_OTOMOTIV', 'BIST_DEMIRCELIK'):
+            # Grup prefix veya isim → get_list ile çöz
+            try:
+                import os as _os
+                _scanner_dir = _os.path.dirname(_os.path.abspath(__file__))
+                if _scanner_dir not in sys.path:
+                    sys.path.insert(0, _scanner_dir)
+                from tickers import get_list
+                tickers = get_list(raw_tickers)
+                if not tickers:
+                    print(f"HATA: '{raw_tickers}' grubu icin hisse listesi bos.")
+                    return
+                print(f"Grup: {raw_tickers} -> {len(tickers)} hisse")
+            except ImportError as e:
+                print(f"HATA: tickers.py yuklenemedi: {e}")
+                return
+        else:
+            # Virgülle ayrılmış manuel liste
+            tickers = [t.strip().upper() for t in raw_tickers.split(',') if t.strip()]
     print(f"\nTarama başlıyor: {len(tickers)} hisse × {len(MA_TYPES)*len(PERIODS)} MA kombinasyonu = {len(tickers)*len(MA_TYPES)*len(PERIODS):,} aday")
     print(f"Parametreler: period={args.period}, react_bars={args.react_bars}, react_pct={args.react_pct}, atr_mult={args.atr_mult}")
     print(f"Walk-forward: {'KAPALI' if args.no_walk_forward else 'AÇIK (ilk %70 / son %30)'}\n")
