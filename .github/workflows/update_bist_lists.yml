@@ -1,0 +1,91 @@
+name: BIST Veri Güncelleyici (Endeks Listeleri)
+
+# Tüm BIST endekslerinin bileşen listelerini güncel tutar.
+# Birden fazla kaynak dener (borsapy + ISYatırım + mynet), en güveniliri seçer.
+# Cache JSON repo'ya commit edilir, diğer workflow'lar bu cache'i kullanır.
+#
+# OTOMATIK: Pazartesi sabah 6:00 (UTC+3, 03:00 UTC)
+# MANUEL: workflow_dispatch ile istediğin zaman
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Pazartesi 06:00 İstanbul
+  workflow_dispatch:
+    inputs:
+      probe_only:
+        description: 'Sadece kaynak testi yap (commit yok)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  update-bist-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Bağımlılıklar
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Probe mode (kaynak testi)
+        if: ${{ github.event.inputs.probe_only == 'true' }}
+        run: |
+          cd scanner
+          echo "=== XU100 probe ==="
+          python bist_data_fetcher.py --probe XU100
+          echo ""
+          echo "=== XBANK probe ==="
+          python bist_data_fetcher.py --probe XBANK
+
+      - name: Tüm endeksleri güncelle
+        if: ${{ github.event.inputs.probe_only != 'true' }}
+        run: |
+          cd scanner
+          python bist_data_fetcher.py --update-all
+
+      - name: Cache durumu
+        if: ${{ github.event.inputs.probe_only != 'true' }}
+        run: |
+          cd scanner
+          python bist_data_fetcher.py --status
+
+      - name: Commit & Push
+        if: ${{ github.event.inputs.probe_only != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add scanner/data/bist_indices.json
+          if git diff --cached --quiet; then
+            echo "Değişiklik yok"
+          else
+            git commit -m "BIST endeks verileri güncellendi: $(date +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Telegram bildirim
+        if: ${{ github.event.inputs.probe_only != 'true' && success() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          MSG="🔄 BIST Veri Güncelleyici%0A%0AEndeks bileşenleri güncel:%0A• XU030, XU050, XU100%0A• XBANK, XHOLD, XKMYA, ...%0A%0ATüm taramalar artık güncel veriyle çalışıyor."
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d chat_id="$TELEGRAM_CHAT_ID" -d text="$MSG" || true
+        continue-on-error: true
