@@ -6,6 +6,9 @@ yfinance>=0.2.0    # Yedek + sektör fallback
 pandas>=2.0
 numpy
 
+# HTTP scraping (bist_data_fetcher - ISYatırım/mynet yedek)
+httpx>=0.27.0
+
 # Plot ve image üretimi (notifier image-rich mod için)
 matplotlib
 
