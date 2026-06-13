@@ -56,12 +56,19 @@ def fetch_current_data(ticker: str, source: str = 'borsapy') -> dict:
 
     try:
         if source == 'borsapy' and HAS_BORSAPY:
-            from datetime import datetime, timedelta
-            start = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+            df = None
             if is_index and hasattr(bp, 'Index'):
-                df = bp.Index(base).history(start=start)
+                try:
+                    df = bp.Index(base).history(period='3ay', interval='1d')
+                except Exception:
+                    df = None
+                if df is None or df.empty:
+                    try:
+                        df = bp.Ticker(base).history(period='3ay', interval='1d')
+                    except Exception:
+                        df = None
             else:
-                df = bp.Ticker(base).history(start=start)
+                df = bp.Ticker(base).history(period='3ay', interval='1d')
         elif HAS_YFINANCE:
             symbol = f"^{base}" if is_index else f"{base}.IS"
             df = yf.download(symbol, period='2mo', progress=False, auto_adjust=True)
