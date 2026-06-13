@@ -392,93 +392,98 @@ def get_list(name: str) -> list:
         print(f"  Veya: 'BIST_SEKTOR:Banks', 'BIST_SEKTOR:Technology' (cache'ten)")
         return []
 
-    # Cache'i yükle (varsa)
+    # === Cache'i yükle (varsa) ===
     cache = _load_cache()
 
-    # 1) borsapy'den canlı çekim dene
+    # === YENİ: bist_data_fetcher cache'inden oku (yaş kontrolü ile) ===
+    cached_symbols, status = _get_from_data_fetcher(index_symbol)
+    if status == 'fresh':
+        print(f"  ✓ {index_symbol}: {len(cached_symbols)} hisse (data cache, taze)")
+        return cached_symbols
+    elif status == 'stale':
+        # Eski ama yine de var — kullan ama uyar
+        age = _get_data_fetcher_age(index_symbol)
+        print(f"  ⚠️ {index_symbol}: {len(cached_symbols)} hisse (data cache, {age:.0f} GÜN ESKİ!)")
+        print(f"     → 'python scanner/bist_data_fetcher.py --update {index_symbol}' ile yenile")
+        # Eski olsa bile dön — ama uyardık
+        if age <= 30:
+            return cached_symbols
+        else:
+            print(f"     ✗ Cache 30+ gün eski, kullanılmıyor!")
+
+    # === Canlı kaynaklardan çek (birden çok yöntem) ===
     if name_upper in ('BIST_TUM', 'BIST_ALL', 'XUTUM'):
         symbols = _fetch_bist_tum()
     else:
         symbols = _fetch_from_borsapy(index_symbol)
 
-    # Başarılıysa cache'e yaz
+    # Borsapy başarılı → cache'e yaz + dön
     if symbols:
         cache[index_symbol] = symbols
         _save_cache(cache)
+        # bist_data_fetcher cache'ine de yaz (eğer var ise)
+        try:
+            sys_path_inserted = False
+            import sys as _sys
+            from pathlib import Path as _Path
+            scanner_dir = _Path(__file__).parent
+            if str(scanner_dir) not in _sys.path:
+                _sys.path.insert(0, str(scanner_dir))
+                sys_path_inserted = True
+            from bist_data_fetcher import update_index as _update
+            _update(index_symbol, verbose=False)
+        except Exception:
+            pass
         return symbols
 
-    # 2) Cache fallback
+    # === Borsapy fail: eski cache var mı? ===
     if index_symbol in cache:
         cached = cache[index_symbol]
-        print(f"  Cache fallback: {index_symbol} → {len(cached)} hisse "
-              f"(borsapy ulaşılamadı)")
+        print(f"  ⚠️ {index_symbol}: borsapy fail, eski cache kullanılıyor ({len(cached)} hisse)")
+        print(f"     'python scanner/bist_data_fetcher.py --update {index_symbol}' ile yenile")
         return cached
 
-    # 3) Hardcoded fallback (en kritik endeksler için)
-    if index_symbol in _HARDCODED_FALLBACK:
-        hardcoded = _HARDCODED_FALLBACK[index_symbol]
-        print(f"  Hardcoded fallback: {index_symbol} → {len(hardcoded)} hisse "
-              f"(borsapy fail, statik liste kullanılıyor)")
-        # Cache'e de yaz ki sonraki seferler hızlı olsun
-        cache[index_symbol] = hardcoded
-        _save_cache(cache)
-        return hardcoded
-
-    # 4) Tamamen başarısız
-    print(f"  HATA: {name} listesi alınamadı. borsapy çalışmıyor ve cache/hardcoded yok.")
-    print(f"  Çözüm: --tickers HISSE1,HISSE2,... şeklinde manuel liste verin.")
+    # === Tamamen başarısız ===
+    print(f"  ✗ HATA: '{name}' listesi alınamadı.")
+    print(f"     Hiçbir kaynak çalışmıyor ve cache yok.")
+    print(f"     Çözüm 1: python scanner/bist_data_fetcher.py --update {index_symbol}")
+    print(f"     Çözüm 2: --tickers HISSE1,HISSE2,... şeklinde manuel liste verin")
     return []
 
 
-# === HARDCODED FALLBACK LİSTELER ===
-# borsapy çalışmazsa kullanılır. ~2026 verisi, periyodik güncellemek gerekir.
-_HARDCODED_FALLBACK = {
-    'XU030': [  # BIST 30
-        'AKBNK', 'AKSEN', 'ALARK', 'ARCLK', 'ASELS', 'ASTOR', 'BIMAS',
-        'EKGYO', 'ENKAI', 'EREGL', 'FROTO', 'GARAN', 'HEKTS', 'ISCTR',
-        'KCHOL', 'KOZAL', 'KRDMD', 'MGROS', 'OYAKC', 'PETKM', 'PGSUS',
-        'SAHOL', 'SASA', 'SISE', 'TAVHL', 'TCELL', 'THYAO', 'TOASO',
-        'TUPRS', 'YKBNK',
-    ],
-    'XU050': [  # BIST 50 = XU30 + 20 ek hisse
-        'AKBNK', 'AKSEN', 'ALARK', 'ARCLK', 'ASELS', 'ASTOR', 'BIMAS',
-        'EKGYO', 'ENKAI', 'EREGL', 'FROTO', 'GARAN', 'HEKTS', 'ISCTR',
-        'KCHOL', 'KOZAL', 'KRDMD', 'MGROS', 'OYAKC', 'PETKM', 'PGSUS',
-        'SAHOL', 'SASA', 'SISE', 'TAVHL', 'TCELL', 'THYAO', 'TOASO',
-        'TUPRS', 'YKBNK',
-        # +20
-        'AEFES', 'AGHOL', 'AHGAZ', 'AKFGY', 'ALKIM', 'ANSGR', 'BERA',
-        'BRSAN', 'CCOLA', 'CIMSA', 'DOAS', 'DOHOL', 'ENJSA', 'GUBRF',
-        'KOZAA', 'KRDMA', 'MAVI', 'ODAS', 'TKFEN', 'ULKER',
-    ],
-    'XU100': [  # BIST 100 = XU50 + 50 ek
-        'AKBNK', 'AKSEN', 'ALARK', 'ARCLK', 'ASELS', 'ASTOR', 'BIMAS',
-        'EKGYO', 'ENKAI', 'EREGL', 'FROTO', 'GARAN', 'HEKTS', 'ISCTR',
-        'KCHOL', 'KOZAL', 'KRDMD', 'MGROS', 'OYAKC', 'PETKM', 'PGSUS',
-        'SAHOL', 'SASA', 'SISE', 'TAVHL', 'TCELL', 'THYAO', 'TOASO',
-        'TUPRS', 'YKBNK',
-        'AEFES', 'AGHOL', 'AHGAZ', 'AKFGY', 'ALKIM', 'ANSGR', 'BERA',
-        'BRSAN', 'CCOLA', 'CIMSA', 'DOAS', 'DOHOL', 'ENJSA', 'GUBRF',
-        'KOZAA', 'KRDMA', 'MAVI', 'ODAS', 'TKFEN', 'ULKER',
-        # +50
-        'ADESE', 'AGROT', 'AKCNS', 'AKFYE', 'ALBRK', 'ALCTL', 'ALFAS',
-        'ANGEN', 'ARTMS', 'AYDEM', 'BAGFS', 'BANVT', 'BFREN', 'BIOEN',
-        'BIZIM', 'BTCIM', 'CWENE', 'DEVA', 'DOGUB', 'DOKTA', 'EGEEN',
-        'EUREN', 'EUROPI', 'FENER', 'GENIL', 'GESAN', 'GLYHO', 'GOLTS',
-        'GWIND', 'IPEKE', 'KARSN', 'KARTN', 'KCAER', 'KORDS', 'KRVGD',
-        'MAGEN', 'MIATK', 'NTHOL', 'NUHCM', 'OTKAR', 'PAPIL', 'PENTA',
-        'POLHO', 'QUAGR', 'SDTTR', 'SMRTG', 'TUKAS', 'VAKBN', 'VESTL',
-        'YEOTK',
-    ],
-    'XBANK': [
-        'GARAN', 'AKBNK', 'ISCTR', 'YKBNK', 'HALKB', 'VAKBN',
-        'ALBRK', 'ICBCT', 'QNBTR', 'SKBNK', 'TSKB',
-    ],
-    'XHOLD': [
-        'SAHOL', 'KCHOL', 'SISE', 'ZOREN', 'DOHOL', 'ENKAI',
-        'GLYHO', 'IHLAS', 'TKFEN', 'ALARK', 'AGHOL', 'BERA', 'NTHOL',
-    ],
-}
+def _get_from_data_fetcher(index_symbol: str) -> tuple:
+    """bist_data_fetcher.py cache'inden oku.
+
+    Returns:
+        (symbols, status): status = 'fresh' | 'stale' | 'missing'
+    """
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        scanner_dir = _Path(__file__).parent
+        if str(scanner_dir) not in _sys.path:
+            _sys.path.insert(0, str(scanner_dir))
+        from bist_data_fetcher import get_cached_components
+        return get_cached_components(index_symbol, max_age_days=7.0)
+    except ImportError:
+        return [], 'missing'
+    except Exception as e:
+        print(f"  ⚠️ data_fetcher cache okuma hatası: {e}")
+        return [], 'missing'
+
+
+def _get_data_fetcher_age(index_symbol: str) -> float:
+    """bist_data_fetcher cache'indeki endeks yaşı (gün)."""
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        scanner_dir = _Path(__file__).parent
+        if str(scanner_dir) not in _sys.path:
+            _sys.path.insert(0, str(scanner_dir))
+        from bist_data_fetcher import get_index_age_days
+        return get_index_age_days(index_symbol)
+    except Exception:
+        return float('inf')
 
 
 def list_available() -> list:
@@ -487,7 +492,6 @@ def list_available() -> list:
 
 
 # === BACKWARD COMPATIBLE ALIAS ===
-# Bazı modüller/workflow'lar get_tickers() çağırıyor (eski isim)
 get_tickers = get_list
 
 
