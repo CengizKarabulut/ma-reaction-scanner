@@ -104,16 +104,18 @@ def send_photo(token: str, chat_id: str, photo_bytes: bytes, caption: str = "") 
 
 
 def render_table_image(headers: list, rows: list, title: str = "",
-                        col_colors: dict = None) -> bytes:
+                        col_colors: dict = None, max_rows_per_image: int = 80) -> list:
     """Matplotlib ile tablo image uret. Sayfa = PIL bytes dondur.
 
     Args:
-        headers: ['Hisse', 'MA', 'Per', 'Değer', 'WR', 'Exp']
+        headers: ['Sembol', 'MA', 'Per', 'Değer', 'WR', 'Exp']
         rows: [['ODAS', 'SMA', '144', '6.09', '93%', '+6.51'], ...]
         title: Üst başlık (emoji icermesin)
-        col_colors: {0: ['#7fc97f', ...]} ticker satir renkleri (DESTEK=yesil, DIRENC=kirmizi)
+        col_colors: {0: ['#7fc97f', ...]} satir renkleri (DESTEK=yesil, DIRENC=kirmizi)
+        max_rows_per_image: Tek image'da max satır (Telegram size+dimension limiti için)
     Returns:
-        PNG bytes or None
+        List[bytes]: PNG image listesi (1 veya birden fazla chunk).
+                     None döner sadece tüm üretim fail olursa.
     """
     try:
         import matplotlib
@@ -127,100 +129,175 @@ def render_table_image(headers: list, rows: list, title: str = "",
     def clean_text(s):
         if not isinstance(s, str):
             return str(s)
-        # Emoji (Unicode emojiler 0x1F000+) ve unicode kalp/etiketler temizle
         return re.sub(r'[\U0001F300-\U0001FAFF\U00002600-\U000027BF]+', '', s).strip()
 
     title_clean = clean_text(title)
-    clean_rows = [[clean_text(c) for c in r] for r in rows]
+    clean_rows_all = [[clean_text(c) for c in r] for r in rows]
     clean_headers = [clean_text(h) for h in headers]
-
-    n_rows = len(clean_rows)
     n_cols = len(clean_headers)
-    if n_rows == 0:
+    n_total = len(clean_rows_all)
+    if n_total == 0:
         return None
 
-    # Dinamik figür boyutu - row sayısına göre
-    fig_w = max(8, n_cols * 1.4)
-    fig_h = max(2, 0.40 * (n_rows + 2))
+    # Satır sayısını chunklara böl (Telegram max ~10 MB image + ~10000px dimension)
+    chunk_size = max(20, min(max_rows_per_image, n_total))
+    chunks = []
 
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=150)
-    ax.axis('off')
+    for chunk_start in range(0, n_total, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, n_total)
+        clean_rows = clean_rows_all[chunk_start:chunk_end]
+        n_rows = len(clean_rows)
 
-    if title_clean:
-        plt.title(title_clean, fontsize=13, fontweight='bold', loc='left',
-                  color='#5fb3ff', pad=12)
+        # Bu chunk için col_colors slice
+        chunk_colors = None
+        if col_colors:
+            chunk_colors = {}
+            for k, v in col_colors.items():
+                chunk_colors[k] = v[chunk_start:chunk_end] if isinstance(v, list) else v
 
-    # Tablo
-    table = ax.table(cellText=clean_rows, colLabels=clean_headers,
-                      cellLoc='center', loc='center',
-                      colColours=['#2a2f39'] * n_cols)
-    table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1, 1.6)
+        # Dinamik figür boyutu
+        fig_w = max(8, n_cols * 1.4)
+        fig_h = max(2, 0.32 * (n_rows + 2))   # Daha sıkı satır yüksekliği
 
-    # Header rengi
-    for i in range(n_cols):
-        cell = table[0, i]
-        cell.set_text_props(color='#5fb3ff', fontweight='bold')
-        cell.set_facecolor('#1a1f29')
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=100)  # 150 → 100 dpi (boyut azalt)
+        ax.axis('off')
 
-    # Veri satır renkleri (her ikinci satır vurgu) + ticker sütununa DESTEK/DIRENC arka plan
-    for i in range(1, n_rows + 1):
-        for j in range(n_cols):
-            cell = table[i, j]
-            bg = '#0f1419' if i % 2 == 0 else '#1a1f29'
-            # Ticker sütunu için özel: yeşil/kırmızı arka plan
-            if j == 0 and col_colors and 0 in col_colors and i - 1 < len(col_colors[0]):
-                tag_color = col_colors[0][i - 1]
-                if tag_color == '#7fc97f':  # Yeşil = DESTEK
-                    bg = '#1a2f1f'
-                    cell.set_text_props(color='#7fc97f', fontweight='bold')
-                elif tag_color == '#ff8c69':  # Kırmızı = DIRENC
-                    bg = '#2f1a1a'
-                    cell.set_text_props(color='#ff8c69', fontweight='bold')
+        # Chunk başlığı (birden fazla chunk varsa numara ekle)
+        if title_clean:
+            if n_total > chunk_size:
+                chunk_no = chunk_start // chunk_size + 1
+                total_chunks = (n_total + chunk_size - 1) // chunk_size
+                full_title = f"{title_clean}  (Sayfa {chunk_no}/{total_chunks})"
+            else:
+                full_title = title_clean
+            plt.title(full_title, fontsize=12, fontweight='bold', loc='left',
+                      color='#5fb3ff', pad=10)
+
+        table = ax.table(cellText=clean_rows, colLabels=clean_headers,
+                          cellLoc='center', loc='center',
+                          colColours=['#2a2f39'] * n_cols)
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.5)
+
+        # Header
+        for i in range(n_cols):
+            cell = table[0, i]
+            cell.set_text_props(color='#5fb3ff', fontweight='bold')
+            cell.set_facecolor('#1a1f29')
+
+        # Veri satırları
+        for i in range(1, n_rows + 1):
+            for j in range(n_cols):
+                cell = table[i, j]
+                bg = '#0f1419' if i % 2 == 0 else '#1a1f29'
+                if j == 0 and chunk_colors and 0 in chunk_colors and i - 1 < len(chunk_colors[0]):
+                    tag_color = chunk_colors[0][i - 1]
+                    if tag_color == '#7fc97f':
+                        bg = '#1a2f1f'
+                        cell.set_text_props(color='#7fc97f', fontweight='bold')
+                    elif tag_color == '#ff8c69':
+                        bg = '#2f1a1a'
+                        cell.set_text_props(color='#ff8c69', fontweight='bold')
+                    else:
+                        cell.set_text_props(color='#e6e6e6')
                 else:
                     cell.set_text_props(color='#e6e6e6')
-            else:
-                cell.set_text_props(color='#e6e6e6')
-            cell.set_facecolor(bg)
+                cell.set_facecolor(bg)
 
-    fig.patch.set_facecolor('#0a0e14')
-    plt.tight_layout()
+        fig.patch.set_facecolor('#0a0e14')
+        plt.tight_layout()
 
-    # PNG bytes'a yaz
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', facecolor='#0a0e14', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    buf.seek(0)
-    return buf.read()
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', facecolor='#0a0e14',
+                    bbox_inches='tight', dpi=100)
+        plt.close(fig)
+        buf.seek(0)
+        png_bytes = buf.read()
+
+        # Telegram limit kontrolü (10 MB)
+        if len(png_bytes) > 9_500_000:
+            # Çok büyükse bu chunk'ı tekrar yarıya böl
+            print(f"  ⚠️ Chunk {chunk_start}-{chunk_end} hala büyük ({len(png_bytes)/1024/1024:.1f} MB), "
+                  f"satır sayısı yarıya düşürülecek", file=sys.stderr)
+            # Recursive call yarı boyutla
+            half_chunks = render_table_image(headers, rows[chunk_start:chunk_end], title=title,
+                                              col_colors={k: v[chunk_start:chunk_end] if isinstance(v, list) else v
+                                                          for k, v in (col_colors or {}).items()},
+                                              max_rows_per_image=chunk_size // 2)
+            if half_chunks:
+                chunks.extend(half_chunks)
+        else:
+            chunks.append(png_bytes)
+
+    return chunks if chunks else None
 
 
-def _format_cross_stock_top(df: pd.DataFrame, n: int = 20) -> list:
+def _detect_instrument_label(df) -> tuple:
+    """CSV'deki ticker'lardan enstrüman tipi tespit et.
+
+    Returns:
+        (singular, plural): ('Endeks', 'Endeksler') gibi
+    """
+    if df is None or len(df) == 0 or 'ticker' not in df.columns:
+        return ('Sembol', 'Sembol')
+
+    tickers = df['ticker'].astype(str).str.upper().unique()
+    n = len(tickers)
+    if n == 0:
+        return ('Sembol', 'Sembol')
+
+    # Sayıma göre yarıdan fazlası ne tipindeyse o
+    n_indices = sum(1 for t in tickers
+                    if t.startswith('X') and len(t) >= 4
+                    and t not in ('XAU', 'XAG', 'XAUUSD', 'XAGUSD'))
+    n_metals = sum(1 for t in tickers
+                   if t.startswith('XAU') or t.startswith('XAG'))
+    n_crypto = sum(1 for t in tickers
+                   if any(t.endswith(s) for s in ('USDT', 'USD', 'BTC', 'ETH'))
+                   and not t.startswith('X'))
+    n_forex = sum(1 for t in tickers
+                  if len(t) == 6 and t[:3] in ('EUR', 'GBP', 'USD', 'TRY', 'JPY')
+                  and t[3:] in ('EUR', 'GBP', 'USD', 'TRY', 'JPY'))
+
+    threshold = n / 2
+    if n_indices > threshold:
+        return ('Endeks', 'Endeks')
+    if n_metals > threshold:
+        return ('Emtia', 'Emtia')
+    if n_crypto > threshold:
+        return ('Coin', 'Coin')
+    if n_forex > threshold:
+        return ('Parite', 'Parite')
+    return ('Hisse', 'Hisse')
+
+
+def _format_cross_stock_top(df: pd.DataFrame, n: int = 20, singular: str = 'Hisse') -> list:
     """Cross-stock top N (robust öncelikli) — fiyat + MA değer + 🟢🔴 etiket dahil.
 
     n=0 → robust olanların TÜMÜNÜ göster (endeks taraması için faydalı).
+    singular: 'Hisse' / 'Endeks' / 'Coin' / 'Emtia' / 'Parite' (auto-detect)
     """
     lines = []
     if 'wf_robust' in df.columns and df['wf_robust'].sum() > 0:
         robust_df = df[df['wf_robust'] == True]
         if n == 0 or n >= len(robust_df):
-            # Tümünü göster (endeks taraması)
             top = robust_df.sort_values('composite_score', ascending=False)
-            lines.append(f"🏆 *Robust TÜM ({len(top)} kayıt, cross-stock)*")
+            lines.append(f"🏆 *Robust TÜM ({len(top)} kayıt, cross-{singular.lower()})*")
         else:
             top = robust_df.nlargest(n, 'composite_score')
-            lines.append(f"🏆 *Robust Top {n} (cross-stock)*")
+            lines.append(f"🏆 *Robust Top {n} (cross-{singular.lower()})*")
     else:
         if n == 0 or n >= len(df):
             top = df.sort_values('composite_score', ascending=False)
             lines.append(f"🏆 *TÜM ({len(top)} kayıt, composite skor)*")
         else:
             top = df.nlargest(n, 'composite_score')
-            lines.append(f"🏆 *Top {n} (cross-stock, composite skor)*")
+            lines.append(f"🏆 *Top {n} (cross-{singular.lower()}, composite skor)*")
 
     lines.append("```")
     # YENI: Fiyat + MA Değer + Etiket sütunları
-    lines.append(f"{'Hisse':<7} {'MA':<5} {'Per':<3} {'MA-Değ':<8} {'WR':<4} {'Exp'}")
+    lines.append(f"{singular:<7} {'MA':<5} {'Per':<3} {'MA-Değ':<8} {'WR':<4} {'Exp'}")
     lines.append("-" * 40)
     for _, r in top.iterrows():
         ma_val = r.get('current_ma_value', None)
@@ -278,20 +355,23 @@ def format_daily(df: pd.DataFrame) -> str:
     n_robust = int(df['wf_robust'].sum()) if 'wf_robust' in df.columns else 0
     n_total = len(df)
 
+    # Enstrüman tipini tespit (Hisse/Endeks/Coin/Emtia/Parite)
+    singular, _ = _detect_instrument_label(df)
+
     lines = []
     lines.append("📊 *BIST MA Reaction Scan — Günlük*")
     lines.append(f"_{datetime.now():%Y-%m-%d %H:%M}_")
     lines.append("")
-    lines.append(f"*Hisse:* {n_stocks} | *Aday MA:* {n_total:,}")
+    lines.append(f"*{singular}:* {n_stocks} | *Aday MA:* {n_total:,}")
     if 'wf_robust' in df.columns:
         lines.append(f"*Robust:* {n_robust:,} ({100*n_robust/max(n_total,1):.1f}%)")
     lines.append("")
 
     # === SMALL MODE (<50 hisse): her hisse için top 1 ===
     if n_stocks <= 50:
-        lines.extend(_format_cross_stock_top(df, n=10))
+        lines.extend(_format_cross_stock_top(df, n=10, singular=singular))
         lines.append("")
-        lines.append("📋 *Hisse Başı Top 3 MA*")
+        lines.append(f"📋 *{singular} Başı Top 3 MA*")
         lines.append("```")
         for ticker in sorted(df['ticker'].unique()):
             sub = df[df['ticker'] == ticker].nlargest(3, 'composite_score')
@@ -306,7 +386,7 @@ def format_daily(df: pd.DataFrame) -> str:
 
     # === MEDIUM MODE (50-150 hisse): cross-stock + robust hisselerin özeti ===
     elif n_stocks <= 150:
-        lines.extend(_format_cross_stock_top(df, n=20))
+        lines.extend(_format_cross_stock_top(df, n=20, singular=singular))
         lines.append("")
         lines.extend(_format_ma_family_stats(df, n=10))
         lines.append("")
@@ -351,7 +431,7 @@ def format_daily(df: pd.DataFrame) -> str:
 
     # === LARGE MODE (>150 hisse, BIST_TUM): yüksek seviyeli özet ===
     else:
-        lines.extend(_format_cross_stock_top(df, n=20))
+        lines.extend(_format_cross_stock_top(df, n=20, singular=singular))
         lines.append("")
         lines.extend(_format_ma_family_stats(df, n=12))
         lines.append("")
@@ -362,7 +442,7 @@ def format_daily(df: pd.DataFrame) -> str:
             .max().sort_values(ascending=False)
             .head(12)
         )
-        lines.append("🚀 *En Güçlü 12 Hissenin TOP 5 MA'sı*")
+        lines.append(f"🚀 *En Güçlü 12 {singular}in TOP 5 MA'sı*")
         lines.append("```")
         for tk, _ in best_per_stock.items():
             top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
@@ -436,10 +516,12 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
 
     Args:
         top_n_setups: Cross-stock top tablosundaki satır sayısı (default 20).
-                      Endeks tarama için 100 vermek mantıklı (79 endeks dahil).
+                      0 = TÜMÜ göster (endeks taraması için faydalı)
         top_n_stocks: Hisse başı top 5 MA bölümünde gösterilecek hisse sayısı.
-                      Endeks için 80, normal hisse için 12.
+                      0 = TÜMÜ göster
     """
+    # Enstrüman tipini otomatik tespit (Endeks/Coin/Emtia/Parite/Hisse)
+    singular, plural = _detect_instrument_label(df)
 
     n_stocks = df['ticker'].nunique()
     n_total = len(df)
@@ -449,11 +531,11 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
         n_robust = int(df['wf_robust'].sum())
         robust_pct = 100 * n_robust / max(n_total, 1)
 
-    # 1. KISA TEXT ÖZET
+    # 1. KISA TEXT ÖZET - enstrüman tipine uygun label
     header_text = (
         f"📊 *{label}*\n"
         f"{pd.Timestamp.now():%Y-%m-%d %H:%M}\n\n"
-        f"📈 Hisse/Endeks: *{n_stocks}* | Toplam MA: *{n_total:,}*\n"
+        f"📈 {singular}: *{n_stocks}* | Toplam MA: *{n_total:,}*\n"
         f"✅ Robust: *{n_robust:,}* ({robust_pct:.1f}%)\n"
     )
     send_telegram(token, chat_id, header_text, parse_mode='Markdown')
@@ -505,14 +587,19 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
         ])
         colors_col[0].append(tcolor)
 
-    headers = ['Hisse', 'MA', 'Per', 'MA Değer', 'WR', 'Exp']
-    img_bytes = render_table_image(headers, rows, title=title, col_colors=colors_col)
-    if img_bytes:
-        send_photo(token, chat_id, img_bytes, caption=f"{title} — {n_stocks} hisse arasından")
+    headers = [singular, 'MA', 'Per', 'MA Değer', 'WR', 'Exp']
+    img_chunks = render_table_image(headers, rows, title=title, col_colors=colors_col)
+    if img_chunks:
+        for idx, chunk in enumerate(img_chunks, 1):
+            if len(img_chunks) > 1:
+                cap = f"{title} — Sayfa {idx}/{len(img_chunks)}"
+            else:
+                cap = f"{title} — {n_stocks} {singular} arasından"
+            send_photo(token, chat_id, chunk, caption=cap)
     else:
         # Fallback - text gönder
         text_lines = [title, '```']
-        text_lines.append(f"{'Hisse':<8} {'MA':<5} {'Per':<4} {'Değer':<10} {'WR':<5} {'Exp'}")
+        text_lines.append(f"{singular:<8} {'MA':<5} {'Per':<4} {'Değer':<10} {'WR':<5} {'Exp'}")
         text_lines.append('-' * 45)
         for row in rows:
             text_lines.append(f"{row[0]:<8} {row[1]:<5} {row[2]:<4} {row[3]:<10} {row[4]:<5} {row[5]}")
@@ -571,23 +658,28 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
                 ])
                 all_colors[0].append(tcolor)
 
-        headers2 = ['Hisse (Fiyat)', 'MA', 'Per', 'MA Değer', 'WR', 'Exp']
-        img2 = render_table_image(
+        headers2 = [f'{singular} (Fiyat)', 'MA', 'Per', 'MA Değer', 'WR', 'Exp']
+        img2_chunks = render_table_image(
             headers2, all_rows,
-            title=f"💎 En Çok Robust MA'lı {len(robust_per_stock)} Hisse — Her Birinin Top 5'i",
+            title=f"💎 En Çok Robust MA'lı {len(robust_per_stock)} {singular} — Her Birinin Top 5'i",
             col_colors=all_colors
         )
-        if img2:
-            send_photo(token, chat_id, img2, caption="💎 Top 12 Hisse Detay")
+        if img2_chunks:
+            for idx, chunk in enumerate(img2_chunks, 1):
+                if len(img2_chunks) > 1:
+                    cap = f"💎 Top {singular} Detay — Sayfa {idx}/{len(img2_chunks)}"
+                else:
+                    cap = f"💎 Top {len(robust_per_stock)} {singular} Detay"
+                send_photo(token, chat_id, chunk, caption=cap)
         else:
             # Fallback - mevcut text format
-            text2 = _build_large_mode_text(df, robust_per_stock)
+            text2 = _build_large_mode_text(df, robust_per_stock, singular=singular)
             send_telegram(token, chat_id, text2, parse_mode='Markdown')
 
 
-def _build_large_mode_text(df, robust_per_stock):
+def _build_large_mode_text(df, robust_per_stock, singular: str = 'Hisse'):
     """Image render edemezse fallback text format."""
-    lines = ["💎 *En Çok Robust MA'lı 12 Hisse*", "```"]
+    lines = [f"💎 *En Çok Robust MA'lı {len(robust_per_stock)} {singular}*", "```"]
     for tk, cnt in robust_per_stock.items():
         top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
         curr_price = top5.iloc[0].get('current_close', None)
