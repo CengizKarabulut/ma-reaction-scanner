@@ -10,6 +10,9 @@ name: BIST Veri Güncelleyici (Endeks Listeleri)
 on:
   schedule:
     - cron: '0 3 * * 1'   # Pazartesi 06:00 İstanbul
+  repository_dispatch:
+    types:
+      - ma-update-bist-lists
   workflow_dispatch:
     inputs:
       probe_only:

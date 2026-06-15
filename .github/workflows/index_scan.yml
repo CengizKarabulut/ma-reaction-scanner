@@ -9,6 +9,9 @@ name: BIST Endeks Tarama
 on:
   schedule:
     - cron: '30 16 * * 1-5'   # 19:30 İstanbul, hafta içi (daily scan'den 1 saat sonra)
+  repository_dispatch:
+    types:
+      - ma-index-scan
   workflow_dispatch:
     inputs:
       tickers:

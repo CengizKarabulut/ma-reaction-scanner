@@ -8,6 +8,9 @@ name: Weekly BIST Robustness Analysis
 on:
   schedule:
     - cron: '0 7 * * 6'   # Cumartesi 10:00 İstanbul (UTC+3)
+  repository_dispatch:
+    types:
+      - ma-weekly-robustness
   workflow_dispatch:
     inputs:
       tickers:

@@ -3,6 +3,9 @@ name: Multi-Timeframe Cascade Scan
 on:
   schedule:
     - cron: '0 7 * * 6'   # Cumartesi 10:00 İstanbul
+  repository_dispatch:
+    types:
+      - ma-multi-tf-cascade
   workflow_dispatch:
     inputs:
       tickers:
