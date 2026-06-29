@@ -25,11 +25,16 @@ After a full research scan:
 ```bash
 python -m scanner.paper_tracker create \
   --panel reports/guarded/panel.csv \
+  --metadata reports/guarded/run_metadata.json \
+  --cohort-id daily-pilot-v1 \
   --ledger paper/ma_watchlist.csv
 ```
 
 Only certified rows are recorded by default. `--include-candidates` is available
-for research comparisons but those rows must remain separately labelled.
+for research comparisons; the ledger permanently labels those rows
+`CANDIDATE_ONLY`. Each watch also stores the scan fingerprint and the complete
+frozen analysis configuration, so later code changes cannot silently redefine
+an in-progress cohort.
 
 ## Advance watches
 
