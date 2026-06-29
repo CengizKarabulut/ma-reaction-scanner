@@ -7,11 +7,7 @@ name: BIST Endeks Tarama
 # Tam pipeline: tarama + strategy + backtest + multi-indicator confirm + zengin Telegram
 
 on:
-  schedule:
-    - cron: '30 16 * * 1-5'   # 19:30 İstanbul, hafta içi (daily scan'den 1 saat sonra)
-  repository_dispatch:
-    types:
-      - ma-index-scan
+  # LEGACY: manual comparison only; automatic signals are intentionally disabled.
   workflow_dispatch:
     inputs:
       tickers:

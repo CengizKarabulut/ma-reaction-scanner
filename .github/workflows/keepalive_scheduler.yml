@@ -1,19 +1,7 @@
 name: MA Reaction Scheduler Keepalive
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/keepalive_scheduler.yml'
-      - '.github/workflows/update_bist_lists.yml'
-      - '.github/workflows/daily_scan.yml'
-      - '.github/workflows/index_scan.yml'
-      - '.github/workflows/weekly_robustness.yml'
-      - '.github/workflows/multi_tf_cascade.yml'
-  repository_dispatch:
-    types:
-      - ma-keepalive-tick
+  # LEGACY: no automatic dispatch while the guarded core is prospectively validated.
   workflow_dispatch:
 
 concurrency:
@@ -22,6 +10,7 @@ concurrency:
 
 jobs:
   scheduler:
+    if: ${{ false }} # Archived: must not dispatch unvalidated legacy workflows.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

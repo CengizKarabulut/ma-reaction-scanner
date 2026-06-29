@@ -1,0 +1,72 @@
+name: Guarded MA Research Panel (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Comma-separated BIST symbols'
+        required: true
+        default: 'GARAN,THYAO,AKBNK'
+      timeframes:
+        description: 'Comma-separated timeframes'
+        required: true
+        default: '1h,4h,1d,1wk,1mo'
+      source:
+        description: 'Market-data source'
+        required: true
+        default: 'auto'
+        type: choice
+        options: [auto, borsapy, yfinance]
+      top:
+        description: 'Candidates displayed per side/timeframe'
+        required: true
+        default: '5'
+      null_iterations:
+        description: 'Matched-null iterations (999 recommended for research)'
+        required: true
+        default: '999'
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      INPUT_TICKERS: ${{ inputs.tickers }}
+      INPUT_TIMEFRAMES: ${{ inputs.timeframes }}
+      INPUT_SOURCE: ${{ inputs.source }}
+      INPUT_TOP: ${{ inputs.top }}
+      INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Mandatory tests
+        run: python -m unittest discover -s tests -v
+      - name: Run guarded panel
+        shell: bash
+        run: |
+          python -m scanner.ma_research_cli \
+            --tickers "$INPUT_TICKERS" \
+            --timeframes "$INPUT_TIMEFRAMES" \
+            --source "$INPUT_SOURCE" \
+            --top "$INPUT_TOP" \
+            --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --output-dir reports/guarded
+      - name: Upload auditable outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guarded-ma-research-${{ github.run_id }}
+          path: |
+            reports/guarded/
+            data_cache/
+          retention-days: 90
+          if-no-files-found: warn
+

@@ -6,11 +6,7 @@ name: Weekly BIST Robustness Analysis
 # Çıktı: HTML rapor + image-rich Telegram özet + önceki hafta delta'sı.
 
 on:
-  schedule:
-    - cron: '0 7 * * 6'   # Cumartesi 10:00 İstanbul (UTC+3)
-  repository_dispatch:
-    types:
-      - ma-weekly-robustness
+  # LEGACY: manual comparison only; automatic signals are intentionally disabled.
   workflow_dispatch:
     inputs:
       tickers:

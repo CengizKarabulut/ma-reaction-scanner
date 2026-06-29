@@ -1,3 +1,18 @@
+# Repository status: research migration in progress
+
+> The original v6 scanner/backtest/Telegram pipeline is retained as **legacy**
+> code for comparison. Its automatic schedules are disabled because its
+> reaction expectancy, breakthrough counter and backtest are not validated.
+>
+> New work must use `scanner/ma_core.py` and `scanner/ma_research_cli.py`.
+> `CERTIFIED` means a level passed null/FDR, validation and holdout gates; it is
+> historical evidence, not a promise of a future reversal.
+
+Start with [the guarded methodology](docs/METHODOLOGY.md) and
+[migration guide](docs/MIGRATION.md).
+
+---
+
 # BIST MA Reaction Scanner — v6.3 (Borsapy v0.10+ Native)
 
 Türkiye Borsası (BIST) hisseleri için **hareketli ortalama saygısını** tarayan profesyonel otomasyon sistemi. Borsapy v0.10+'nın TradingView WebSocket backend'i sayesinde **tüm BIST verilerine** tam erişim.
