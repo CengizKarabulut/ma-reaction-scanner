@@ -4,7 +4,7 @@
     "XBANK": {
       "count": 12,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:16.603113",
+      "fetched_at": "2026-07-06T03:01:45.746265",
       "index": "XBANK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -26,7 +26,7 @@
     "XGIDA": {
       "count": 47,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:18.112611",
+      "fetched_at": "2026-07-06T03:01:47.256139",
       "index": "XGIDA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -83,7 +83,7 @@
     "XHOLD": {
       "count": 49,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:17.106273",
+      "fetched_at": "2026-07-06T03:01:46.249514",
       "index": "XHOLD",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -142,7 +142,7 @@
     "XINSA": {
       "count": 14,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:19.118893",
+      "fetched_at": "2026-07-06T03:01:48.262544",
       "index": "XINSA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -166,7 +166,7 @@
     "XKMYA": {
       "count": 46,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:17.609392",
+      "fetched_at": "2026-07-06T03:01:46.752797",
       "index": "XKMYA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -222,7 +222,7 @@
     "XSGRT": {
       "count": 6,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:20.655589",
+      "fetched_at": "2026-07-06T03:01:49.772673",
       "index": "XSGRT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -238,7 +238,7 @@
     "XU030": {
       "count": 30,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:14.588917",
+      "fetched_at": "2026-07-06T03:01:43.731453",
       "index": "XU030",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -278,7 +278,7 @@
     "XU050": {
       "count": 50,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:15.092344",
+      "fetched_at": "2026-07-06T03:01:44.235131",
       "index": "XU050",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -286,7 +286,6 @@
         "AKBNK",
         "AKSEN",
         "ALARK",
-        "ARCLK",
         "ASELS",
         "ASTOR",
         "BIMAS",
@@ -295,21 +294,23 @@
         "CANTE",
         "CCOLA",
         "CIMSA",
-        "DOAS",
         "DSTKF",
+        "ECILC",
+        "EFOR",
         "EKGYO",
         "ENKAI",
         "EREGL",
         "FROTO",
         "GARAN",
+        "GLRMK",
         "GUBRF",
         "HALKB",
         "HEKTS",
         "ISCTR",
         "KCHOL",
         "KRDMD",
+        "KTLEV",
         "KUYAS",
-        "MAVI",
         "MGROS",
         "MIATK",
         "OYAKC",
@@ -325,7 +326,6 @@
         "TOASO",
         "TRALT",
         "TRMET",
-        "TSKB",
         "TTKOM",
         "TUPRS",
         "TURSG",
@@ -338,12 +338,11 @@
     "XU100": {
       "count": 100,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:15.595705",
+      "fetched_at": "2026-07-06T03:01:44.738570",
       "index": "XU100",
       "source": "borsapy.component_symbols",
       "symbols": [
         "AEFES",
-        "AGHOL",
         "AKBNK",
         "AKSA",
         "AKSEN",
@@ -376,6 +375,7 @@
         "ENJSA",
         "ENKAI",
         "EREGL",
+        "ESEN",
         "EUPWR",
         "EUREN",
         "FENER",
@@ -390,6 +390,7 @@
         "GUBRF",
         "HALKB",
         "HEKTS",
+        "IEYHO",
         "ISCTR",
         "ISMEN",
         "IZENR",
@@ -405,6 +406,7 @@
         "MPARK",
         "OBAMS",
         "ODAS",
+        "ODINE",
         "OTKAR",
         "OYAKC",
         "PAHOL",
@@ -422,7 +424,6 @@
         "SISE",
         "SKBNK",
         "SOKM",
-        "TABGD",
         "TAVHL",
         "TCELL",
         "THYAO",
@@ -435,7 +436,6 @@
         "TTKOM",
         "TUKAS",
         "TUPRS",
-        "TUREX",
         "TURSG",
         "ULKER",
         "VAKBN",
@@ -448,7 +448,7 @@
     "XUMAL": {
       "count": 150,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:20.125729",
+      "fetched_at": "2026-07-06T03:01:49.269573",
       "index": "XUMAL",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -606,9 +606,9 @@
       "verified": true
     },
     "XUSIN": {
-      "count": 241,
+      "count": 243,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:19.622387",
+      "fetched_at": "2026-07-06T03:01:48.766138",
       "index": "XUSIN",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -642,6 +642,7 @@
         "BARMA",
         "BAYRK",
         "BESLR",
+        "BETAE",
         "BFREN",
         "BIENY",
         "BLCYT",
@@ -821,6 +822,7 @@
         "SILVR",
         "SKTAS",
         "SNICA",
+        "SOHOE",
         "SOKE",
         "SUNTK",
         "TARKM",
@@ -859,7 +861,7 @@
     "XUTEK": {
       "count": 42,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:18.615797",
+      "fetched_at": "2026-07-06T03:01:47.759368",
       "index": "XUTEK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -909,9 +911,9 @@
       "verified": true
     },
     "XUTUM": {
-      "count": 566,
+      "count": 568,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:16.100027",
+      "fetched_at": "2026-07-06T03:01:45.243074",
       "index": "XUTUM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -998,6 +1000,7 @@
         "BERA",
         "BESLR",
         "BESTE",
+        "BETAE",
         "BEYAZ",
         "BFREN",
         "BIENY",
@@ -1395,6 +1398,7 @@
         "SMRVA",
         "SNGYO",
         "SNICA",
+        "SOHOE",
         "SOKE",
         "SOKM",
         "SONME",
@@ -1487,7 +1491,7 @@
     "XYORT": {
       "count": 9,
       "failures": [],
-      "fetched_at": "2026-06-29T08:17:21.158525",
+      "fetched_at": "2026-07-06T03:01:50.275763",
       "index": "XYORT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1504,5 +1508,5 @@
       "verified": true
     }
   },
-  "updated_at": "2026-06-29T08:17:21.158814"
+  "updated_at": "2026-07-06T03:01:50.276062"
 }
