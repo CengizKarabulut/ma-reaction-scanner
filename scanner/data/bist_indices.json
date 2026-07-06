@@ -4,7 +4,7 @@
     "XBANK": {
       "count": 12,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:45.746265",
+      "fetched_at": "2026-07-06T07:16:16.791413",
       "index": "XBANK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -26,7 +26,7 @@
     "XGIDA": {
       "count": 47,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:47.256139",
+      "fetched_at": "2026-07-06T07:16:18.300755",
       "index": "XGIDA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -83,7 +83,7 @@
     "XHOLD": {
       "count": 49,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:46.249514",
+      "fetched_at": "2026-07-06T07:16:17.294547",
       "index": "XHOLD",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -142,7 +142,7 @@
     "XINSA": {
       "count": 14,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:48.262544",
+      "fetched_at": "2026-07-06T07:16:19.306770",
       "index": "XINSA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -166,7 +166,7 @@
     "XKMYA": {
       "count": 46,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:46.752797",
+      "fetched_at": "2026-07-06T07:16:17.797588",
       "index": "XKMYA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -222,7 +222,7 @@
     "XSGRT": {
       "count": 6,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:49.772673",
+      "fetched_at": "2026-07-06T07:16:20.816681",
       "index": "XSGRT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -238,7 +238,7 @@
     "XU030": {
       "count": 30,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:43.731453",
+      "fetched_at": "2026-07-06T07:16:14.777338",
       "index": "XU030",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -278,7 +278,7 @@
     "XU050": {
       "count": 50,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:44.235131",
+      "fetched_at": "2026-07-06T07:16:15.280814",
       "index": "XU050",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -338,7 +338,7 @@
     "XU100": {
       "count": 100,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:44.738570",
+      "fetched_at": "2026-07-06T07:16:15.784138",
       "index": "XU100",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -448,7 +448,7 @@
     "XUMAL": {
       "count": 150,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:49.269573",
+      "fetched_at": "2026-07-06T07:16:20.313455",
       "index": "XUMAL",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -608,7 +608,7 @@
     "XUSIN": {
       "count": 243,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:48.766138",
+      "fetched_at": "2026-07-06T07:16:19.810235",
       "index": "XUSIN",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -861,7 +861,7 @@
     "XUTEK": {
       "count": 42,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:47.759368",
+      "fetched_at": "2026-07-06T07:16:18.803761",
       "index": "XUTEK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -913,7 +913,7 @@
     "XUTUM": {
       "count": 568,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:45.243074",
+      "fetched_at": "2026-07-06T07:16:16.288394",
       "index": "XUTUM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1491,7 +1491,7 @@
     "XYORT": {
       "count": 9,
       "failures": [],
-      "fetched_at": "2026-07-06T03:01:50.275763",
+      "fetched_at": "2026-07-06T07:16:21.319712",
       "index": "XYORT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1508,5 +1508,5 @@
       "verified": true
     }
   },
-  "updated_at": "2026-07-06T03:01:50.276062"
+  "updated_at": "2026-07-06T07:16:21.319958"
 }
