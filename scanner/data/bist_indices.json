@@ -4,7 +4,7 @@
     "XBANK": {
       "count": 12,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:04.530927",
+      "fetched_at": "2026-07-06T07:16:16.791413",
       "index": "XBANK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -75,7 +75,7 @@
     "XGIDA": {
       "count": 47,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:05.585615",
+      "fetched_at": "2026-07-06T07:16:18.300755",
       "index": "XGIDA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -132,7 +132,7 @@
     "XHOLD": {
       "count": 49,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:06.647947",
+      "fetched_at": "2026-07-06T07:16:17.294547",
       "index": "XHOLD",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -203,7 +203,7 @@
     "XINSA": {
       "count": 14,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:13.908113",
+      "fetched_at": "2026-07-06T07:16:19.306770",
       "index": "XINSA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -227,7 +227,7 @@
     "XKMYA": {
       "count": 46,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:06.108368",
+      "fetched_at": "2026-07-06T07:16:17.797588",
       "index": "XKMYA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -341,7 +341,7 @@
     "XSGRT": {
       "count": 6,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:07.181634",
+      "fetched_at": "2026-07-06T07:16:20.816681",
       "index": "XSGRT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -424,7 +424,7 @@
     "XU030": {
       "count": 30,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:02.334615",
+      "fetched_at": "2026-07-06T07:16:14.777338",
       "index": "XU030",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -464,7 +464,7 @@
     "XU050": {
       "count": 50,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:02.881197",
+      "fetched_at": "2026-07-06T07:16:15.280814",
       "index": "XU050",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -524,7 +524,7 @@
     "XU100": {
       "count": 100,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:03.412819",
+      "fetched_at": "2026-07-06T07:16:15.784138",
       "index": "XU100",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -656,7 +656,7 @@
     "XUMAL": {
       "count": 150,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:20.873316",
+      "fetched_at": "2026-07-06T07:16:20.313455",
       "index": "XUMAL",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -814,9 +814,9 @@
       "verified": true
     },
     "XUSIN": {
-      "count": 242,
+      "count": 243,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:20.345734",
+      "fetched_at": "2026-07-06T07:16:19.810235",
       "index": "XUSIN",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1030,6 +1030,7 @@
         "SILVR",
         "SKTAS",
         "SNICA",
+        "SOHOE",
         "SOKE",
         "SUNTK",
         "TARKM",
@@ -1068,7 +1069,7 @@
     "XUTEK": {
       "count": 42,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:05.068702",
+      "fetched_at": "2026-07-06T07:16:18.803761",
       "index": "XUTEK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1118,9 +1119,9 @@
       "verified": true
     },
     "XUTUM": {
-      "count": 567,
+      "count": 568,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:03.993340",
+      "fetched_at": "2026-07-06T07:16:16.288394",
       "index": "XUTUM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1605,6 +1606,7 @@
         "SMRVA",
         "SNGYO",
         "SNICA",
+        "SOHOE",
         "SOKE",
         "SOKM",
         "SONME",
@@ -1697,7 +1699,7 @@
     "XYORT": {
       "count": 9,
       "failures": [],
-      "fetched_at": "2026-07-01T16:11:21.398206",
+      "fetched_at": "2026-07-06T07:16:21.319712",
       "index": "XYORT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1714,5 +1716,5 @@
       "verified": true
     }
   },
-  "updated_at": "2026-07-01T16:12:41.286063"
+  "updated_at": "2026-07-06T07:16:21.319958"
 }
