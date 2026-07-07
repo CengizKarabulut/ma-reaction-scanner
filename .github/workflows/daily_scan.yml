@@ -1,11 +1,7 @@
 name: Daily BIST MA Reaction Scan
 
 on:
-  schedule:
-    - cron: '30 15 * * 1-5'   # 18:30 İstanbul, hafta içi
-  repository_dispatch:
-    types:
-      - ma-daily-scan
+  # LEGACY: manual comparison only; automatic signals are intentionally disabled.
   workflow_dispatch:
     inputs:
       tickers:

@@ -1,0 +1,142 @@
+name: Guarded MA Research Panel (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: 'Hazır varlık evreni (sembol kodu yazmanız gerekmez)'
+        required: true
+        default: 'bist30_stocks'
+        type: choice
+        options:
+          - bist30_stocks
+          - bist50_stocks
+          - bist100_stocks
+          - bist_all_stocks
+          - bist_sector_stocks
+          - bist_bank_stocks
+          - bist_technology_stocks
+          - bist_food_stocks
+          - bist_chemistry_stocks
+          - bist_main_indices
+          - bist_sector_indices
+          - bist_all_indices
+          - crypto_majors
+          - commodities_majors
+          - custom
+      sector:
+        description: 'Yalnızca bist_sector_stocks için sektör (kod bilmek gerekmez)'
+        required: true
+        default: 'Bankacılık'
+        type: choice
+        options:
+          - Bankacılık
+          - Teknoloji
+          - Gıda ve İçecek
+          - Kimya, Petrol ve Plastik
+          - Holding ve Yatırım
+          - Sigorta
+          - Turizm
+          - Elektrik
+          - İletişim
+          - İnşaat
+          - Madencilik
+          - Metal Ana
+          - Spor
+          - Tekstil ve Deri
+          - Ulaştırma
+          - Sınai
+          - Mali
+      custom_asset_class:
+        description: 'Yalnızca custom için varlık sınıfı'
+        required: true
+        default: 'stock'
+        type: choice
+        options: [stock, index, sector_index, crypto, commodity]
+      custom_market:
+        description: 'Yalnızca custom için piyasa'
+        required: true
+        default: 'BIST'
+        type: choice
+        options: [BIST, GLOBAL]
+      custom_symbols:
+        description: 'Yalnızca custom seçilirse virgüllü semboller'
+        required: false
+        default: 'GARAN,THYAO,AKBNK'
+      timeframes:
+        description: 'Comma-separated timeframes'
+        required: true
+        default: '1d'
+      periods:
+        description: 'MA periods (operational default)'
+        required: true
+        default: '20,50,100,200'
+      source:
+        description: 'Market-data source'
+        required: true
+        default: 'auto'
+        type: choice
+        options: [auto, borsapy, yfinance]
+      top:
+        description: 'Candidates displayed per side/timeframe'
+        required: true
+        default: '5'
+      null_iterations:
+        description: 'Matched-null iterations'
+        required: true
+        default: '499'
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      INPUT_UNIVERSE: ${{ inputs.universe }}
+      INPUT_ASSET_CLASS: ${{ inputs.custom_asset_class }}
+      INPUT_SECTOR: ${{ inputs.sector }}
+      INPUT_MARKET: ${{ inputs.custom_market }}
+      INPUT_TICKERS: ${{ inputs.custom_symbols }}
+      INPUT_PERIODS: ${{ inputs.periods }}
+      INPUT_TIMEFRAMES: ${{ inputs.timeframes }}
+      INPUT_SOURCE: ${{ inputs.source }}
+      INPUT_TOP: ${{ inputs.top }}
+      INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Mandatory tests
+        run: python -m unittest discover -s tests -v
+      - name: Run guarded panel
+        shell: bash
+        run: |
+          python -m scanner.ma_research_cli \
+            --universe "$INPUT_UNIVERSE" \
+            --asset-class "$INPUT_ASSET_CLASS" \
+            --sector "$INPUT_SECTOR" \
+            --market "$INPUT_MARKET" \
+            --tickers "$INPUT_TICKERS" \
+            --periods "$INPUT_PERIODS" \
+            --timeframes "$INPUT_TIMEFRAMES" \
+            --source "$INPUT_SOURCE" \
+            --top "$INPUT_TOP" \
+            --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --output-dir reports/guarded
+      - name: Upload auditable outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guarded-ma-research-${{ github.run_id }}
+          path: |
+            reports/guarded/
+            data_cache/
+          retention-days: 90
+          if-no-files-found: warn
+

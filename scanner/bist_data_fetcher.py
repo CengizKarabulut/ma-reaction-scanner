@@ -28,10 +28,15 @@ import json
 import re
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import httpx  # borsapy ile geliyor
+
+try:
+    from .bist_classification import SECTOR_INDEX_NAMES
+except ImportError:
+    from bist_classification import SECTOR_INDEX_NAMES
 
 try:
     import borsapy as bp
@@ -49,6 +54,8 @@ MIN_COMPONENTS = {
     'XU500': 400, 'XUTUM': 400, 'XKTUM': 200,
     'XBANK': 8, 'XHOLD': 8, 'XKMYA': 8, 'XGIDA': 8,
     'XUTEK': 6, 'XINSA': 6, 'XUSIN': 30, 'XUMAL': 30,
+    'XSGRT': 5, 'XILTM': 2, 'XSPOR': 4, 'XMADN': 5,
+    'XTRZM': 5, 'XELKT': 5, 'XMANA': 5, 'XTEKS': 5, 'XULAS': 5,
 }
 
 
@@ -326,7 +333,7 @@ def update_index(index_symbol: str, verbose: bool = True) -> bool:
     result = fetch_index_components(index_symbol, verbose=verbose)
     if not result['verified']:
         if verbose:
-            print(f"  ✗ Tüm kaynaklar fail. Cache güncellenmedi.")
+            print("  ✗ Tüm kaynaklar fail. Cache güncellenmedi.")
             for f in result['failures']:
                 print(f"     - {f}")
         return False
@@ -337,7 +344,6 @@ def update_index(index_symbol: str, verbose: bool = True) -> bool:
     save_cache(cache)
 
     if verbose:
-        age_before = get_index_age_days(index_symbol)
         print(f"  ✓ {index_symbol} cache güncellendi: {len(result['symbols'])} hisse")
     return True
 
@@ -345,8 +351,7 @@ def update_index(index_symbol: str, verbose: bool = True) -> bool:
 def update_all(verbose: bool = True) -> dict:
     """Tüm ana endeksleri güncelle."""
     primary = ['XU030', 'XU050', 'XU100', 'XUTUM']
-    sectoral = ['XBANK', 'XHOLD', 'XKMYA', 'XGIDA', 'XUTEK',
-                'XINSA', 'XUSIN', 'XUMAL', 'XSGRT', 'XYORT']
+    sectoral = list(SECTOR_INDEX_NAMES) + ['XYORT']
 
     results = {'success': [], 'failed': []}
     for sym in primary + sectoral:
@@ -358,7 +363,7 @@ def update_all(verbose: bool = True) -> dict:
         time.sleep(0.5)  # Rate limit
 
     if verbose:
-        print(f"\n=== ÖZET ===")
+        print("\n=== ÖZET ===")
         print(f"Başarılı: {len(results['success'])} ({', '.join(results['success'])})")
         print(f"Başarısız: {len(results['failed'])} ({', '.join(results['failed'])})")
     return results
@@ -372,7 +377,7 @@ def status_report():
         print("⚠️ Cache boş. Önce: python bist_data_fetcher.py --update-all")
         return
 
-    print(f"\n📊 BIST Veri Cache Durumu")
+    print("\n📊 BIST Veri Cache Durumu")
     print(f"Son güncelleme: {cache.get('updated_at', 'bilinmiyor')}")
     print(f"Toplam endeks: {len(indices)}\n")
 
@@ -404,6 +409,11 @@ def status_report():
 # ============================================================
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError):
+            pass
     p = argparse.ArgumentParser(description='BIST Veri Kaynağı')
     p.add_argument('--update', type=str, help='Tek endeksi canlı güncelle')
     p.add_argument('--update-all', action='store_true',

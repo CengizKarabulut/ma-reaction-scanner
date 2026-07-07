@@ -1,0 +1,43 @@
+{
+  "cohort_id": "bist_daily_pilot_v2",
+  "registered_date": "2026-06-29",
+  "status": "ACTIVE_NO_CERTIFIED_WATCHES",
+  "purpose": "Operational pilot of the guarded prospective MA reaction workflow; not a claim about the full BIST universe.",
+  "universe": {
+    "tickers": ["GARAN", "THYAO", "AKBNK"],
+    "selection_rule": "Fixed repository pilot universe chosen before this cohort is scanned; membership does not change within the cohort."
+  },
+  "scan": {
+    "timeframes": ["1d"],
+    "ma_types": ["SMA", "EMA", "WMA", "VWMA", "KAMA", "ALMA", "HMA"],
+    "periods": [20, 50, 100, 200],
+    "period_selection_rule": "Conventional short, medium and long daily trend horizons fixed before any v2 result was generated.",
+    "null_iterations": 499,
+    "fdr_q": 0.10,
+    "panel_top_per_side": 5,
+    "secondary_controls": ["shifted_ma", "horizontal_level"],
+    "configuration_source": "The complete AnalysisConfig and source fingerprint are copied from run_metadata.json into every ledger row."
+  },
+  "enrollment": {
+    "include_certified": true,
+    "include_candidate_comparator": true,
+    "primary_evidence_status": "CERTIFIED",
+    "comparison_rule": "CANDIDATE_ONLY rows are reported separately and can never satisfy the promotion rule."
+  },
+  "execution": {
+    "entry": "First eligible independent touch strictly after the scan cut-off.",
+    "roundtrip_cost_bps": 25.0,
+    "ambiguous_bar_policy": "Conservative: simultaneous target and stop counts as STOP.",
+    "outcome_horizon_bars": 10,
+    "target_atr": 1.0,
+    "stop_atr": 1.0
+  },
+  "decision_rule": {
+    "minimum_resolved_certified_watches": 30,
+    "minimum_certified_target_rate": 0.55,
+    "minimum_certified_median_net_fixed_return_atr": 0.0,
+    "promotion": "All three thresholds must be met. Until then the result is INCONCLUSIVE and notifications remain disabled.",
+    "failure": "At or after 30 resolved CERTIFIED watches, target rate below 0.50 or median net fixed return at or below zero rejects this cohort."
+  },
+  "change_control": "Any change to universe, timeframe, MA family, periods, touch definition, horizon, target, stop, FDR, null controls or costs creates a new cohort identifier."
+}
