@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from scanner.paper_tracker import (
+    _fetch_watch_frame,
     advance_watchlist,
     append_watchlist,
     build_watchlist,
@@ -48,6 +49,74 @@ class PaperTrackerTests(unittest.TestCase):
         ledger = build_watchlist(panel, created_at="2025-01-01")
         self.assertEqual(len(ledger), 1)
         self.assertEqual(ledger.iloc[0]["state"], "WATCHING")
+
+    def test_typed_asset_metadata_survives_into_fetch(self):
+        panel = pd.DataFrame(
+            [
+                {
+                    "ticker": "BTC-USD",
+                    "provider_symbol": "BTC-USD",
+                    "asset_class": "crypto",
+                    "asset_label": "Kripto",
+                    "universe": "crypto_majors",
+                    "display_name": "Bitcoin",
+                    "market": "GLOBAL",
+                    "timeframe": "1d",
+                    "side": "support",
+                    "ma_type": "EMA",
+                    "period": 20,
+                    "current_ma": 100,
+                    "current_price": 102,
+                    "q_value": 0.02,
+                    "certified": True,
+                }
+            ]
+        )
+        ledger = build_watchlist(panel, created_at="2025-01-01")
+        watch = ledger.iloc[0]
+        self.assertEqual(watch["asset_label"], "Kripto")
+        self.assertEqual(watch["market"], "GLOBAL")
+
+        captured = {}
+
+        def fetcher(symbol, timeframe, **metadata):
+            captured.update(symbol=symbol, timeframe=timeframe, **metadata)
+            return pd.DataFrame()
+
+        _fetch_watch_frame(fetcher, watch, "1d")
+        self.assertEqual(captured["symbol"], "BTC-USD")
+        self.assertEqual(captured["asset_class"], "crypto")
+        self.assertEqual(captured["market"], "GLOBAL")
+
+    def test_legacy_stock_panel_gets_sector_and_index_memberships(self):
+        panel = pd.DataFrame(
+            [
+                {
+                    "ticker": "GARAN",
+                    "timeframe": "1d",
+                    "side": "support",
+                    "ma_type": "EMA",
+                    "period": 20,
+                    "current_ma": 100,
+                    "current_price": 102,
+                    "q_value": 0.02,
+                    "certified": True,
+                }
+            ]
+        )
+        ledger = build_watchlist(panel, created_at="2025-01-01")
+        self.assertEqual(ledger.iloc[0]["sector"], "Bankacılık / Mali")
+        self.assertIn("XBANK (BIST Banka)", ledger.iloc[0]["index_memberships"])
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "legacy.csv"
+            legacy = ledger.copy()
+            legacy["sector"] = ""
+            legacy["industry"] = ""
+            legacy["index_memberships"] = "XU030 (BIST 30)"
+            legacy.to_csv(path, index=False)
+            migrated = append_watchlist(path, ledger.iloc[0:0])
+            self.assertEqual(migrated.iloc[0]["sector"], "Bankacılık / Mali")
+            self.assertIn("XBANK (BIST Banka)", migrated.iloc[0]["index_memberships"])
 
     def test_active_duplicate_is_not_reenrolled(self):
         panel = pd.DataFrame(

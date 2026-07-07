@@ -1,9 +1,15 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
-from scanner.ma_data import fingerprint_frame, resample_ohlcv
+from scanner.ma_data import (
+    MarketDataProvider,
+    _yfinance_symbol,
+    fingerprint_frame,
+    resample_ohlcv,
+)
 
 
 class DataLayerTests(unittest.TestCase):
@@ -40,12 +46,35 @@ class DataLayerTests(unittest.TestCase):
         first = fingerprint_frame(self.frame)
         second = fingerprint_frame(self.frame.copy())
         changed = self.frame.copy()
+
         changed.iloc[-1, changed.columns.get_loc("Close")] += 1.0
         changed.iloc[-1, changed.columns.get_loc("High")] += 1.0
         self.assertEqual(first, second)
         self.assertNotEqual(first, fingerprint_frame(changed))
 
+    def test_yfinance_symbols_respect_asset_class(self):
+        self.assertEqual(_yfinance_symbol("GARAN", "stock", "BIST"), "GARAN.IS")
+        self.assertEqual(_yfinance_symbol("XU100", "index", "BIST"), "XU100.IS")
+        self.assertEqual(_yfinance_symbol("BTC-USD", "crypto", "GLOBAL"), "BTC-USD")
+        self.assertEqual(_yfinance_symbol("GC=F", "commodity", "GLOBAL"), "GC=F")
+
+    def test_external_assets_skip_borsapy_in_auto_mode(self):
+        provider = MarketDataProvider(source="auto", snapshot=False)
+        with (
+            patch(
+                "scanner.ma_data._fetch_yfinance", return_value=self.frame
+            ) as yf_fetch,
+            patch("scanner.ma_data._bp_history") as bp_fetch,
+        ):
+            result = provider.fetch(
+                "BTC-USD", "1d", asset_class="crypto", market="GLOBAL"
+            )
+        self.assertEqual(result.source, "yfinance")
+        yf_fetch.assert_called_once_with(
+            "BTC-USD", "1d", asset_class="crypto", market="GLOBAL"
+        )
+        bp_fetch.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
-

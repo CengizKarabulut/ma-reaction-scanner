@@ -39,15 +39,42 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
 
-def _symbol_type(symbol: str) -> str:
+def _symbol_type(symbol: str, asset_class: str | None = None) -> str:
+    if asset_class in {"index", "sector_index"}:
+        return "bist_index"
+    if asset_class in {"crypto", "commodity"}:
+        return "external"
     value = symbol.upper().replace(".IS", "")
     if re.match(r"^X[A-Z0-9]{3,4}$", value):
         return "bist_index"
     return "bist"
 
 
+def _yfinance_symbol(
+    ticker: str, asset_class: str | None = None, market: str | None = None
+) -> str:
+    symbol = ticker.upper()
+    if (
+        market == "BIST"
+        and _symbol_type(symbol, asset_class) in {"bist", "bist_index"}
+        and not symbol.endswith(".IS")
+    ):
+        symbol += ".IS"
+    elif (
+        asset_class is None
+        and _symbol_type(symbol) == "bist"
+        and not symbol.endswith(".IS")
+    ):
+        symbol += ".IS"
+    return symbol
+
+
 def _start_date(years: int = 10) -> str:
-    return (datetime.now(timezone.utc) - timedelta(days=365 * years + 90)).date().isoformat()
+    return (
+        (datetime.now(timezone.utc) - timedelta(days=365 * years + 90))
+        .date()
+        .isoformat()
+    )
 
 
 def resample_ohlcv(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
@@ -55,7 +82,11 @@ def resample_ohlcv(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
 
     df = normalize_ohlcv(frame)
     aggregations = {
-        "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+        "Open": "first",
+        "High": "max",
+        "Low": "min",
+        "Close": "last",
+        "Volume": "sum",
     }
     if timeframe == "4h":
         # BIST continuous session starts at 10:00 Europe/Istanbul.  Anchoring to
@@ -72,12 +103,15 @@ def resample_ohlcv(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     return normalize_ohlcv(sampled.dropna(subset=["Open", "High", "Low", "Close"]))
 
 
-def _fetch_yfinance(ticker: str, interval: str) -> pd.DataFrame:
+def _fetch_yfinance(
+    ticker: str,
+    interval: str,
+    asset_class: str | None = None,
+    market: str | None = None,
+) -> pd.DataFrame:
     if yf is None:
         raise RuntimeError("yfinance is not installed")
-    symbol = ticker.upper()
-    if _symbol_type(symbol) == "bist" and not symbol.endswith(".IS"):
-        symbol += ".IS"
+    symbol = _yfinance_symbol(ticker, asset_class, market)
     period = YF_PERIODS[interval]
     data = yf.download(
         symbol,
@@ -93,11 +127,23 @@ def _fetch_yfinance(ticker: str, interval: str) -> pd.DataFrame:
     return normalize_ohlcv(data)
 
 
-def _bp_history(ticker: str, interval: str) -> pd.DataFrame:
+def _bp_history(
+    ticker: str,
+    interval: str,
+    asset_class: str | None = None,
+    market: str | None = None,
+) -> pd.DataFrame:
     if bp is None:
         raise RuntimeError("borsapy is not installed")
+    if market is not None and market != "BIST":
+        raise RuntimeError("borsapy adapter only supports BIST instruments")
+    if asset_class in {"crypto", "commodity"}:
+        raise RuntimeError(f"borsapy does not support asset class: {asset_class}")
     symbol = ticker.upper().replace(".IS", "")
-    instrument = bp.Index(symbol) if _symbol_type(symbol) == "bist_index" and hasattr(bp, "Index") else bp.Ticker(symbol)
+    is_index = _symbol_type(symbol, asset_class) == "bist_index"
+    instrument = (
+        bp.Index(symbol) if is_index and hasattr(bp, "Index") else bp.Ticker(symbol)
+    )
     if interval == "1d":
         try:
             data = instrument.history(start=_start_date(10), interval="1d")
@@ -142,14 +188,20 @@ class MarketDataProvider:
         folder = self.cache_dir / _safe_name(ticker.upper()) / timeframe
         if not self.use_cache or not folder.exists():
             return None
-        files = sorted(folder.glob("*.csv.gz"), key=lambda p: p.stat().st_mtime, reverse=True)
+        files = sorted(
+            folder.glob("*.csv.gz"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
         return files[0] if files else None
 
     def _read_cache(self, path: Path, ticker: str, timeframe: str) -> FetchResult:
         frame = pd.read_csv(path, index_col=0, parse_dates=True)
         df = normalize_ohlcv(frame)
         metadata_path = path.with_suffix("").with_suffix(".json")
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+        metadata = (
+            json.loads(metadata_path.read_text(encoding="utf-8"))
+            if metadata_path.exists()
+            else {}
+        )
         return FetchResult(
             frame=df,
             ticker=ticker.upper(),
@@ -160,7 +212,15 @@ class MarketDataProvider:
             fingerprint=fingerprint_frame(df),
         )
 
-    def fetch(self, ticker: str, timeframe: str, prefer_cache: bool = False) -> FetchResult:
+    def fetch(
+        self,
+        ticker: str,
+        timeframe: str,
+        prefer_cache: bool = False,
+        *,
+        asset_class: str | None = None,
+        market: str | None = None,
+    ) -> FetchResult:
         if timeframe not in TIMEFRAMES:
             raise ValueError(f"unsupported timeframe: {timeframe}")
         cached = self._latest_cache(ticker, timeframe)
@@ -168,15 +228,30 @@ class MarketDataProvider:
             return self._read_cache(cached, ticker, timeframe)
 
         base = BASE_INTERVAL.get(timeframe, DIRECT_INTERVALS[timeframe])
-        sources = [self.source] if self.source != "auto" else (
-            ["yfinance", "borsapy"] if base != "1d" else ["borsapy", "yfinance"]
-        )
+        if self.source != "auto":
+            sources = [self.source]
+        elif market not in {None, "BIST"} or asset_class in {"crypto", "commodity"}:
+            sources = ["yfinance"]
+        else:
+            sources = (
+                ["yfinance", "borsapy"] if base != "1d" else ["borsapy", "yfinance"]
+            )
         errors = []
         frame = None
         used_source = None
         for source in sources:
             try:
-                frame = _bp_history(ticker, base) if source == "borsapy" else _fetch_yfinance(ticker, base)
+                if source == "borsapy":
+                    frame = _bp_history(
+                        ticker, base, asset_class=asset_class, market=market
+                    )
+                else:
+                    frame = _fetch_yfinance(
+                        ticker,
+                        base,
+                        asset_class=asset_class,
+                        market=market,
+                    )
                 used_source = source
                 break
             except Exception as exc:  # source fallbacks must preserve diagnostics
@@ -192,7 +267,17 @@ class MarketDataProvider:
 
         snapshot_path = None
         if self.snapshot:
-            snapshot_path = str(self._write_snapshot(frame, ticker, timeframe, used_source or "unknown", base))
+            snapshot_path = str(
+                self._write_snapshot(
+                    frame,
+                    ticker,
+                    timeframe,
+                    used_source or "unknown",
+                    base,
+                    asset_class,
+                    market,
+                )
+            )
         return FetchResult(
             frame=frame,
             ticker=ticker.upper(),
@@ -210,6 +295,8 @@ class MarketDataProvider:
         timeframe: str,
         source: str,
         base_interval: str,
+        asset_class: str | None,
+        market: str | None,
     ) -> Path:
         folder = self.cache_dir / _safe_name(ticker.upper()) / timeframe
         folder.mkdir(parents=True, exist_ok=True)
@@ -226,6 +313,8 @@ class MarketDataProvider:
                 "created_at_utc": datetime.now(timezone.utc).isoformat(),
                 "rows": len(frame),
                 "first_bar": str(frame.index[0]),
+                "asset_class": asset_class,
+                "market": market,
                 "last_bar": str(frame.index[-1]),
                 "fingerprint": fingerprint,
             }
@@ -234,26 +323,46 @@ class MarketDataProvider:
             )
         return path
 
-    def probe(self, ticker: str) -> list[dict[str, object]]:
+    def probe(
+        self,
+        ticker: str,
+        *,
+        asset_class: str | None = None,
+        market: str | None = None,
+    ) -> list[dict[str, object]]:
         rows = []
-        for source, fetcher in (("borsapy", _bp_history), ("yfinance", _fetch_yfinance)):
+        for source, fetcher in (
+            ("borsapy", _bp_history),
+            ("yfinance", _fetch_yfinance),
+        ):
             for interval in DIRECT_INTERVALS.values():
                 try:
-                    frame = fetcher(ticker, interval)
-                    rows.append({
-                        "source": source,
-                        "interval": interval,
-                        "ok": True,
-                        "rows": len(frame),
-                        "first": str(frame.index[0]),
-                        "last": str(frame.index[-1]),
-                        "error": "",
-                    })
+                    frame = fetcher(
+                        ticker, interval, asset_class=asset_class, market=market
+                    )
+                    rows.append(
+                        {
+                            "source": source,
+                            "interval": interval,
+                            "ok": True,
+                            "rows": len(frame),
+                            "first": str(frame.index[0]),
+                            "last": str(frame.index[-1]),
+                            "error": "",
+                        }
+                    )
                 except Exception as exc:
-                    rows.append({
-                        "source": source, "interval": interval, "ok": False,
-                        "rows": 0, "first": "", "last": "", "error": str(exc),
-                    })
+                    rows.append(
+                        {
+                            "source": source,
+                            "interval": interval,
+                            "ok": False,
+                            "rows": 0,
+                            "first": "",
+                            "last": "",
+                            "error": str(exc),
+                        }
+                    )
         return rows
 
 
@@ -266,10 +375,12 @@ def fingerprint_frame(frame: pd.DataFrame) -> str:
     for timestamp, row in canonical.iterrows():
         stamp = pd.Timestamp(timestamp).isoformat()
         values = [
-            *(f"{float(row[column]):.8f}" for column in ("Open", "High", "Low", "Close")),
+            *(
+                f"{float(row[column]):.8f}"
+                for column in ("Open", "High", "Low", "Close")
+            ),
             f"{float(row['Volume']):.3f}",
         ]
         lines.append(",".join((stamp, *values)))
     payload = "\n".join(lines).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
-

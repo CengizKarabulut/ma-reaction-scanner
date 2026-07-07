@@ -9,7 +9,8 @@
 > historical evidence, not a promise of a future reversal.
 
 Start with [the guarded methodology](docs/METHODOLOGY.md) and
-[migration guide](docs/MIGRATION.md).
+[migration guide](docs/MIGRATION.md). Asset selection and one-row summaries are
+documented in [asset universes](docs/ASSET_UNIVERSES.md).
 
 ---
 

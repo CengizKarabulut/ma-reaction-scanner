@@ -24,7 +24,7 @@ After a full research scan:
 
 ```bash
 python -m scanner.paper_tracker create \
-  --panel reports/guarded/panel.csv \
+  --panel reports/guarded/panel_detail.csv \
   --metadata reports/guarded/run_metadata.json \
   --cohort-id daily-pilot-v1 \
   --ledger paper/ma_watchlist.csv

@@ -7,6 +7,7 @@ import argparse
 from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
+import inspect
 import json
 from pathlib import Path
 from typing import Callable
@@ -15,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 try:
+    from .asset_universe import build_custom_instruments
     from .ma_core import (
         AnalysisConfig,
         TIMEFRAME_CONFIGS,
@@ -24,7 +26,9 @@ try:
         prepare_frame,
     )
     from .ma_data import MarketDataProvider
+    from .stock_metadata import enrich_stock_instruments, format_index_memberships
 except ImportError:
+    from asset_universe import build_custom_instruments
     from ma_core import (
         AnalysisConfig,
         TIMEFRAME_CONFIGS,
@@ -34,6 +38,7 @@ except ImportError:
         prepare_frame,
     )
     from ma_data import MarketDataProvider
+    from stock_metadata import enrich_stock_instruments, format_index_memberships
 
 
 LEDGER_COLUMNS = [
@@ -44,6 +49,15 @@ LEDGER_COLUMNS = [
     "watch_after",
     "ticker",
     "timeframe",
+    "asset_class",
+    "asset_label",
+    "universe",
+    "display_name",
+    "provider_symbol",
+    "market",
+    "sector",
+    "industry",
+    "index_memberships",
     "side",
     "ma_type",
     "period",
@@ -71,6 +85,7 @@ LEDGER_COLUMNS = [
 def _identifier(row: pd.Series, created_at: str, cohort_id: str) -> str:
     payload = "|".join(
         [
+            str(row.get("asset_class", "stock")),
             cohort_id,
             str(row["ticker"]),
             str(row["timeframe"]),
@@ -89,11 +104,45 @@ def _as_bool(value: object) -> bool:
     return bool(value)
 
 
+def _text_or_default(value: object, default: str) -> str:
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return text if text and text.lower() != "nan" else default
+
+
 def _config_for_watch(watch: pd.Series) -> AnalysisConfig:
     raw = watch.get("config_json")
     if isinstance(raw, str) and raw.strip():
         return AnalysisConfig(**json.loads(raw))
     return TIMEFRAME_CONFIGS[str(watch["timeframe"])]
+
+
+def _fallback_stock_metadata(panel: pd.DataFrame) -> dict[str, dict[str, str]]:
+    symbols = sorted(
+        {
+            str(row["ticker"]).upper()
+            for _, row in panel.iterrows()
+            if _text_or_default(row.get("asset_class"), "stock") == "stock"
+            and _text_or_default(row.get("market"), "BIST") == "BIST"
+        }
+    )
+    if not symbols:
+        return {}
+    instruments = build_custom_instruments(symbols, asset_class="stock", market="BIST")
+    return {
+        item.symbol: {
+            "sector": item.sector,
+            "industry": item.industry,
+            "index_memberships": format_index_memberships(item.index_memberships),
+        }
+        for item in enrich_stock_instruments(instruments)
+    }
 
 
 def build_watchlist(
@@ -112,6 +161,7 @@ def build_watchlist(
     created = created_at or datetime.now(timezone.utc).isoformat()
     certified = panel["certified"].map(_as_bool)
     selected = panel.copy() if include_candidates else panel[certified].copy()
+    fallback_metadata = _fallback_stock_metadata(selected)
     rows = []
     for _, row in selected.iterrows():
         key = (str(row["ticker"]).upper(), str(row["timeframe"]))
@@ -119,6 +169,38 @@ def build_watchlist(
         config = source.get("config") or asdict(TIMEFRAME_CONFIGS[key[1]])
         after = (watch_after or {}).get(key, created)
         is_certified = _as_bool(row["certified"])
+        asset_class = _text_or_default(
+            row.get("asset_class", source.get("asset_class")), "stock"
+        )
+        asset_label = _text_or_default(
+            row.get("asset_label", source.get("asset_label")), "Hisse"
+        )
+        universe = _text_or_default(
+            row.get("universe", source.get("universe")), "custom"
+        )
+        display_name = _text_or_default(
+            row.get("display_name", source.get("display_name")), str(row["ticker"])
+        )
+        provider_symbol = _text_or_default(
+            row.get("provider_symbol", source.get("provider_symbol")),
+            str(row["ticker"]),
+        )
+        market = _text_or_default(row.get("market", source.get("market")), "BIST")
+        fallback = fallback_metadata.get(key[0], {})
+        sector = _text_or_default(
+            row.get("sector", source.get("sector")), fallback.get("sector", "")
+        )
+        industry = _text_or_default(
+            row.get("industry", source.get("industry")), fallback.get("industry", "")
+        )
+        memberships_value = row.get(
+            "index_memberships", source.get("index_memberships")
+        )
+        if isinstance(memberships_value, (list, tuple)):
+            memberships_value = "; ".join(map(str, memberships_value))
+        index_memberships = _text_or_default(
+            memberships_value, fallback.get("index_memberships", "")
+        )
         rows.append(
             {
                 "signal_id": _identifier(row, created, cohort_id),
@@ -128,7 +210,16 @@ def build_watchlist(
                 "watch_after": after,
                 "ticker": str(row["ticker"]).upper(),
                 "timeframe": str(row["timeframe"]),
+                "asset_class": asset_class,
+                "asset_label": asset_label,
+                "universe": universe,
+                "display_name": display_name,
+                "provider_symbol": provider_symbol,
+                "market": market,
                 "side": str(row["side"]),
+                "sector": sector,
+                "industry": industry,
+                "index_memberships": index_memberships,
                 "ma_type": str(row["ma_type"]),
                 "period": int(row["period"]),
                 "scan_level": float(row["current_ma"]),
@@ -165,6 +256,36 @@ def append_watchlist(path: str | Path, new_rows: pd.DataFrame) -> pd.DataFrame:
         if ledger_path.exists()
         else pd.DataFrame(columns=LEDGER_COLUMNS)
     )
+    legacy_defaults = {
+        "asset_class": "stock",
+        "asset_label": "Hisse",
+        "market": "BIST",
+        "sector": "",
+        "industry": "",
+        "index_memberships": "",
+    }
+    for column, default in legacy_defaults.items():
+        if column not in existing:
+            existing[column] = default
+    if "universe" not in existing:
+        existing["universe"] = (
+            existing["cohort_id"] if "cohort_id" in existing else "legacy"
+        )
+    for column in ("display_name", "provider_symbol"):
+        if column not in existing:
+            existing[column] = existing.get("ticker", pd.Series(dtype=str))
+    for column in ("sector", "industry", "index_memberships"):
+        existing[column] = existing[column].astype("object")
+    existing_metadata = _fallback_stock_metadata(existing)
+    for row_index, row in existing.iterrows():
+        fallback = existing_metadata.get(str(row.get("ticker", "")).upper(), {})
+        if not fallback:
+            continue
+        for column in ("sector", "industry", "index_memberships"):
+            refreshed = fallback.get(column, "")
+            if refreshed:
+                existing.at[row_index, column] = refreshed
+
     incoming = new_rows.copy()
     key_columns = [
         "cohort_id",
@@ -172,6 +293,7 @@ def append_watchlist(path: str | Path, new_rows: pd.DataFrame) -> pd.DataFrame:
         "ticker",
         "timeframe",
         "side",
+        "asset_class",
         "ma_type",
         "period",
     ]
@@ -211,9 +333,33 @@ def _timestamp_after(value: object, boundary: object) -> bool:
     return bool(left > right)
 
 
+def _fetch_watch_frame(
+    fetch_fn: Callable[..., pd.DataFrame], watch: pd.Series, timeframe: str
+) -> pd.DataFrame:
+    provider_symbol = _text_or_default(
+        watch.get("provider_symbol"), str(watch["ticker"])
+    )
+    asset_class = _text_or_default(watch.get("asset_class"), "stock")
+    default_market = "GLOBAL" if asset_class in {"crypto", "commodity"} else "BIST"
+    market = _text_or_default(watch.get("market"), default_market)
+    try:
+        parameters = inspect.signature(fetch_fn).parameters
+        accepts_metadata = "asset_class" in parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+    except (TypeError, ValueError):
+        accepts_metadata = False
+    if accepts_metadata:
+        return fetch_fn(
+            provider_symbol, timeframe, asset_class=asset_class, market=market
+        )
+    return fetch_fn(str(watch["ticker"]), timeframe)
+
+
 def advance_watchlist(
     ledger: pd.DataFrame,
-    fetch_fn: Callable[[str, str], pd.DataFrame],
+    fetch_fn: Callable[..., pd.DataFrame],
 ) -> pd.DataFrame:
     """Trigger and resolve watches only with bars newer than their creation cut."""
 
@@ -223,7 +369,7 @@ def advance_watchlist(
             continue
         timeframe = str(watch["timeframe"])
         config = _config_for_watch(watch)
-        frame = prepare_frame(fetch_fn(str(watch["ticker"]), timeframe), config)
+        frame = prepare_frame(_fetch_watch_frame(fetch_fn, watch, timeframe), config)
         ma = compute_ma(
             str(watch["ma_type"]), frame["Close"], frame["Volume"], int(watch["period"])
         )
@@ -388,7 +534,8 @@ def main(argv: list[str] | None = None) -> int:
     provider = MarketDataProvider(source=args.source)
     ledger = pd.read_csv(ledger_path)
     advanced = advance_watchlist(
-        ledger, lambda ticker, tf: provider.fetch(ticker, tf).frame
+        ledger,
+        lambda ticker, tf, **metadata: provider.fetch(ticker, tf, **metadata).frame,
     )
     advanced.to_csv(ledger_path, index=False)
     print(ledger_summary(advanced).to_string(index=False))
