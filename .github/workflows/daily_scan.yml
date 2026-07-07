@@ -1,211 +1,156 @@
-name: Daily BIST MA Reaction Scan
+name: Daily Guarded MA Scan
 
 on:
-  # LEGACY: manual comparison only; automatic signals are intentionally disabled.
   workflow_dispatch:
     inputs:
-      tickers:
-        description: 'Liste: BIST_TUM, BIST_100, BIST_30, BIST_BILES:XBANK (banka endeksi bileşeni), BIST_SEKTOR:Bankacılık, virgülle özel'
-        required: false
-        default: 'BIST_100'
-      period:
-        description: 'Veri periyodu (1y, 3y, 5y, max)'
-        required: false
-        default: '3y'
-      interval:
-        description: 'Zaman dilimi: 1h, 4h, 1d, 1wk, 1mo'
-        required: false
-        default: '1d'
+      universe:
+        description: 'Hazır varlık evreni'
+        required: true
+        default: 'bist100_stocks'
         type: choice
         options:
-          - 1h
-          - 4h
-          - 1d
-          - 1wk
-          - 1mo
-      no_walk_forward:
-        description: 'Walk-forward atla (hızlı test)'
+          - bist30_stocks
+          - bist50_stocks
+          - bist100_stocks
+          - bist_all_stocks
+          - bist_sector_stocks
+          - bist_bank_stocks
+          - bist_technology_stocks
+          - bist_food_stocks
+          - bist_chemistry_stocks
+          - bist_main_indices
+          - bist_sector_indices
+          - bist_all_indices
+          - crypto_majors
+          - commodities_majors
+          - custom
+      sector:
+        description: 'Yalnızca seçilen sektörün hisseleri için'
+        required: true
+        default: 'Bankacılık'
+        type: choice
+        options:
+          - Bankacılık
+          - Teknoloji
+          - Gıda ve İçecek
+          - Kimya, Petrol ve Plastik
+          - Holding ve Yatırım
+          - Sigorta
+          - Turizm
+          - Elektrik
+          - İletişim
+          - İnşaat
+          - Madencilik
+          - Metal Ana
+          - Spor
+          - Tekstil ve Deri
+          - Ulaştırma
+          - Sınai
+          - Mali
+      custom_asset_class:
+        description: 'Yalnızca custom için varlık sınıfı'
+        required: true
+        default: 'stock'
+        type: choice
+        options: [stock, index, sector_index, crypto, commodity]
+      custom_market:
+        description: 'Yalnızca custom için piyasa'
+        required: true
+        default: 'BIST'
+        type: choice
+        options: [BIST, GLOBAL]
+      custom_symbols:
+        description: 'Yalnızca custom için virgülle semboller'
         required: false
-        default: 'false'
+        default: 'GARAN,THYAO,AKBNK'
+      interval:
+        description: 'Tek zaman dilimi'
+        required: true
+        default: '1d'
+        type: choice
+        options: [1h, 4h, 1d, 1wk, 1mo]
+      periods:
+        description: 'MA periyotları'
+        required: true
+        default: '20,50,100,200'
       source:
-        description: 'Veri kaynağı (borsapy/yfinance)'
-        required: false
-        default: 'borsapy'
-      generate_strategies:
-        description: 'Strateji raporu üret (en robust 20 hisse için)'
-        required: false
-        default: 'true'
-      portfolio:
-        description: 'Strateji raporu için portföy büyüklüğü (TL)'
-        required: false
-        default: '100000'
-      min_volume_tl:
-        description: 'Min günlük TL hacim (likidite filtresi, 10M=10000000)'
-        required: false
-        default: '10000000'
+        description: 'Veri kaynağı'
+        required: true
+        default: 'auto'
+        type: choice
+        options: [auto, borsapy, yfinance]
+      top:
+        description: 'Taraf/zaman dilimi başına ayrıntı adayı'
+        required: true
+        default: '5'
+      null_iterations:
+        description: 'Eşleştirilmiş rastgele kontrol sayısı'
+        required: true
+        default: '499'
+
+permissions:
+  contents: read
 
 jobs:
-  scan:
+  guarded-daily:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-
+    timeout-minutes: 180
+    env:
+      INPUT_UNIVERSE: ${{ inputs.universe }}
+      INPUT_SECTOR: ${{ inputs.sector }}
+      INPUT_ASSET_CLASS: ${{ inputs.custom_asset_class }}
+      INPUT_MARKET: ${{ inputs.custom_market }}
+      INPUT_SYMBOLS: ${{ inputs.custom_symbols }}
+      INPUT_INTERVAL: ${{ inputs.interval }}
+      INPUT_PERIODS: ${{ inputs.periods }}
+      INPUT_SOURCE: ${{ inputs.source }}
+      INPUT_TOP: ${{ inputs.top }}
+      INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
     steps:
       - name: Repo checkout
         uses: actions/checkout@v4
-
       - name: Python setup
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
+          cache: pip
       - name: Bağımlılıklar
+        run: python -m pip install -r requirements.txt
+      - name: Zorunlu testler
+        run: python -m unittest discover -s tests -v
+      - name: Guarded günlük tarama
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: BIST Veri Tazeliği Kontrolü
-        id: data_check
-        run: |
-          cd scanner
-          # Cache yaşı kontrolü — 7 günden eskiyse uyar, 30 günden eskiyse FAIL
-          python -c "
-          from bist_data_fetcher import load_cache, get_index_age_days
-          from pathlib import Path
-          import json, sys
-
-          cache = load_cache()
-          indices = cache.get('indices', {})
-
-          if not indices:
-              print('⚠️ BIST veri cache YOK!')
-              print('   → İlk çalıştırma olabilir.')
-              print('   → Actions → \"BIST Veri Güncelleyici\" → Run workflow')
-              print('   → Veya manuel: python scanner/bist_data_fetcher.py --update-all')
-              sys.exit(0)  # Fail etmeyelim, sadece uyaralım
-
-          # En eski endeksin yaşı
-          ages = []
-          for sym, entry in indices.items():
-              if entry.get('fetched_at'):
-                  age = get_index_age_days(sym)
-                  ages.append((sym, age))
-
-          if not ages:
-              print('⚠️ Cache entries yok')
-              sys.exit(0)
-
-          max_age = max(a for _, a in ages)
-          oldest = max(ages, key=lambda x: x[1])
-          print(f'En eski cache: {oldest[0]} ({oldest[1]:.1f} gün önce)')
-
-          if max_age > 30:
-              print(f'✗ BIST verileri 30+ GÜN ESKİ! Yanlış sonuç riski yüksek.')
-              print(f'  → Actions → BIST Veri Güncelleyici → Run')
-              sys.exit(1)
-          elif max_age > 7:
-              print(f'⚠️ BIST verileri eskidi ({max_age:.0f} gün). Güncellemen önerilir.')
-              print(f'  → Actions → BIST Veri Güncelleyici → Run')
-          else:
-              print(f'✓ BIST verileri taze ({max_age:.1f} gün)')
-          " || echo "Data check fail, scanner devam edecek"
-        continue-on-error: true
-
-      - name: Parametreler
-        id: prep
-        run: |
-          INPUT="${{ github.event.inputs.tickers || 'BIST_100' }}"
-          if [[ "$INPUT" =~ ^(BIST_TUM|BIST_ALL|BIST_100|BIST_50|BIST_30)$ ]] || [[ "$INPUT" =~ ^X[A-Z0-9]{3,}$ ]]; then
-            TICKERS_ARG="--all-bist --bist-list $INPUT"
-          else
-            TICKERS_ARG="--tickers $INPUT"
-          fi
-          echo "tickers_arg=$TICKERS_ARG" >> $GITHUB_OUTPUT
-
-          WF="${{ github.event.inputs.no_walk_forward || 'false' }}"
-          [ "$WF" = "true" ] && echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT || echo "wf_arg=" >> $GITHUB_OUTPUT
-
-          SRC="${{ github.event.inputs.source || 'borsapy' }}"
-          INTV="${{ github.event.inputs.interval || '1d' }}"
-
-          echo "src_arg=--source $SRC" >> $GITHUB_OUTPUT
-          echo "intv_arg=--interval $INTV" >> $GITHUB_OUTPUT
-          echo "interval=$INTV" >> $GITHUB_OUTPUT
-
-          TS=$(date +'%Y-%m-%d')
-          echo "ts=$TS" >> $GITHUB_OUTPUT
-
-      - name: Tarama (${{ steps.prep.outputs.interval }})
-        run: |
-          mkdir -p reports
-          python scanner/bist_ma_reaction_scanner.py \
-            ${{ steps.prep.outputs.tickers_arg }} \
-            ${{ steps.prep.outputs.src_arg }} \
-            ${{ steps.prep.outputs.intv_arg }} \
-            --period ${{ github.event.inputs.period || '3y' }} \
-            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
-            ${{ steps.prep.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
-            --report both \
-            --top_n 20
-
-      - name: Strateji raporu üret
-        if: ${{ github.event.inputs.generate_strategies != 'false' && success() }}
-        run: |
-          python scanner/strategy_generator.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
-            --all-robust \
-            --top_ma 5 \
-            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
-            --risk_pct 1.0 \
-            ${{ steps.prep.outputs.src_arg }} \
-            --output reports/strategies_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
-        continue-on-error: true
-
-      - name: 🌐 BIST Panorama (TÜM hisseler - yakın/uzak ayırmadan)
-        if: success()
-        run: |
-          # Cengiz'in özel isteği: tüm hisseler için tam tablo, sadece robust olanlar değil
-          python scanner/panorama_report.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
-            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
-        continue-on-error: true
-
-      - name: Backtest Simülasyonu (tarihi PnL)
-        if: success()
-        run: |
-          python scanner/backtest_simulator.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
-            --all-robust --top_ma 3 \
-            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
-            --output reports/backtest_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
-        continue-on-error: true
-
-      - name: Multi-Indicator Confirmation (RSI/MACD/BB/Ichimoku/OBV/SMI)
-        if: success()
-        run: |
-          python scanner/multi_indicator_confirm.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
-            --all-robust --n_tickers 20 \
-            --output reports/confirm_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.html
-        continue-on-error: true
-
-      - name: Telegram özet
+          python -m scanner.ma_research_cli \
+            --universe "$INPUT_UNIVERSE" \
+            --sector "$INPUT_SECTOR" \
+            --asset-class "$INPUT_ASSET_CLASS" \
+            --market "$INPUT_MARKET" \
+            --tickers "$INPUT_SYMBOLS" \
+            --timeframes "$INPUT_INTERVAL" \
+            --periods "$INPUT_PERIODS" \
+            --source "$INPUT_SOURCE" \
+            --top "$INPUT_TOP" \
+            --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --output-dir reports/daily
+      - name: Telegram tekilleştirilmiş özet
         if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python scanner/notifier.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.prep.outputs.interval }}.csv \
-            --label "BIST Daily Tarama (${{ steps.prep.outputs.interval }})" \
-            --mode daily
+          python -m scanner.guarded_notifier \
+            --summary reports/daily/instrument_summary.csv \
+            --label "Daily Guarded MA (${{ inputs.interval }})" \
+            --top 20
         continue-on-error: true
-
-      - name: Artifact yükle
+      - name: Denetlenebilir çıktıları yükle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scan-${{ steps.prep.outputs.ts }}-${{ steps.prep.outputs.interval }}
-          path: reports/
+          name: daily-guarded-ma-${{ github.run_id }}
+          path: |
+            reports/daily/
+            data_cache/
           retention-days: 90
+          if-no-files-found: warn

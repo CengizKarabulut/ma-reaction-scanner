@@ -1,329 +1,164 @@
-name: Multi-Timeframe Cascade Scan
+name: Guarded Multi-Timeframe Scan
 
 on:
-  # LEGACY: manual comparison only; automatic signals are intentionally disabled.
   workflow_dispatch:
     inputs:
-      tickers:
-        description: 'Liste: BIST_TUM, BIST_100, BIST_BILES:XBANK (endeks bileşeni), BIST_SEKTOR:Bankacılık'
-        required: false
-        default: 'BIST_100'
-      period:
-        description: 'Veri periyodu'
-        required: false
-        default: '3y'
-      portfolio:
-        description: 'Portföy (TL)'
-        required: false
-        default: '100000'
-      min_volume_tl:
-        description: 'Min günlük TL hacim (likidite filtresi, 0=filtre yok, 10M=10000000)'
-        required: false
-        default: '10000000'
-      source:
-        description: 'Veri kaynağı'
-        required: false
-        default: 'borsapy'
+      universe:
+        description: 'Hazır varlık evreni'
+        required: true
+        default: 'bist100_stocks'
         type: choice
         options:
-          - borsapy
-          - yfinance
-      no_walk_forward:
-        description: 'Walk-forward atla (hızlı test)'
-        required: false
-        default: 'false'
+          - bist30_stocks
+          - bist50_stocks
+          - bist100_stocks
+          - bist_all_stocks
+          - bist_sector_stocks
+          - bist_bank_stocks
+          - bist_technology_stocks
+          - bist_food_stocks
+          - bist_chemistry_stocks
+          - bist_main_indices
+          - bist_sector_indices
+          - bist_all_indices
+          - crypto_majors
+          - commodities_majors
+          - custom
+      sector:
+        description: 'Yalnızca seçilen sektörün hisseleri için'
+        required: true
+        default: 'Bankacılık'
         type: choice
         options:
-          - 'false'
-          - 'true'
+          - Bankacılık
+          - Teknoloji
+          - Gıda ve İçecek
+          - Kimya, Petrol ve Plastik
+          - Holding ve Yatırım
+          - Sigorta
+          - Turizm
+          - Elektrik
+          - İletişim
+          - İnşaat
+          - Madencilik
+          - Metal Ana
+          - Spor
+          - Tekstil ve Deri
+          - Ulaştırma
+          - Sınai
+          - Mali
+      custom_asset_class:
+        description: 'Yalnızca custom için varlık sınıfı'
+        required: true
+        default: 'stock'
+        type: choice
+        options: [stock, index, sector_index, crypto, commodity]
+      custom_market:
+        description: 'Yalnızca custom için piyasa'
+        required: true
+        default: 'BIST'
+        type: choice
+        options: [BIST, GLOBAL]
+      custom_symbols:
+        description: 'Yalnızca custom için virgülle semboller'
+        required: false
+        default: 'GARAN,THYAO,AKBNK'
       cascade_type:
-        description: 'Cascade tipi: daily (1d+1wk+1mo) veya intraday (1h+4h+1d)'
+        description: 'Daily: 1d+1wk+1mo, Intraday: 1h+4h+1d'
         required: true
         default: 'daily'
         type: choice
-        options:
-          - daily
-          - intraday
+        options: [daily, intraday]
+      periods:
+        description: 'MA periyotları'
+        required: true
+        default: '20,50,100,200'
+      source:
+        description: 'Veri kaynağı'
+        required: true
+        default: 'auto'
+        type: choice
+        options: [auto, borsapy, yfinance]
+      top:
+        description: 'Taraf/zaman dilimi başına ayrıntı adayı'
+        required: true
+        default: '5'
+      null_iterations:
+        description: 'Eşleştirilmiş rastgele kontrol sayısı'
+        required: true
+        default: '499'
+
+permissions:
+  contents: read
 
 jobs:
-  cascade-scan:
+  guarded-multi-timeframe:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-
+    timeout-minutes: 240
+    env:
+      INPUT_UNIVERSE: ${{ inputs.universe }}
+      INPUT_SECTOR: ${{ inputs.sector }}
+      INPUT_ASSET_CLASS: ${{ inputs.custom_asset_class }}
+      INPUT_MARKET: ${{ inputs.custom_market }}
+      INPUT_SYMBOLS: ${{ inputs.custom_symbols }}
+      INPUT_PERIODS: ${{ inputs.periods }}
+      INPUT_SOURCE: ${{ inputs.source }}
+      INPUT_TOP: ${{ inputs.top }}
+      INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
     steps:
       - name: Repo checkout
         uses: actions/checkout@v4
-
       - name: Python setup
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
+          cache: pip
       - name: Bağımlılıklar
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Parametreler hazırla
-        id: prep
-        run: |
-          INPUT="${{ github.event.inputs.tickers || 'BIST_100' }}"
-          if [[ "$INPUT" =~ ^(BIST_TUM|BIST_ALL|BIST_100|BIST_50|BIST_30)$ ]] || [[ "$INPUT" =~ ^X[A-Z0-9]{3,}$ ]]; then
-            TICKERS_ARG="--all-bist --bist-list $INPUT"
-          else
-            TICKERS_ARG="--tickers $INPUT"
-          fi
-          echo "tickers_arg=$TICKERS_ARG" >> $GITHUB_OUTPUT
-          TS=$(date +'%Y-%m-%d')
-          echo "ts=$TS" >> $GITHUB_OUTPUT
-          mkdir -p reports
-
-      # ============================================================
-      # STEP 1: DAILY TARAMA (likidite filtresi aktif)
-      # ============================================================
-      - name: Walk-forward bayrağı ayarla
-        id: wf
-        run: |
-          if [ "${{ github.event.inputs.no_walk_forward || 'false' }}" = "true" ]; then
-            echo "wf_arg=--no_walk_forward" >> $GITHUB_OUTPUT
-          else
-            echo "wf_arg=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Cascade interval'larını belirle
+        run: python -m pip install -r requirements.txt
+      - name: Zorunlu testler
+        run: python -m unittest discover -s tests -v
+      - name: Zaman dilimlerini seç
         id: cascade
+        shell: bash
         run: |
-          # cascade_type: daily (1d+1wk+1mo) veya intraday (1h+4h+1d)
-          CT="${{ github.event.inputs.cascade_type || 'daily' }}"
-          if [ "$CT" = "intraday" ]; then
-            echo "interval_1=1h" >> $GITHUB_OUTPUT
-            echo "interval_2=4h" >> $GITHUB_OUTPUT
-            echo "interval_3=1d" >> $GITHUB_OUTPUT
-            echo "period_1=60d" >> $GITHUB_OUTPUT
-            echo "period_2=120d" >> $GITHUB_OUTPUT
-            echo "period_3=2y" >> $GITHUB_OUTPUT
-            echo "label_1=1 Saatlik" >> $GITHUB_OUTPUT
-            echo "label_2=4 Saatlik" >> $GITHUB_OUTPUT
-            echo "label_3=Günlük" >> $GITHUB_OUTPUT
+          if [ "${{ inputs.cascade_type }}" = "intraday" ]; then
+            echo "timeframes=1h,4h,1d" >> "$GITHUB_OUTPUT"
           else
-            echo "interval_1=1d" >> $GITHUB_OUTPUT
-            echo "interval_2=1wk" >> $GITHUB_OUTPUT
-            echo "interval_3=1mo" >> $GITHUB_OUTPUT
-            echo "period_1=${{ github.event.inputs.period || '3y' }}" >> $GITHUB_OUTPUT
-            echo "period_2=${{ github.event.inputs.period || '3y' }}" >> $GITHUB_OUTPUT
-            echo "period_3=5y" >> $GITHUB_OUTPUT
-            echo "label_1=Günlük" >> $GITHUB_OUTPUT
-            echo "label_2=Haftalık" >> $GITHUB_OUTPUT
-            echo "label_3=Aylık" >> $GITHUB_OUTPUT
+            echo "timeframes=1d,1wk,1mo" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: 1️⃣ TF1 Tarama (${{ steps.cascade.outputs.label_1 }})
+      - name: Guarded çoklu zaman dilimi taraması
+        shell: bash
         run: |
-          python scanner/bist_ma_reaction_scanner.py \
-            ${{ steps.prep.outputs.tickers_arg }} \
-            --source ${{ github.event.inputs.source || 'borsapy' }} --interval ${{ steps.cascade.outputs.interval_1 }} \
-            --period ${{ steps.cascade.outputs.period_1 }} \
-            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
-            ${{ steps.wf.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
-            --report html --top_n 20
-
-      # ============================================================
-      # STEP 1.5: CSV oluştu mu kontrol et — yoksa exit
-      # ============================================================
-      - name: 1.5️⃣ Tarama CSV kontrol
-        run: |
-          CSV="reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv"
-          if [ -f "$CSV" ]; then
-            LINES=$(wc -l < "$CSV")
-            echo "✓ Tarama CSV oluştu ($LINES satır): $CSV"
-            if [ "$LINES" -lt 2 ]; then
-              echo "✗ CSV boş veya sadece header var, devam edemez"
-              exit 1
-            fi
-          else
-            echo "✗ TARAMA CSV'Sİ OLUŞMADI: $CSV"
-            echo ""
-            echo "Olası nedenler:"
-            echo "  1. borsapy çalışmıyor (versiyon ve internet bağlantısı kontrol)"
-            echo "  2. Tickers listesi boş geldi (BIST_100 → boş)"
-            echo "  3. Filtre çok sıkı (min_volume_tl çok yüksek)"
-            echo ""
-            echo "Reports klasöründe ne var:"
-            ls -la reports/ || true
-            exit 1
-          fi
-
-      # ============================================================
-      # STEP 2: Daily-robust hisseleri çıkar
-      # ============================================================
-      - name: 2️⃣ Robust hisseleri çıkar
-        id: filter
-        run: |
-          python -c "
-          import pandas as pd
-          df = pd.read_csv('reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv')
-          if 'wf_robust' in df.columns:
-              robust = df[df['wf_robust']==True]
-              top_tickers = robust.groupby('ticker').size().nlargest(50).index.tolist()
-          else:
-              top_tickers = df.nlargest(100, 'composite_score')['ticker'].unique()[:50].tolist()
-          with open('robust_tickers.txt', 'w') as f:
-              f.write(','.join(top_tickers))
-          print(f'TF1 robust: {len(top_tickers)} hisse')
-          "
-          ROBUST_LIST=$(cat robust_tickers.txt)
-          echo "robust_list=$ROBUST_LIST" >> $GITHUB_OUTPUT
-
-      # ============================================================
-      # STEP 3: TF2 TARAMA (cascade_type'a bağlı: 4h veya 1wk)
-      # ============================================================
-      - name: 3️⃣ TF2 Tarama (${{ steps.cascade.outputs.label_2 }})
-        if: steps.filter.outputs.robust_list != ''
-        run: |
-          # min_touches'i interval'a göre ayarla (intraday için daha düşük)
-          # 4h ile 3 ay = 78 bar → her MA ~5-10 touch yapabilir
-          # 1wk ile 5y = 260 bar → her MA ~15-30 touch yapabilir
-          INTV="${{ steps.cascade.outputs.interval_2 }}"
-          if [ "$INTV" = "4h" ] || [ "$INTV" = "1h" ]; then
-            MIN_T=4
-          elif [ "$INTV" = "1wk" ]; then
-            MIN_T=5
-          else
-            MIN_T=8
-          fi
-          echo "TF2 min_touches=$MIN_T (interval=$INTV)"
-
-          python scanner/bist_ma_reaction_scanner.py \
-            --tickers "${{ steps.filter.outputs.robust_list }}" \
-            --source ${{ github.event.inputs.source || 'borsapy' }} --interval ${{ steps.cascade.outputs.interval_2 }} \
-            --period ${{ steps.cascade.outputs.period_2 }} \
-            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
-            ${{ steps.wf.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.csv \
-            --report html --top_n 20 \
-            --min_touches $MIN_T \
-            --separation_mult 1.8
-        continue-on-error: true
-
-      # ============================================================
-      # STEP 4: TF3 TARAMA (cascade_type'a bağlı: 1d veya 1mo)
-      # ============================================================
-      - name: 4️⃣ TF3 Tarama (${{ steps.cascade.outputs.label_3 }})
-        if: steps.filter.outputs.robust_list != ''
-        run: |
-          python scanner/bist_ma_reaction_scanner.py \
-            --tickers "${{ steps.filter.outputs.robust_list }}" \
-            --source ${{ github.event.inputs.source || 'borsapy' }} --interval ${{ steps.cascade.outputs.interval_3 }} \
-            --period ${{ steps.cascade.outputs.period_3 }} \
-            --min_volume_tl ${{ github.event.inputs.min_volume_tl || '10000000' }} \
-            ${{ steps.wf.outputs.wf_arg }} \
-            --output reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.csv \
-            --report html --top_n 20 \
-            --min_touches 3 \
-            --separation_mult 1.5 \
-            --min_adr 0.3 \
-            --min_hma_period 13
-        continue-on-error: true
-
-      # ============================================================
-      # STEP 5: CONSENSUS (monthly fallback aktif)
-      # ============================================================
-      - name: 5️⃣ Cross-Timeframe Consensus
-        run: |
-          python scanner/cross_tf_consensus.py \
-            --daily reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
-            --weekly reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.csv \
-            --monthly reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.csv \
-            --output reports/consensus_${{ steps.prep.outputs.ts }}.html \
-            --csv-out reports/consensus_${{ steps.prep.outputs.ts }}.csv
-        continue-on-error: true
-
-      # ============================================================
-      # STEP 6: STRATEGY GENERATOR (TF1 CSV'sinden somut trade onerileri)
-      # ============================================================
-      - name: 6️⃣ Strategy Raporu
-        run: |
-          python scanner/strategy_generator.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
-            --all-robust --top_ma 5 \
-            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
-            --output reports/strategies_${{ steps.prep.outputs.ts }}.html
-        continue-on-error: true
-
-      # ============================================================
-      # STEP 7: BACKTEST
-      # ============================================================
-      - name: 7️⃣ Backtest Simulator
-        run: |
-          python scanner/backtest_simulator.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
-            --all-robust --top_ma 3 \
-            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
-            --output reports/backtest_${{ steps.prep.outputs.ts }}.html
-        continue-on-error: true
-
-      # ============================================================
-      # STEP 8: MULTI-INDICATOR CONFIRMATION
-      # ============================================================
-      - name: 8️⃣ Multi-Indicator Confirmation
-        run: |
-          python scanner/multi_indicator_confirm.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
-            --all-robust --n_tickers 20 \
-            --output reports/confirm_${{ steps.prep.outputs.ts }}.html
-        continue-on-error: true
-
-      # ============================================================
-      # STEP 8.5: BIST PANORAMA — 3 TF için ayrı tablolar
-      # ============================================================
-      - name: 8.5️⃣ Panorama (Daily TF)
-        if: success()
-        run: |
-          python scanner/panorama_report.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
-            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.html
-        continue-on-error: true
-
-      - name: 8.5️⃣ Panorama (Weekly TF)
-        if: success()
-        run: |
-          python scanner/panorama_report.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.csv \
-            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_2 }}.html
-        continue-on-error: true
-
-      - name: 8.5️⃣ Panorama (Monthly TF)
-        if: success()
-        run: |
-          python scanner/panorama_report.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.csv \
-            --output reports/panorama_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_3 }}.html
-        continue-on-error: true
-
-      # ============================================================
-      # STEP 9: TELEGRAM ÖZET
-      # ============================================================
-      - name: 9️⃣ Telegram Özet
+          python -m scanner.ma_research_cli \
+            --universe "$INPUT_UNIVERSE" \
+            --sector "$INPUT_SECTOR" \
+            --asset-class "$INPUT_ASSET_CLASS" \
+            --market "$INPUT_MARKET" \
+            --tickers "$INPUT_SYMBOLS" \
+            --timeframes "${{ steps.cascade.outputs.timeframes }}" \
+            --periods "$INPUT_PERIODS" \
+            --source "$INPUT_SOURCE" \
+            --top "$INPUT_TOP" \
+            --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --output-dir reports/multi_tf
+      - name: Telegram tekilleştirilmiş özet
         if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python scanner/notifier.py \
-            --csv reports/scan_${{ steps.prep.outputs.ts }}_${{ steps.cascade.outputs.interval_1 }}.csv \
-            --label "Multi-TF Cascade (${{ github.event.inputs.cascade_type || 'daily' }})" \
-            --mode daily
+          python -m scanner.guarded_notifier \
+            --summary reports/multi_tf/instrument_summary.csv \
+            --label "Guarded Multi-TF (${{ inputs.cascade_type }})" \
+            --top 20
         continue-on-error: true
-
-      # ============================================================
-      # STEP 10: ARTIFACT
-      # ============================================================
-      - name: 🔟 Artifact yükle
+      - name: Denetlenebilir çıktıları yükle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cascade-scan-${{ steps.prep.outputs.ts }}
-          path: reports/
+          name: guarded-multi-tf-${{ github.run_id }}
+          path: |
+            reports/multi_tf/
+            data_cache/
           retention-days: 90
+          if-no-files-found: warn

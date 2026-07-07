@@ -1,186 +1,109 @@
-name: Tek Hisse / Sembol Analiz
-
-# Tek bir sembol için zengin analiz raporu (mobile-friendly)
-# Hızlı (~30 saniye), Telegram'a otomatik özet
+name: Guarded Single Instrument Analysis
 
 on:
   workflow_dispatch:
     inputs:
-      ticker:
-        description: 'Sembol kodu (BIST: ASELS, Kripto: BTCUSD, Altın: XAUUSD, Endeks: XU100)'
+      asset_class:
+        description: 'Varlık sınıfı'
+        required: true
+        default: 'stock'
+        type: choice
+        options: [stock, index, sector_index, crypto, commodity]
+      market:
+        description: 'Piyasa'
+        required: true
+        default: 'BIST'
+        type: choice
+        options: [BIST, GLOBAL]
+      symbol:
+        description: 'Tek sembol: GARAN, XU100, XBANK, BTC-USD veya GC=F'
         required: true
         default: 'ASELS'
-      interval:
-        description: 'Zaman dilimi'
-        required: false
+      timeframes:
+        description: 'Zaman dilimleri'
+        required: true
         default: '1d'
         type: choice
-        options:
-          - 1h
-          - 4h
-          - 1d
-          - 1wk
-          - 1mo
+        options: [1h, 4h, 1d, 1wk, 1mo, '4h,1d', '1d,1wk', '1d,1wk,1mo']
+      periods:
+        description: 'MA periyotları'
+        required: true
+        default: '20,50,100,200'
       source:
         description: 'Veri kaynağı'
-        required: false
-        default: 'borsapy'
+        required: true
+        default: 'auto'
         type: choice
-        options:
-          - borsapy
-          - yfinance
-      use_latest_csv:
-        description: "Son tarama CSV'sini kullan (false=canlı tara, true=hızlı)"
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
-      strict_mode:
-        description: 'Sadece robust MA (gevşek fallback kapalı)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
-      portfolio:
-        description: 'Portföy büyüklüğü (TL)'
-        required: false
-        default: '100000'
-      risk_pct:
-        description: 'Trade başına risk (%)'
-        required: false
-        default: '1.0'
+        options: [auto, borsapy, yfinance]
+      top:
+        description: 'Taraf/zaman dilimi başına ayrıntı adayı'
+        required: true
+        default: '5'
+      null_iterations:
+        description: 'Eşleştirilmiş rastgele kontrol sayısı'
+        required: true
+        default: '499'
+
+permissions:
+  contents: read
 
 jobs:
-  analyze:
+  guarded-single:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 90
+    env:
+      INPUT_ASSET_CLASS: ${{ inputs.asset_class }}
+      INPUT_MARKET: ${{ inputs.market }}
+      INPUT_SYMBOL: ${{ inputs.symbol }}
+      INPUT_TIMEFRAMES: ${{ inputs.timeframes }}
+      INPUT_PERIODS: ${{ inputs.periods }}
+      INPUT_SOURCE: ${{ inputs.source }}
+      INPUT_TOP: ${{ inputs.top }}
+      INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
     steps:
       - name: Repo checkout
         uses: actions/checkout@v4
-
       - name: Python setup
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
+          cache: pip
       - name: Bağımlılıklar
+        run: python -m pip install -r requirements.txt
+      - name: Zorunlu testler
+        run: python -m unittest discover -s tests -v
+      - name: Guarded tek varlık analizi
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Parametreler
-        id: prep
-        run: |
-          TICKER="${{ github.event.inputs.ticker }}"
-          TICKER_UPPER=$(echo "$TICKER" | tr '[:lower:]' '[:upper:]')
-          echo "ticker=$TICKER_UPPER" >> $GITHUB_OUTPUT
-          TS=$(date +'%Y-%m-%d_%H-%M')
-          echo "ts=$TS" >> $GITHUB_OUTPUT
-          mkdir -p reports
-
-          USE_CSV="${{ github.event.inputs.use_latest_csv || 'true' }}"
-          CSV_FLAG=""
-          if [ "$USE_CSV" = "true" ]; then
-            LATEST=$(ls -t reports/scan_*_1d.csv 2>/dev/null | head -1)
-            if [ -n "$LATEST" ] && [ -f "$LATEST" ]; then
-              CSV_FLAG="--csv $LATEST"
-              echo "csv_used=$LATEST" >> $GITHUB_OUTPUT
-              echo "Son CSV: $LATEST"
-            else
-              CSV_FLAG="--scan-fresh"
-              echo "csv_used=canlı tarama (CSV yok)" >> $GITHUB_OUTPUT
-            fi
-          else
-            CSV_FLAG="--scan-fresh"
-            echo "csv_used=canlı tarama (manuel)" >> $GITHUB_OUTPUT
-          fi
-          echo "csv_flag=$CSV_FLAG" >> $GITHUB_OUTPUT
-
-      - name: Analiz
-        run: |
-          STRICT_FLAG=""
-          if [ "${{ github.event.inputs.strict_mode || 'false' }}" = "true" ]; then
-            STRICT_FLAG="--strict"
-          fi
-
-          python scanner/single_ticker_query.py \
-            --ticker "${{ steps.prep.outputs.ticker }}" \
-            ${{ steps.prep.outputs.csv_flag }} \
-            --source "${{ github.event.inputs.source || 'borsapy' }}" \
-            --interval "${{ github.event.inputs.interval || '1d' }}" \
-            --portfolio ${{ github.event.inputs.portfolio || '100000' }} \
-            --risk_pct ${{ github.event.inputs.risk_pct || '1.0' }} \
-            $STRICT_FLAG \
-            --output reports/${{ steps.prep.outputs.ticker }}_${{ steps.prep.outputs.ts }}.html \
-            --summary-text reports/${{ steps.prep.outputs.ticker }}_${{ steps.prep.outputs.ts }}.txt
-
-      - name: Telegram özet gönder
+          python -m scanner.ma_research_cli \
+            --universe custom \
+            --asset-class "$INPUT_ASSET_CLASS" \
+            --market "$INPUT_MARKET" \
+            --tickers "$INPUT_SYMBOL" \
+            --timeframes "$INPUT_TIMEFRAMES" \
+            --periods "$INPUT_PERIODS" \
+            --source "$INPUT_SOURCE" \
+            --top "$INPUT_TOP" \
+            --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --output-dir reports/single
+      - name: Telegram tek varlık özeti
         if: success()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TICKER: ${{ steps.prep.outputs.ticker }}
-          TS: ${{ steps.prep.outputs.ts }}
-          CSV_USED: ${{ steps.prep.outputs.csv_used }}
         run: |
-          python << 'EOF'
-          import os
-          import requests
-          import sys
-
-          summary_file = f"reports/{os.environ['TICKER']}_{os.environ['TS']}.txt"
-          if not os.path.exists(summary_file):
-              print(f"Özet dosyası yok: {summary_file}")
-              sys.exit(0)
-
-          with open(summary_file, 'r', encoding='utf-8') as f:
-              text = f.read()
-
-          # Veri kaynağı bilgisi ekle
-          text += f"\n\n_Veri: {os.environ['CSV_USED']}_"
-          text += "\n_Detaylı HTML: GitHub Actions artifact_"
-
-          # Markdown önce dene
-          token = os.environ['TELEGRAM_BOT_TOKEN']
-          chat_id = os.environ['TELEGRAM_CHAT_ID']
-
-          if len(text) > 4000:
-              text = text[:3900] + "\n_(kısaltıldı)_"
-
-          resp = requests.post(
-              f"https://api.telegram.org/bot{token}/sendMessage",
-              json={'chat_id': chat_id, 'text': text, 'parse_mode': 'Markdown'},
-              timeout=20
-          )
-          if not resp.ok:
-              print(f"Markdown hata ({resp.status_code}): {resp.text[:300]}")
-              # Plain text fallback
-              resp2 = requests.post(
-                  f"https://api.telegram.org/bot{token}/sendMessage",
-                  json={'chat_id': chat_id, 'text': text},
-                  timeout=20
-              )
-              if resp2.ok:
-                  print("Plain text gönderildi")
-              else:
-                  print(f"Plain text de başarısız: {resp2.status_code} - {resp2.text[:300]}")
-          else:
-              print("✓ Telegram gönderildi")
-          EOF
+          python -m scanner.guarded_notifier \
+            --summary reports/single/instrument_summary.csv \
+            --label "Guarded Tek Varlık: ${{ inputs.symbol }}" \
+            --top 1
         continue-on-error: true
-
-      - name: HTML rapor artifact
+      - name: Denetlenebilir çıktıları yükle
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ticker-${{ steps.prep.outputs.ticker }}-${{ steps.prep.outputs.ts }}
+          name: guarded-single-${{ inputs.symbol }}-${{ github.run_id }}
           path: |
-            reports/${{ steps.prep.outputs.ticker }}*.html
-            reports/${{ steps.prep.outputs.ticker }}*.txt
-          retention-days: 30
+            reports/single/
+            data_cache/
+          retention-days: 90
+          if-no-files-found: warn

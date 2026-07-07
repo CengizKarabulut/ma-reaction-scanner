@@ -5,16 +5,27 @@ on:
     branches: [main]
     paths:
       - 'scanner/ma_*.py'
+      - 'scanner/asset_*.py'
+      - 'scanner/bist_classification.py'
+      - 'scanner/stock_metadata.py'
+      - 'scanner/guarded_notifier.py'
+      - 'scanner/notifier.py'
       - 'scanner/sr_baselines.py'
       - 'tests/**'
       - 'requirements.txt'
-      - '.github/workflows/ma_core_tests.yml'
+      - '.github/workflows/**'
   pull_request:
     paths:
       - 'scanner/ma_*.py'
+      - 'scanner/asset_*.py'
+      - 'scanner/bist_classification.py'
+      - 'scanner/stock_metadata.py'
+      - 'scanner/guarded_notifier.py'
+      - 'scanner/notifier.py'
       - 'scanner/sr_baselines.py'
       - 'tests/**'
       - 'requirements.txt'
+      - '.github/workflows/**'
 
 permissions:
   contents: read
@@ -35,4 +46,3 @@ jobs:
         run: python -m compileall -q scanner tests
       - name: Unit and synthetic tests
         run: python -m unittest discover -s tests -v
-
