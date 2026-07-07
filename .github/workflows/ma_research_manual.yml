@@ -129,6 +129,17 @@ jobs:
             --top "$INPUT_TOP" \
             --null-iterations "$INPUT_NULL_ITERATIONS" \
             --output-dir reports/guarded
+      - name: Telegram tekilleştirilmiş özet
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -m scanner.guarded_notifier \
+            --summary reports/guarded/instrument_summary.csv \
+            --label "Guarded MA Research: ${{ inputs.universe }}" \
+            --top 20
+        continue-on-error: true
       - name: Upload auditable outputs
         if: always()
         uses: actions/upload-artifact@v4

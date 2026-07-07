@@ -1,230 +1,163 @@
-# Repository status: research migration in progress
+# MA Reaction Scanner — Guarded Research Pipeline
 
-> The original v6 scanner/backtest/Telegram pipeline is retained as **legacy**
-> code for comparison. Its automatic schedules are disabled because its
-> reaction expectancy, breakthrough counter and backtest are not validated.
->
-> New work must use `scanner/ma_core.py` and `scanner/ma_research_cli.py`.
-> `CERTIFIED` means a level passed null/FDR, validation and holdout gates; it is
-> historical evidence, not a promise of a future reversal.
+Bu depo, fiyatın hareketli ortalamalara bağımsız dokunuşlardan sonra verdiği tepkinin
+rastgele ve alternatif seviyelerden daha güçlü ve tekrarlanabilir olup olmadığını
+araştırır. Ana çalışma hattı `scanner/ma_core.py` ve `scanner/ma_research_cli.py`dır.
 
-Start with [the guarded methodology](docs/METHODOLOGY.md) and
-[migration guide](docs/MIGRATION.md). Asset selection and one-row summaries are
-documented in [asset universes](docs/ASSET_UNIVERSES.md).
+`CERTIFIED`, bir seviyenin discovery, eşleştirilmiş kontrol/FDR, validation ve
+dokunulmamış holdout kapılarını geçtiğini belirtir. Gelecekte kesin tepki veya kâr
+garantisi değildir.
 
----
+Ayrıntılar:
 
-# BIST MA Reaction Scanner — v6.3 (Borsapy v0.10+ Native)
+- [Araştırma metodolojisi](docs/METHODOLOGY.md)
+- [Varlık evrenleri ve tek satırlık özet](docs/ASSET_UNIVERSES.md)
+- [Eski sistemden geçiş](docs/MIGRATION.md)
 
-Türkiye Borsası (BIST) hisseleri için **hareketli ortalama saygısını** tarayan profesyonel otomasyon sistemi. Borsapy v0.10+'nın TradingView WebSocket backend'i sayesinde **tüm BIST verilerine** tam erişim.
+## GitHub Actions
 
-## Yenilikler (v6.3 — Borsapy v0.10 Native)
+Actions ekranı bilinçli olarak altı workflow ile sınırlandırılmıştır:
 
-- ✅ **Intraday tam destek:** 1m, 5m, 15m, 30m, 1h, 4h (borsapy native + resample)
-- ✅ **79 BIST endeksi:** Tümü artık erişilebilir (önceki 4 sınırı yok)
-- ✅ **Endeks bileşenleri otomatik:** `BIST_BILES:XBANK` → tüm banka hisseleri
-- ✅ **Dinamik sektör:** `BIST_SEKTOR:Bankacılık` → borsapy'den otomatik
-- ✅ **Image-rich Telegram:** PNG tablo, DESTEK/DIRENC renkli arka plan
-- ✅ Bug fix: 1h/4h/1d aynı sonuç hatası çözüldü
+| Workflow | Kullanım |
+|---|---|
+| `Guarded MA Research Panel (Manual)` | Esnek evren, sektör, zaman dilimi ve MA araştırması |
+| `Daily Guarded MA Scan` | Açılır menüden seçilen evrende tek zaman dilimi taraması |
+| `Guarded Multi-Timeframe Scan` | Daily: 1d+1wk+1mo veya intraday: 1h+4h+1d |
+| `Guarded Single Instrument Analysis` | Açık varlık sınıfıyla tek hisse/endeks/kripto/emtia |
+| `BIST Veri Güncelleyici (Endeks Listeleri)` | BIST endeks bileşenlerini haftalık yeniler |
+| `Guarded MA Core Tests` | PR ve main değişikliklerinde otomatik test |
 
-## Workflow Tablosu
+Eski Endeks Tarama, Weekly, Sektör Cache ve Keepalive workflow'ları kaldırılmıştır.
+Daily, Multi-Timeframe ve Tek Varlık artık eski v6 tarayıcısını değil guarded
+çekirdeği çağırır.
 
-| Workflow | Ne Yapar | Süre |
-|---|---|---|
-| **Daily Scan** | Tek TF tarama, hızlı pulse | 5-30 dk |
-| **Multi-TF Cascade** | 3 TF konsensüsü (D+W+M veya 1h+4h+1d) | 45-90 dk |
-| **Index Scan** | BIST endeksleri (4/36/79 seç) | 15-30 dk |
-| **Single Ticker** | Tek hisse derin analiz | 30 sn |
-| **Build Sector Cache** | Sektör cache oluştur (ayda 1) | 5 dk |
+## Kod yazmadan evren seçimi
 
-## YENİ — Sektör & Endeks Bileşenleri (En Güçlü Özellik)
+Daily, Multi-Timeframe ve ana Research Panel aynı açılır evrenleri kullanır:
 
-Borsapy v0.10 ile artık BIST endekslerinin bileşen hisselerini direkt çekebiliyoruz. **Hardcoded liste tutmak gereksiz**.
+- `bist30_stocks`, `bist50_stocks`, `bist100_stocks`, `bist_all_stocks`
+- `bist_sector_stocks` ve Türkçe sektör menüsü
+- `bist_bank_stocks`, `bist_technology_stocks`, `bist_food_stocks`, `bist_chemistry_stocks`
+- `bist_main_indices`, `bist_sector_indices`, `bist_all_indices`
+- `crypto_majors`, `commodities_majors`
+- `custom`
 
-### Endeks Bileşenleri (`BIST_BILES:`)
+`bist_sector_stocks` seçildiğinde sektör adı menüden seçilir. Endeks kodu yazmak
+gerekmez. `custom` dışında sembol alanı kullanılmaz.
 
-XBANK endeksinin tüm bileşen hisselerini topluca tara:
+## Önerilen başlangıç ayarları
 
-```
-Daily Scan → Run
-  Tickers: BIST_BILES:XBANK    ← Otomatik tüm banka hisseleri
-  Interval: 1d
-```
-
-Çıktı:
-```
-Endeks bileşenleri: XBANK → 12 hisse (borsapy)
-Tarama başlıyor: 12 hisse × 140 MA = 1,680 aday
-```
-
-**Tüm sektör endeksleri için çalışır:**
-- `BIST_BILES:XBANK` → Bankalar
-- `BIST_BILES:XKMYA` → Kimya
-- `BIST_BILES:XGIDA` → Gıda
-- `BIST_BILES:XTEKS` → Tekstil
-- `BIST_BILES:XHOLD` → Holding
-- `BIST_BILES:XU100` → BIST 100 bileşenleri
-- ... 79 endeksin **hepsi**
-
-### Sektör Adı ile (`BIST_SEKTOR:`)
-
-```
-Daily Scan → Run
-  Tickers: BIST_SEKTOR:Bankacılık
-  Interval: 1d
+```text
+universe: bist30_stocks veya bist_sector_stocks
+timeframes/interval: 1d
+periods: 20,50,100,200
+source: auto
+top: 5
+null_iterations: 499
 ```
 
-Bunun için önce **build_sector_cache** workflow'unu bir kez çalıştır.
+Tüm BIST ve üç zaman dilimi birlikte çok maliyetlidir. İlk çalıştırmalarda BIST 30
+veya tek sektör kullanın. Düşük `null_iterations` değeri yalnız hızlı tanı içindir;
+kanıt üretmek için 499 varsayılanını koruyun.
 
-### Tüm 79 BIST Endeksi
+## Tek varlık analizi
 
-```
-Index Scan → Run
-  Tickers: BIST_TUM_ENDEKSLER    ← borsapy'den dinamik 79 endeks
-  Period: 5y
-  Interval: 1d
-```
+`Guarded Single Instrument Analysis` önce varlık sınıfını sorar:
 
-## Daily vs Multi-TF Cascade
-
-### Daily Scan — Tek Timeframe
-```
-Tickers: BIST_BILES:XBANK
-Interval: 1d   ← TEK timeframe
-```
-Hızlı pulse, günlük takip.
-
-### Multi-TF Cascade — 3 TF + Konsensüs
-```
-Tickers: BIST_BILES:XBANK
-Cascade tipi: daily       (1d+1wk+1mo) veya
-              intraday    (1h+4h+1d)
+```text
+Hisse:         asset_class=stock,        market=BIST,   symbol=GARAN
+Endeks:        asset_class=index,        market=BIST,   symbol=XU100
+Sektör endeksi:asset_class=sector_index, market=BIST,   symbol=XBANK
+Kripto:        asset_class=crypto,       market=GLOBAL, symbol=BTC-USD
+Emtia:         asset_class=commodity,    market=GLOBAL, symbol=GC=F
 ```
 
-**Multi-TF'nin avantajları:**
-1. 3 TF birden tarar (Daily ile 3 ayrı run gerekir)
-2. Filtreleme yapar (TF1 robust olmayanı atlar — hızlı)
-3. **Cross-TF Consensus** = 3 TF'de de robust = 🥇 ALTIN setup
-4. Backtest + Multi-Indicator Confirm raporu otomatik
+Bu ayrım endekslerin “Hisse”, kriptonun BIST sembolü gibi etiketlenmesini engeller.
 
-## Tüm Interval Desteği
+## Tekilleştirilmiş sonuçlar
 
-| Interval | Borsapy | Yöntem |
-|---|---|---|
-| 1m, 3m, 5m, 15m, 30m, 45m | Native | bp.Ticker.history(interval='1m', ...) |
-| **1h** | Native | bp.Ticker.history(interval='1h', period='1ay') |
-| **4h** | Türetilen | 1h çekilir → 4h resample |
-| 1d | Native | bp.Ticker.history(interval='1d', period='3y') |
-| 1wk | Türetilen | 1d çekilir → W resample |
-| 1mo | Türetilen | 1d çekilir → ME resample |
+Her koşu iki görünüm üretir:
 
-Önceki versiyonlardaki "hepsinde aynı sonuç" bug'ı kalktı. Her interval gerçekten farklı veri çekiyor.
+- `instrument_summary.csv` ve `panel.csv`: her varlık tam olarak bir satır
+- `panel_detail.csv` ve `all_candidates.csv`: denetlenebilir tüm MA ayrıntıları
 
-## Telegram Image-Rich Tablo
+Ana özette şu toplulaştırılmış alanlar bulunur:
 
-`notifier.py` artık PNG tablo image üretiyor:
-- DESTEK hisseleri: **yeşil arka plan + yeşil yazı**
-- DIRENC hisseleri: **kırmızı arka plan + kırmızı yazı**
-- Tüm sütunlar mükemmel hizalı
-- Karanlık tema, profesyonel görünüm
+- test edilen aktif seviye sayısı
+- discovery kapısını geçen seviye sayısı
+- sertifikalı ve aksiyon alınabilir seviye sayısı
+- sertifikasyon oranı
+- sertifikalı seviyelerin ortalama holdout isabet oranı
+- sertifikalı seviyelerin ortalama holdout ATR getirisi
+- en iyi destek ve direnç seviyesi
+- hisse için sektör ve endeks üyelikleri
 
-Text fallback otomatik: image üretilemezse text gönderir.
+Telegram “Top 20” tablosu da bu özeti kullanır. Aynı hissenin farklı MA'ları artık
+ayrı satırlara dağılmaz; her varlık bir kez görünür.
 
-## Hızlı Komut Referansı
+## Telegram bildirimi
 
-### Endeks Bileşenleri
+Aşağıdaki repository secret'ları tanımlı olmalıdır:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
+Guarded Research Panel, Daily, Multi-Timeframe ve Tek Varlık başarılı taramadan
+sonra `scanner.guarded_notifier` çağırır. Bildirim gönderilemese bile araştırma
+çıktıları artifact olarak korunur; hata workflow logundaki `Telegram` adımında
+görülür.
+
+## BIST bileşen verisi
+
+`BIST Veri Güncelleyici (Endeks Listeleri)` her pazartesi 06.00 İstanbul saatinde
+otomatik çalışır. Endeks dönemi değiştiğinde elle de çalıştırılabilir.
+
+```text
+probe_only=false  → cache güncellenir ve değişiklik varsa commit edilir
+probe_only=true   → yalnız veri kaynağı test edilir
+```
+
+Yeni sektör seçimi doğrulanmış `scanner/data/bist_indices.json` bileşen cache'ini
+kullanır; ayrı bir sektör-cache workflow'una ihtiyaç yoktur.
+
+## Lokal kullanım
+
+Evren ve sektörleri listeleyin:
+
 ```bash
-python scanner/sector_resolver.py --index XBANK
-# → AKBNK,GARAN,ISCTR,...
-
-python scanner/sector_resolver.py --list-indices
-# → 79 endeks listesi
+python -m scanner.ma_research_cli --list-universes
+python -m scanner.ma_research_cli --list-sectors
 ```
 
-### Sektör
+BIST 30 günlük tarama:
+
 ```bash
-python scanner/sector_resolver.py --list-sectors
-# → borsapy sektörleri (53 adet, Türkçe)
-
-python scanner/sector_resolver.py --sector "Bankacılık"
-# → cache'ten banka hisseleri
-
-python scanner/sector_resolver.py --build-cache
-# → 500+ hisse için sektör cache (5 dk)
+python -m scanner.ma_research_cli \
+  --universe bist30_stocks \
+  --timeframes 1d \
+  --periods 20,50,100,200 \
+  --source auto \
+  --null-iterations 499
 ```
 
-### Tek Hisse Sorgu
+Bankacılık sektörü:
+
 ```bash
-python scanner/single_ticker_query.py --ticker ASELS --interval 4h
+python -m scanner.ma_research_cli \
+  --universe bist_sector_stocks \
+  --sector "Bankacılık" \
+  --timeframes 1d
 ```
 
-### Lokal Test
+Testler:
+
 ```bash
-TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... \
-  python scanner/notifier.py --test
+python -m unittest discover -s tests -v
 ```
 
-## Repo Yapısı
+## Araştırma sınırı
 
-```
-ma-reaction-scanner/
-├── .github/workflows/
-│   ├── daily_scan.yml               # Tek TF tarama
-│   ├── multi_tf_cascade.yml         # 3 TF cascade (daily/intraday)
-│   ├── index_scan.yml               # 4/36/79 endeks
-│   ├── single_ticker.yml            # Tek hisse
-│   └── build_sector_cache.yml       # Sektör cache (ayda 1)
-├── scanner/
-│   ├── bist_ma_reaction_scanner.py  # Ana scanner (borsapy v0.10)
-│   ├── tickers.py                   # Dinamik liste + BIST_BILES/BIST_SEKTOR
-│   ├── sector_resolver.py           # Sektör/endeks çözücü (borsapy)
-│   ├── strategy_generator.py
-│   ├── backtest_simulator.py
-│   ├── multi_indicator_confirm.py
-│   ├── cross_tf_consensus.py
-│   ├── single_ticker_query.py
-│   └── notifier.py                  # Image-rich Telegram
-├── pine/
-│   ├── ma_reaction_profile_v6.pine
-│   └── ma_trade_signals.pine
-├── requirements.txt
-└── README.md
-```
-
-## Sorun Giderme
-
-**"Telegram mesajı gelmiyor"**
-1. Secrets kontrol: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-2. `python scanner/notifier.py --test` ile test
-3. Log'da `✓ Telegram BAŞARILI` ara
-
-**"BIST_SEKTOR:xxx çalışmıyor"**
-- Önce `Actions → Sektör Cache Oluştur → Run` ile cache oluştur
-- Sonra `BIST_SEKTOR:Bankacılık` çalışır
-
-**"borsapy intraday hata veriyor"**
-- borsapy versiyonu eski olabilir
-- `requirements.txt`'te `borsapy>=0.10.0` zorla
-- yfinance fallback otomatik devreye girer
-
-**"Image üretilmiyor"**
-- `pip install matplotlib`
-- requirements.txt'te `matplotlib` var mı kontrol
-
-## Önemli Notlar
-
-### TradingView Gecikme
-Borsapy default ~15 dakika gecikmeli veri kullanır. **Real-time veri** için:
-1. TradingView Pro/Pro+/Premium abonelik
-2. BIST Real-time Market Data paketi (ek ücretli)
-3. `bp.set_tradingview_auth(session=..., session_sign=...)` ile auth
-
-Şu an gecikmeli veri scanner için **yeterli** — günlük tarama EOD verisi kullanıyor.
-
-### Veri Period Limitleri (Borsapy)
-- **1m:** Son 1 gün
-- **5m, 15m, 30m:** Son 5 gün
-- **1h:** Son 1 ay
-- **1d+:** 3y, 5y, max destekli
-
-Scanner bunları otomatik ayarlıyor (interval'a göre period seçiyor).
+Kod içi testler gelecekteki kârlılığı kanıtlamaz. Sağlayıcı fiyat ayarlamalarının,
+survivorship bias'ın, gerçek işlem maliyetlerinin ve ileriye dönük paper-test
+sonuçlarının ayrıca izlenmesi gerekir. Zaman dilimi confluence'ı bağlamsaldır;
+korelasyonlu zaman dilimleri bağımsız oy sayılmaz.

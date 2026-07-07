@@ -40,6 +40,9 @@ class AssetReportingTests(unittest.TestCase):
         self.assertEqual(summary.iloc[0]["asset_label"], "Endeks")
         self.assertEqual(summary.iloc[0]["support_ma"], "EMA")
         self.assertEqual(summary.iloc[0]["resistance_ma"], "WMA")
+        self.assertEqual(summary.iloc[0]["tested_level_count"], 4)
+        self.assertEqual(summary.iloc[0]["certified_level_count"], 1)
+        self.assertAlmostEqual(summary.iloc[0]["certification_rate_pct"], 25.0)
 
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {

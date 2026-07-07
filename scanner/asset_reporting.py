@@ -81,6 +81,16 @@ def _metadata_text(group: pd.DataFrame, column: str) -> str:
     return str(value).strip()
 
 
+def _mean_metric(group: pd.DataFrame, column: str, scale: float = 1.0) -> float:
+    """Return a finite numeric mean without inventing missing evidence."""
+
+    if column not in group or group.empty:
+        return np.nan
+    values = pd.to_numeric(group[column], errors="coerce")
+    values = values[np.isfinite(values)]
+    return float(values.mean() * scale) if not values.empty else np.nan
+
+
 def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
     """Return exactly one row per typed instrument across all MAs/timeframes."""
 
@@ -97,7 +107,20 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
         price = _price_row(group)
         support = _best_level(group, "support")
         resistance = _best_level(group, "resistance")
-        certified_count = int(group.loc[group["active_side"], "certified"].sum())
+        active = group[group["active_side"].fillna(False).astype(bool)].copy()
+        discovery = (
+            active[active["discovery_pass"].fillna(False).astype(bool)]
+            if "discovery_pass" in active
+            else active.iloc[0:0]
+        )
+        certified = active[active["certified"].fillna(False).astype(bool)]
+        actionable = (
+            certified[certified["actionable"].fillna(False).astype(bool)]
+            if "actionable" in certified
+            else certified.iloc[0:0]
+        )
+        active_count = len(active)
+        certified_count = len(certified)
         record: dict[str, object] = {
             "asset_class": asset_class,
             "asset_label": str(group["asset_label"].iloc[0]),
@@ -108,7 +131,20 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
             "industry": _metadata_text(group, "industry"),
             "index_memberships": _metadata_text(group, "index_memberships"),
             "current_price": float(price["current_price"]),
+            "tested_level_count": active_count,
+            "discovery_pass_count": len(discovery),
             "certified_level_count": certified_count,
+            "actionable_level_count": len(actionable),
+            "certification_rate_pct": (
+                100.0 * certified_count / active_count if active_count else 0.0
+            ),
+            "avg_holdout_hit_rate_pct": _mean_metric(
+                certified, "holdout_hit_rate", scale=100.0
+            ),
+            "avg_holdout_return_atr": _mean_metric(
+                certified, "holdout_median_fixed_atr"
+            ),
+            "avg_q_value": _mean_metric(certified, "q_value"),
             "overall_evidence": "CERTIFIED" if certified_count else "CANDIDATE_ONLY",
         }
         record.update(_level_fields("support", support))
