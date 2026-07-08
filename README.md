@@ -42,8 +42,14 @@ Daily, Multi-Timeframe ve ana Research Panel aynı açılır evrenleri kullanır
 - `crypto_majors`, `commodities_majors`
 - `custom`
 
-`bist_sector_stocks` seçildiğinde sektör adı menüden seçilir. Endeks kodu yazmak
-gerekmez. `custom` dışında sembol alanı kullanılmaz.
+BIST 100 içindeki bütün sektörleri taramak için `bist100_stocks` seçin ve
+sektör alanını `Tümü / uygulanmaz` bırakın. Sektör alanı BIST 30/50/100
+ve tüm BIST evrenlerinde filtre uygulamaz; bu evrenler zaten içlerindeki bütün
+sektörleri kapsar.
+
+Yalnız belirli bir sektörün hisselerini taramak için `bist_sector_stocks`
+seçin ve Türkçe sektör adını menüden belirleyin. Endeks kodu yazmak gerekmez.
+`custom` dışında sembol alanı kullanılmaz.
 
 ## Önerilen başlangıç ayarları
 
@@ -62,14 +68,35 @@ kanıt üretmek için 499 varsayılanını koruyun.
 
 ## Tek varlık analizi
 
-`Guarded Single Instrument Analysis` önce varlık sınıfını sorar:
+Tek hisse taramak için Actions ekranında **Guarded Single Instrument Analysis**
+workflow'unu kullanın:
+
+1. `asset_class`: BIST hissesi için `stock`
+2. `market`: `BIST`
+3. `symbol`: yalnızca hisse kodu, örneğin `THYAO`
+4. `timeframes`: ilk denemede `1d`
+5. `periods`: `20,50,100,200`
+6. `source`: `auto`
+7. `top`: `5`
+8. `null_iterations`: gerçek taramada `499`
+
+Bu workflow `--universe custom` ile çalışır ve `symbol` alanındaki tek koddan
+başka piyasa varlığı taramaz. Logda `Etkin seçim: ... varlık_sayısı=1,
+semboller=THYAO` satırı bunu doğrular.
+
+Daily, Multi-Timeframe veya ana Research Panel'de tek sembol taramak isterseniz
+önce `universe=custom` seçmelisiniz. Başka bir evren (örneğin
+`bist100_stocks`) seçiliyken custom sembol alanı bilinçli olarak yok sayılır ve
+seçilen evrenin tamamı taranır.
+
+Diğer tek varlık örnekleri:
 
 ```text
-Hisse:         asset_class=stock,        market=BIST,   symbol=GARAN
-Endeks:        asset_class=index,        market=BIST,   symbol=XU100
-Sektör endeksi:asset_class=sector_index, market=BIST,   symbol=XBANK
-Kripto:        asset_class=crypto,       market=GLOBAL, symbol=BTC-USD
-Emtia:         asset_class=commodity,    market=GLOBAL, symbol=GC=F
+Hisse:          asset_class=stock,        market=BIST,   symbol=GARAN
+Endeks:         asset_class=index,        market=BIST,   symbol=XU100
+Sektör endeksi: asset_class=sector_index, market=BIST,   symbol=XBANK
+Kripto:         asset_class=crypto,       market=GLOBAL, symbol=BTC-USD
+Emtia:          asset_class=commodity,    market=GLOBAL, symbol=GC=F
 ```
 
 Bu ayrım endekslerin “Hisse”, kriptonun BIST sembolü gibi etiketlenmesini engeller.
@@ -94,6 +121,12 @@ Ana özette şu toplulaştırılmış alanlar bulunur:
 
 Telegram “Top 20” tablosu da bu özeti kullanır. Aynı hissenin farklı MA'ları artık
 ayrı satırlara dağılmaz; her varlık bir kez görünür.
+
+`0/28`, veri bulunamadı demek değildir: 28 aktif MA seviyesi test edilmiş fakat
+hiçbiri discovery, kontrol, validation ve holdout kapılarının tamamını
+geçememiştir. Bu durumda Telegram tablosu boş oranlar yerine en yakın güncel
+adayı; MA, taraf, seviye, ATR/yüzde uzaklık, olay sayısı ve elenme durumuyla
+gösterir. `CANDIDATE_ONLY` bir işlem sinyali değildir.
 
 ## Telegram bildirimi
 

@@ -73,6 +73,11 @@ def _resolve_instruments(args: argparse.Namespace):
             market=args.market,
         )
     else:
+        if args.universe == "bist_sector_stocks" and str(args.sector).casefold().startswith("tüm"):
+            raise ValueError(
+                "bist_sector_stocks için belirli bir sektör seçin; "
+                "tüm sektörleri taramak için bist30/50/100/all_stocks evrenlerinden birini kullanın"
+            )
         instruments = resolve_universe(args.universe, sector=args.sector)
     return enrich_stock_instruments(instruments)
 
@@ -174,6 +179,16 @@ def main(argv: list[str] | None = None) -> int:
         instruments = _resolve_instruments(args)
     except (ValueError, RuntimeError) as exc:
         raise SystemExit(str(exc)) from exc
+
+    preview = ", ".join(item.symbol for item in instruments[:12])
+    if len(instruments) > 12:
+        preview += f", ... (+{len(instruments) - 12})"
+    LOG.info(
+        "Etkin seçim: evren=%s, varlık_sayısı=%d, semboller=%s",
+        args.universe,
+        len(instruments),
+        preview,
+    )
 
     timeframes = _csv_list(args.timeframes)
     invalid_timeframes = sorted(set(timeframes) - set(TIMEFRAMES))

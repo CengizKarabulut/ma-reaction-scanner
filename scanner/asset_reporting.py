@@ -53,22 +53,76 @@ def _level_fields(prefix: str, row: pd.Series | None) -> dict[str, object]:
             f"{prefix}_ma": "",
             f"{prefix}_period": np.nan,
             f"{prefix}_level": np.nan,
+            f"{prefix}_distance_pct": np.nan,
             f"{prefix}_distance_atr": np.nan,
             f"{prefix}_q_value": np.nan,
+            f"{prefix}_status": "none",
+            f"{prefix}_discovery_events": 0,
+            f"{prefix}_discovery_pass": False,
+            f"{prefix}_validation_pass": False,
+            f"{prefix}_holdout_pass": False,
             f"{prefix}_evidence": "NONE",
         }
+    q_value = row.get("q_value", np.nan)
     return {
         f"{prefix}_timeframe": str(row["timeframe"]),
         f"{prefix}_ma": str(row["ma_type"]),
         f"{prefix}_period": int(row["period"]),
         f"{prefix}_level": float(row["current_ma"]),
+        f"{prefix}_distance_pct": float(row.get("distance_pct", np.nan)),
         f"{prefix}_distance_atr": float(row["distance_atr"]),
-        f"{prefix}_q_value": (
-            float(row["q_value"]) if np.isfinite(row["q_value"]) else np.nan
-        ),
+        f"{prefix}_q_value": float(q_value) if np.isfinite(q_value) else np.nan,
+        f"{prefix}_status": str(row.get("status", "unverified_candidate")),
+        f"{prefix}_discovery_events": int(row.get("discovery_events", 0) or 0),
+        f"{prefix}_discovery_pass": bool(row.get("discovery_pass", False)),
+        f"{prefix}_validation_pass": bool(row.get("validation_pass", False)),
+        f"{prefix}_holdout_pass": bool(row.get("holdout_pass", False)),
         f"{prefix}_evidence": "CERTIFIED"
         if bool(row["certified"])
         else "CANDIDATE_ONLY",
+    }
+
+
+def _nearest_fields(
+    support: pd.Series | None, resistance: pd.Series | None
+) -> dict[str, object]:
+    candidates = [
+        row
+        for row in (support, resistance)
+        if row is not None and np.isfinite(row.get("distance_atr", np.nan))
+    ]
+    if not candidates:
+        return {
+            "nearest_timeframe": "",
+            "nearest_side": "",
+            "nearest_ma": "",
+            "nearest_period": np.nan,
+            "nearest_level": np.nan,
+            "nearest_distance_pct": np.nan,
+            "nearest_distance_atr": np.nan,
+            "nearest_abs_distance_atr": np.nan,
+            "nearest_status": "none",
+            "nearest_discovery_events": 0,
+            "nearest_discovery_pass": False,
+            "nearest_validation_pass": False,
+            "nearest_holdout_pass": False,
+        }
+    row = min(candidates, key=lambda item: abs(float(item["distance_atr"])))
+    distance_atr = float(row["distance_atr"])
+    return {
+        "nearest_timeframe": str(row["timeframe"]),
+        "nearest_side": str(row["side"]),
+        "nearest_ma": str(row["ma_type"]),
+        "nearest_period": int(row["period"]),
+        "nearest_level": float(row["current_ma"]),
+        "nearest_distance_pct": float(row.get("distance_pct", np.nan)),
+        "nearest_distance_atr": distance_atr,
+        "nearest_abs_distance_atr": abs(distance_atr),
+        "nearest_status": str(row.get("status", "unverified_candidate")),
+        "nearest_discovery_events": int(row.get("discovery_events", 0) or 0),
+        "nearest_discovery_pass": bool(row.get("discovery_pass", False)),
+        "nearest_validation_pass": bool(row.get("validation_pass", False)),
+        "nearest_holdout_pass": bool(row.get("holdout_pass", False)),
     }
 
 
@@ -149,12 +203,19 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
         }
         record.update(_level_fields("support", support))
         record.update(_level_fields("resistance", resistance))
+        record.update(_nearest_fields(support, resistance))
         records.append(record)
     return (
         pd.DataFrame(records)
         .sort_values(
-            ["asset_class", "certified_level_count", "symbol"],
-            ascending=[True, False, True],
+            [
+                "asset_class",
+                "certified_level_count",
+                "nearest_abs_distance_atr",
+                "symbol",
+            ],
+            ascending=[True, False, True, True],
+            na_position="last",
         )
         .reset_index(drop=True)
     )
