@@ -44,6 +44,46 @@ class AssetReportingTests(unittest.TestCase):
         self.assertEqual(summary.iloc[0]["certified_level_count"], 1)
         self.assertAlmostEqual(summary.iloc[0]["certification_rate_pct"], 25.0)
 
+    def test_uncertified_summary_keeps_nearest_current_candidate(self):
+        rows = []
+        for side, distance, ma_type in (
+            ("support", -1.8, "HMA"),
+            ("resistance", 0.25, "WMA"),
+        ):
+            rows.append(
+                {
+                    "ticker": "THYAO",
+                    "asset_class": "stock",
+                    "asset_label": "Hisse",
+                    "universe": "custom",
+                    "display_name": "THYAO",
+                    "timeframe": "1d",
+                    "current_price": 354.25,
+                    "current_ma": 350.0 if side == "support" else 355.0,
+                    "ma_type": ma_type,
+                    "period": 20,
+                    "side": side,
+                    "active_side": True,
+                    "distance_pct": -1.2 if side == "support" else 0.21,
+                    "distance_atr": distance,
+                    "q_value": 1.0,
+                    "certified": False,
+                    "actionable": False,
+                    "rank_score": 1.0,
+                    "status": "unverified_candidate",
+                    "discovery_events": 18,
+                    "discovery_pass": False,
+                    "validation_pass": True,
+                    "holdout_pass": True,
+                }
+            )
+        summary = build_instrument_summary(pd.DataFrame(rows))
+        row = summary.iloc[0]
+        self.assertEqual(row["nearest_side"], "resistance")
+        self.assertEqual(row["nearest_ma"], "WMA")
+        self.assertAlmostEqual(row["nearest_abs_distance_atr"], 0.25)
+        self.assertEqual(row["nearest_discovery_events"], 18)
+
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {
             "ticker": "TEST",

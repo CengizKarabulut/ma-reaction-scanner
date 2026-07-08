@@ -12,6 +12,18 @@ class ResearchCliAssetTests(unittest.TestCase):
         )
         self.assertEqual({item.asset_label for item in instruments}, {"Endeks"})
 
+    def test_all_sector_sentinel_explains_whole_market_choice(self):
+        args = build_parser().parse_args(
+            [
+                "--universe",
+                "bist_sector_stocks",
+                "--sector",
+                "Tümü / uygulanmaz",
+            ]
+        )
+        with self.assertRaisesRegex(ValueError, "bist30/50/100/all_stocks"):
+            _resolve_instruments(args)
+
     def test_custom_symbols_are_typed_and_deduplicated(self):
         args = build_parser().parse_args(
             [
