@@ -34,8 +34,9 @@ Daily, Multi-Timeframe ve Tek Varlık artık eski v6 tarayıcısını değil gua
 Daily ve Multi-Timeframe genis evrenlerde **hizli gunluk eleme** profiliyle calisir:
 yalniz guncel aktif destek/direnc tarafi test edilir, fiyattan 4 ATR'den uzak MA
 seviyeleri pahali random kontrolden gecirilmeden konum satiri olarak birakilir ve
-`null_iterations` 29 ustune cikarilsa bile hizli profilde 29'a kirpilir. Bu mod
-gunluk aday listesi uretmek icindir. Daha agir 499 iterasyonlu kanit taramasi icin
+`null_iterations` 29 ustune cikarilsa bile hizli profilde 29'a kirpilir. Genis
+evrenlerde uzun periyot listeleri de operasyonel cekirdege (`20,50,100,200`)
+indirgenir. Bu mod gunluk aday listesi uretmek icindir. Daha agir 499 iterasyonlu kanit taramasi icin
 **Guarded Single Instrument Analysis** veya kucuk evrenli **Guarded MA Research
 Panel** kullanin.
 

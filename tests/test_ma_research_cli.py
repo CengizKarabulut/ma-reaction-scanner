@@ -1,6 +1,18 @@
 import unittest
 
-from scanner.ma_research_cli import _resolve_instruments, build_parser
+from scanner.ma_research_cli import _cap_fast_periods, _resolve_instruments, build_parser
+
+
+class ResearchCliBudgetTests(unittest.TestCase):
+    def test_fast_large_scan_prefers_operational_period_core(self):
+        periods = [5, 8, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
+
+        self.assertEqual(_cap_fast_periods(periods, 100, 1), [20, 50, 100, 200])
+
+    def test_fast_small_scan_keeps_research_periods(self):
+        periods = [5, 8, 13, 20, 21, 34, 50, 55]
+
+        self.assertEqual(_cap_fast_periods(periods, 1, 1), periods)
 
 
 class ResearchCliAssetTests(unittest.TestCase):
