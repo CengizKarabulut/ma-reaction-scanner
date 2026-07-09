@@ -61,8 +61,29 @@ except ImportError:  # direct script execution
 LOG = logging.getLogger("ma_research")
 
 
+FAST_LARGE_SCAN_PERIODS: tuple[int, ...] = (20, 50, 100, 200)
+FAST_LARGE_SCAN_MAX_PERIODS = 6
+FAST_LARGE_SCAN_MIN_WORK_UNITS = 30
+
+
 def _csv_list(value: str) -> list[str]:
     return [x.strip() for x in value.split(",") if x.strip()]
+
+
+def _cap_fast_periods(
+    periods: list[int], instrument_count: int, timeframe_count: int
+) -> list[int]:
+    """Keep broad fast scans operational even when users enter research grids."""
+
+    work_units = instrument_count * timeframe_count
+    if work_units < FAST_LARGE_SCAN_MIN_WORK_UNITS:
+        return list(periods)
+    if len(periods) <= FAST_LARGE_SCAN_MAX_PERIODS:
+        return list(periods)
+    preferred = [period for period in FAST_LARGE_SCAN_PERIODS if period in periods]
+    if preferred:
+        return preferred
+    return list(periods[:FAST_LARGE_SCAN_MAX_PERIODS])
 
 
 def _resolve_instruments(args: argparse.Namespace):
@@ -209,6 +230,15 @@ def main(argv: list[str] | None = None) -> int:
     if invalid_timeframes:
         raise SystemExit(f"Unsupported timeframes: {invalid_timeframes}")
     periods = [int(x) for x in _csv_list(args.periods)]
+    if args.fast:
+        requested_periods = list(periods)
+        periods = _cap_fast_periods(periods, len(instruments), len(timeframes))
+        if periods != requested_periods:
+            LOG.warning(
+                "Fast broad scan period cap: %s -> %s. Use Manual/Single for exhaustive research grids.",
+                requested_periods,
+                periods,
+            )
     ma_types = [x.upper() for x in _csv_list(args.ma_types)]
     invalid_mas = sorted(set(ma_types) - set(MA_TYPES))
     if invalid_mas:
