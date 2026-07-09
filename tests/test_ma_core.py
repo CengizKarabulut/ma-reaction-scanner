@@ -60,6 +60,32 @@ class CoreMathTests(unittest.TestCase):
         result = compute_ma("SMA", normalized["Close"], normalized["Volume"], 2)
         self.assertAlmostEqual(result.iloc[-1], 11.5)
 
+    def test_weighted_mas_match_rolling_apply(self):
+        index = pd.date_range("2024-01-01", periods=7)
+        close = pd.Series([1.0, 2.0, 3.0, np.nan, 5.0, 6.0, 7.0], index=index)
+        volume = pd.Series(1.0, index=index)
+
+        wma_weights = np.arange(1, 4, dtype=float)
+        expected_wma = close.rolling(3, min_periods=3).apply(
+            lambda values: float(np.dot(values, wma_weights) / wma_weights.sum()),
+            raw=True,
+        )
+        pd.testing.assert_series_equal(
+            compute_ma("WMA", close, volume, 3), expected_wma
+        )
+
+        center = 0.85 * (3 - 1)
+        width = 3 / 6.0
+        x = np.arange(3)
+        alma_weights = np.exp(-((x - center) ** 2) / (2 * width * width))
+        alma_weights /= alma_weights.sum()
+        expected_alma = close.rolling(3, min_periods=3).apply(
+            lambda values: float(np.dot(values, alma_weights)), raw=True
+        )
+        pd.testing.assert_series_equal(
+            compute_ma("ALMA", close, volume, 3), expected_alma
+        )
+
     def test_invalid_ohlc_is_rejected(self):
         raw = pd.DataFrame(
             {"Open": [10], "High": [9], "Low": [8], "Close": [10], "Volume": [1]},
