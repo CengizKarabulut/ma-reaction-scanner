@@ -127,6 +127,7 @@ jobs:
             --source "$INPUT_SOURCE" \
             --top "$INPUT_TOP" \
             --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --active-only \
             --output-dir reports/guarded
       - name: Telegram tekilleştirilmiş özet
         if: success()

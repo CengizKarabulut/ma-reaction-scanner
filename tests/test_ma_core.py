@@ -6,6 +6,7 @@ import pandas as pd
 from scanner.ma_core import (
     AnalysisConfig,
     adjust_fdr,
+    analyze_ma_universe,
     build_confluence,
     compute_ma,
     detect_independent_touches,
@@ -152,6 +153,31 @@ class StatisticalGateTests(unittest.TestCase):
 
 
 class PresentationTests(unittest.TestCase):
+    def test_active_only_distance_screen_keeps_location_row(self):
+        frame = analysis_frame(np.linspace(100.0, 150.0, 160))
+        cfg = AnalysisConfig(
+            horizon=4,
+            null_iterations=19,
+            use_shift_control=False,
+            use_horizontal_control=False,
+        )
+        result = analyze_ma_universe(
+            frame,
+            "TEST",
+            "1d",
+            cfg,
+            ma_types=("SMA",),
+            periods=(20,),
+            active_only=True,
+            max_evaluated_distance_atr=0.10,
+        )
+
+        self.assertEqual(len(result), 1)
+        row = result.iloc[0]
+        self.assertTrue(bool(row["active_side"]))
+        self.assertTrue(bool(row["screen_skipped"]))
+        self.assertEqual(row["status"], "distance_skipped")
+
     def test_panel_labels_unverified_rows_as_candidates(self):
         rows = pd.DataFrame(
             [

@@ -83,6 +83,7 @@ jobs:
             --source "$INPUT_SOURCE" \
             --top "$INPUT_TOP" \
             --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --active-only \
             --output-dir reports/single
       - name: Telegram tek varlık özeti
         if: success()

@@ -715,6 +715,36 @@ def evaluate_candidate(
     return result
 
 
+def _location_only_candidate(ma_type: str, period: int, side: int) -> dict[str, object]:
+    """Return a cheap current-location row without historical certification tests."""
+
+    result: dict[str, object] = {
+        "ma_type": ma_type,
+        "period": int(period),
+        "side": "support" if side == 1 else "resistance",
+    }
+    empty_metrics = summarize_measurements([])
+    for prefix in ("discovery", "validation", "holdout"):
+        for key, value in empty_metrics.items():
+            result[f"{prefix}_{key}"] = value
+    result.update({
+        "p_random": np.nan,
+        "p_shift": np.nan,
+        "p_horizontal": np.nan,
+        "p_value": np.nan,
+        "shift_control_pass": False,
+        "horizontal_control_pass": False,
+        "secondary_controls_pass": False,
+        "shift_score_threshold": np.nan,
+        "horizontal_score_threshold": np.nan,
+        "random_score_threshold": np.nan,
+        "validation_pass": False,
+        "holdout_pass": False,
+        "screen_skipped": True,
+    })
+    return result
+
+
 def adjust_fdr(p_values: Sequence[float], method: str = "by") -> np.ndarray:
     """Benjamini-Hochberg or dependence-robust Benjamini-Yekutieli q-values."""
 
@@ -744,6 +774,8 @@ def analyze_ma_universe(
     config: AnalysisConfig | None = None,
     ma_types: Sequence[str] = MA_TYPES,
     periods: Sequence[int] = DEFAULT_PERIODS,
+    active_only: bool = False,
+    max_evaluated_distance_atr: float | None = None,
 ) -> pd.DataFrame:
     """Evaluate every MA/side, correct the family, and attach current levels."""
 
@@ -763,16 +795,38 @@ def analyze_ma_universe(
             if not np.isfinite(current_ma):
                 continue
             current_side = "support" if current_ma <= current_price else "resistance"
-            for side in (1, -1):
-                seed = cfg.random_seed + type_index * 100_003 + int(period) * 101 + (1 if side == 1 else 2)
-                row = evaluate_candidate(df, ma_series, ma_type, int(period), side, cfg, seed)
+            current_direction = 1 if current_side == "support" else -1
+            distance_atr = (
+                (current_ma - current_price) / current_atr
+                if current_atr > 0
+                else np.nan
+            )
+            sides = (current_direction,) if active_only else (1, -1)
+            for side in sides:
+                too_far_for_screen = (
+                    max_evaluated_distance_atr is not None
+                    and side == current_direction
+                    and np.isfinite(distance_atr)
+                    and abs(distance_atr) > max_evaluated_distance_atr
+                )
+                if too_far_for_screen:
+                    row = _location_only_candidate(ma_type, int(period), side)
+                else:
+                    seed = (
+                        cfg.random_seed
+                        + type_index * 100_003
+                        + int(period) * 101
+                        + (1 if side == 1 else 2)
+                    )
+                    row = evaluate_candidate(df, ma_series, ma_type, int(period), side, cfg, seed)
+                    row["screen_skipped"] = False
                 row.update({
                     "ticker": ticker.upper(),
                     "timeframe": timeframe,
                     "current_price": current_price,
                     "current_ma": current_ma,
                     "distance_pct": 100.0 * (current_ma - current_price) / current_price,
-                    "distance_atr": (current_ma - current_price) / current_atr if current_atr > 0 else np.nan,
+                    "distance_atr": distance_atr,
                     "current_side": current_side,
                     "active_side": row["side"] == current_side,
                 })
@@ -809,6 +863,7 @@ def analyze_ma_universe(
     ] = "holdout_failed"
     result.loc[result["certified"], "status"] = "certified"
     result.loc[result["certified"] & ~result["actionable"], "status"] = "certified_but_far"
+    result.loc[result["screen_skipped"].fillna(False), "status"] = "distance_skipped"
     quality = (
         result["discovery_score"].fillna(-10)
         + result["validation_score"].fillna(-10)

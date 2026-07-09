@@ -146,6 +146,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--null-iterations", type=int, default=None)
     parser.add_argument("--fdr-q", type=float, default=None)
     parser.add_argument(
+        "--active-only",
+        action="store_true",
+        help="Evaluate only the currently active support/resistance side of each MA",
+    )
+    parser.add_argument(
+        "--max-evaluated-distance-atr",
+        type=float,
+        default=None,
+        help=(
+            "Skip expensive evidence tests for active MA levels farther than this "
+            "ATR distance; a current-location row is still emitted"
+        ),
+    )
+    parser.add_argument(
         "--fast",
         action="store_true",
         help="Diagnostic run: fewer null draws, no secondary controls",
@@ -200,6 +214,28 @@ def main(argv: list[str] | None = None) -> int:
     if invalid_mas:
         raise SystemExit(f"Unsupported MA types: {invalid_mas}")
 
+    side_factor = 1 if args.active_only else 2
+    estimated_hypotheses = (
+        len(instruments) * len(timeframes) * len(periods) * len(ma_types) * side_factor
+    )
+    LOG.info(
+        "Analiz butcesi: timeframe=%d, periyot=%d, MA=%d, taraf=%d, hipotez~%d",
+        len(timeframes),
+        len(periods),
+        len(ma_types),
+        side_factor,
+        estimated_hypotheses,
+    )
+    if args.fast:
+        LOG.info(
+            "Hizli tarama modu: null_iterations en fazla 29, shift/horizontal kontroller kapali"
+        )
+    if args.max_evaluated_distance_atr is not None:
+        LOG.info(
+            "Uzaklik freni: |distance_atr| > %.2f olan aktif seviyeler konum satiri olarak birakilir",
+            args.max_evaluated_distance_atr,
+        )
+
     provider = MarketDataProvider(
         source=args.source,
         cache_dir=args.cache_dir,
@@ -244,13 +280,16 @@ def main(argv: list[str] | None = None) -> int:
         for timeframe in timeframes:
             cfg = TIMEFRAME_CONFIGS[timeframe]
             if args.fast:
+                fast_null_iterations = (
+                    29 if args.null_iterations is None else min(args.null_iterations, 29)
+                )
                 cfg = replace(
                     cfg,
-                    null_iterations=29,
+                    null_iterations=fast_null_iterations,
                     use_shift_control=False,
                     use_horizontal_control=False,
                 )
-            if args.null_iterations is not None:
+            elif args.null_iterations is not None:
                 cfg = replace(cfg, null_iterations=args.null_iterations)
             if args.fdr_q is not None:
                 cfg = replace(cfg, fdr_q=args.fdr_q)
@@ -277,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
                     cfg,
                     ma_types=ma_types,
                     periods=periods,
+                    active_only=args.active_only,
+                    max_evaluated_distance_atr=args.max_evaluated_distance_atr,
                 )
                 if result.empty:
                     raise RuntimeError("no MA candidate had enough calculable history")
