@@ -31,6 +31,14 @@ Eski Endeks Tarama, Weekly, Sektör Cache ve Keepalive workflow'ları kaldırıl
 Daily, Multi-Timeframe ve Tek Varlık artık eski v6 tarayıcısını değil guarded
 çekirdeği çağırır.
 
+Daily ve Multi-Timeframe genis evrenlerde **hizli gunluk eleme** profiliyle calisir:
+yalniz guncel aktif destek/direnc tarafi test edilir, fiyattan 4 ATR'den uzak MA
+seviyeleri pahali random kontrolden gecirilmeden konum satiri olarak birakilir ve
+`null_iterations` 29 ustune cikarilsa bile hizli profilde 29'a kirpilir. Bu mod
+gunluk aday listesi uretmek icindir. Daha agir 499 iterasyonlu kanit taramasi icin
+**Guarded Single Instrument Analysis** veya kucuk evrenli **Guarded MA Research
+Panel** kullanin.
+
 ## Kod yazmadan evren seçimi
 
 Daily, Multi-Timeframe ve ana Research Panel aynı açılır evrenleri kullanır:
@@ -59,12 +67,13 @@ timeframes/interval: 1d
 periods: 20,50,100,200
 source: auto
 top: 5
-null_iterations: 499
+null_iterations: Daily/Multi icin 29, Single/Manual kanit taramasi icin 499
 ```
 
-Tüm BIST ve üç zaman dilimi birlikte çok maliyetlidir. İlk çalıştırmalarda BIST 30
-veya tek sektör kullanın. Düşük `null_iterations` değeri yalnız hızlı tanı içindir;
-kanıt üretmek için 499 varsayılanını koruyun.
+Tum BIST ve uc zaman dilimi birlikte cok maliyetlidir. Daily/Multi bunu otomatik
+hizli eleme profiline alir. Gercek kanit uretmek istediginizde evreni kucultun
+(tek hisse, BIST 30 veya tek sektor) ve Single/Manual workflow'da 499 iterasyon
+kullanin.
 
 ## Tek varlık analizi
 

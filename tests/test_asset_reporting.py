@@ -84,6 +84,35 @@ class AssetReportingTests(unittest.TestCase):
         self.assertAlmostEqual(row["nearest_abs_distance_atr"], 0.25)
         self.assertEqual(row["nearest_discovery_events"], 18)
 
+    def test_screen_skipped_levels_are_not_counted_as_tested(self):
+        base = {
+            "ticker": "TEST",
+            "asset_class": "stock",
+            "asset_label": "Hisse",
+            "universe": "custom",
+            "display_name": "TEST",
+            "timeframe": "1d",
+            "current_price": 100.0,
+            "current_ma": 99.0,
+            "ma_type": "SMA",
+            "period": 20,
+            "side": "support",
+            "active_side": True,
+            "distance_atr": -1.0,
+            "q_value": 0.5,
+            "certified": False,
+            "actionable": False,
+            "rank_score": 1.0,
+            "screen_skipped": False,
+        }
+        rows = [base, {**base, "period": 50, "screen_skipped": True}]
+        summary = build_instrument_summary(pd.DataFrame(rows))
+        row = summary.iloc[0]
+
+        self.assertEqual(row["active_level_count"], 2)
+        self.assertEqual(row["tested_level_count"], 1)
+        self.assertEqual(row["screen_skipped_level_count"], 1)
+
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {
             "ticker": "TEST",

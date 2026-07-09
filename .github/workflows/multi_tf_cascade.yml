@@ -85,9 +85,9 @@ on:
         required: true
         default: '5'
       null_iterations:
-        description: 'Eşleştirilmiş rastgele kontrol sayısı'
+        description: 'Multi-TF hizli taramada 29 ustu otomatik kirpilir'
         required: true
-        default: '499'
+        default: '29'
 
 permissions:
   contents: read
@@ -139,6 +139,9 @@ jobs:
             --source "$INPUT_SOURCE" \
             --top "$INPUT_TOP" \
             --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --fast \
+            --active-only \
+            --max-evaluated-distance-atr 4.0 \
             --output-dir reports/multi_tf
       - name: Telegram tekilleştirilmiş özet
         if: success()

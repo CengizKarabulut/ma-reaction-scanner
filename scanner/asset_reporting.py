@@ -173,7 +173,18 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
             if "actionable" in certified
             else certified.iloc[0:0]
         )
+        screen_skipped = (
+            active[active["screen_skipped"].fillna(False).astype(bool)]
+            if "screen_skipped" in active
+            else active.iloc[0:0]
+        )
+        evaluated = (
+            active[~active["screen_skipped"].fillna(False).astype(bool)]
+            if "screen_skipped" in active
+            else active
+        )
         active_count = len(active)
+        evaluated_count = len(evaluated)
         certified_count = len(certified)
         record: dict[str, object] = {
             "asset_class": asset_class,
@@ -185,12 +196,14 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
             "industry": _metadata_text(group, "industry"),
             "index_memberships": _metadata_text(group, "index_memberships"),
             "current_price": float(price["current_price"]),
-            "tested_level_count": active_count,
+            "active_level_count": active_count,
+            "tested_level_count": evaluated_count,
+            "screen_skipped_level_count": len(screen_skipped),
             "discovery_pass_count": len(discovery),
             "certified_level_count": certified_count,
             "actionable_level_count": len(actionable),
             "certification_rate_pct": (
-                100.0 * certified_count / active_count if active_count else 0.0
+                100.0 * certified_count / evaluated_count if evaluated_count else 0.0
             ),
             "avg_holdout_hit_rate_pct": _mean_metric(
                 certified, "holdout_hit_rate", scale=100.0
