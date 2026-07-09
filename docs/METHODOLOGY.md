@@ -30,10 +30,15 @@ These words are intentionally different:
   (resistance candidate). Location only.
 - **Discovery pass:** historical reactions beat the matched null after FDR.
 - **Certified:** discovery pass also remains positive in validation and untouched
-  holdout segments.
-- **Actionable:** certified and not farther than the configured ATR distance.
+  holdout segments, including the configured holdout Wilson lower-bound gate.
+- **Low confidence:** a raw pass produced by a fast/underpowered profile, or by a
+  holdout segment with only 3-4 events. These rows are downgraded from strict
+  certification and labelled `LOW_CONFIDENCE`, `low_confidence_fast`, or
+  `certified_thin_holdout`.
+- **Actionable:** strictly certified and not farther than the configured ATR distance.
 
-The panel may show several `CANDIDATE_ONLY` levels when nothing is certified.
+The panel may show several `CANDIDATE_ONLY` or `LOW_CONFIDENCE` levels when
+nothing is strictly certified.
 It may also show no support or no resistance when no scanned MA exists on that
 side. The program never relabels a weak candidate merely to fill a table.
 
@@ -72,6 +77,10 @@ The discovery statistic must survive:
 The matched random ensemble supplies the empirical p-value. The smaller shift
 and horizontal ensembles are secondary gates, not coarse p-values.
 
+Volatility regimes are assigned with fixed ATR/price thresholds from the current
+and prior bars rather than full-sample percentile ranks. This avoids a look-ahead
+where a future volatility shock could change an older event's matching bin.
+
 ## Multiple testing
 
 The live hypothesis family contains the currently relevant side of every MA in
@@ -79,6 +88,12 @@ one ticker/timeframe scan. Benjamini-Hochberg is the default because these smoot
 MA tests are positively dependent. `fdr_method="by"` is available for a more
 conservative arbitrary-dependence audit, but it requires substantially more null
 draws. No individual raw p-value is presented as proof after scanning many MAs.
+
+Fast operational scans are intentionally underpowered candidate screens. When
+`null_iterations` is below 99, or when shift/horizontal controls are disabled, a
+raw pass is downgraded to `LOW_CONFIDENCE` instead of `CERTIFIED` because the
+minimum attainable empirical p-value and missing secondary controls are not enough
+for strict certification.
 
 ## Time separation
 
@@ -88,9 +103,23 @@ Bars are split chronologically:
 - 20% validation;
 - 20% untouched holdout.
 
-Parameters and candidates are not tuned on holdout results. A candidate with too
-few events in any required segment is labelled insufficient rather than rescued
-with a looser fallback.
+Parameters and candidates are not tuned on holdout results. Holdout must satisfy
+minimum event count, positive median fixed-horizon ATR reaction, positive score,
+and the same Wilson lower-bound threshold used by the configured discovery gate.
+A raw pass with only 3-4 holdout events is kept visible as `certified_thin_holdout`
+but is not counted as strict certification. A candidate with too few events in any
+required segment is labelled insufficient rather than rescued with a looser fallback.
+
+## Ranking score constants
+
+`rank_score` is a presentation ranking, not a trading expectancy. Strict
+certification receives the largest bonus, thin-holdout and fast low-confidence
+passes receive smaller bonuses, discovery pass receives a context bonus, and the
+remaining quality term rewards positive discovery/validation/holdout scores while
+penalizing distance from current price. The constants are deliberately ordinal:
+they keep strict certified rows ahead of downgraded evidence and keep mere
+candidates behind both. Changing them should be treated as UI ranking sensitivity,
+not a change to the statistical gates.
 
 ## Cross-timeframe confluence
 
@@ -119,7 +148,9 @@ Code tests cannot establish future profitability. Before scheduled signals are
 enabled, the project still needs:
 
 - provider-specific adjusted/raw verification for BIST corporate actions;
-- historical-universe data or an explicit survivorship-bias warning;
+- historical-universe data for true point-in-time membership. Until that exists,
+  run summaries and metadata print an explicit survivorship-bias warning because
+  BIST universes use currently available membership lists;
 - realistic broker-specific costs and short-sale constraints;
 - a frozen prospective paper-test protocol with enough completed events;
 - periodic monitoring for regime decay.

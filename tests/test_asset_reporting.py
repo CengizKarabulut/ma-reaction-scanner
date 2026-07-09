@@ -113,6 +113,52 @@ class AssetReportingTests(unittest.TestCase):
         self.assertEqual(row["tested_level_count"], 1)
         self.assertEqual(row["screen_skipped_level_count"], 1)
 
+    def test_low_confidence_summary_is_counted_without_nan_truthiness(self):
+        base = {
+            "ticker": "TEST",
+            "asset_class": "stock",
+            "asset_label": "Hisse",
+            "universe": "custom",
+            "display_name": "TEST",
+            "timeframe": "1d",
+            "current_price": 100.0,
+            "period": 20,
+            "active_side": True,
+            "q_value": 0.5,
+            "certified": False,
+            "actionable": False,
+            "rank_score": 1.0,
+        }
+        rows = [
+            {
+                **base,
+                "current_ma": 99.0,
+                "ma_type": "SMA",
+                "side": "support",
+                "distance_atr": -0.2,
+                "low_confidence": True,
+                "certified_thin_holdout": True,
+            },
+            {
+                **base,
+                "current_ma": 101.0,
+                "ma_type": "EMA",
+                "side": "resistance",
+                "distance_atr": 0.3,
+                "low_confidence": float("nan"),
+                "certified_thin_holdout": float("nan"),
+            },
+        ]
+
+        row = build_instrument_summary(pd.DataFrame(rows)).iloc[0]
+
+        self.assertEqual(row["certified_level_count"], 0)
+        self.assertEqual(row["low_confidence_level_count"], 1)
+        self.assertEqual(row["thin_holdout_level_count"], 1)
+        self.assertEqual(row["overall_evidence"], "LOW_CONFIDENCE")
+        self.assertEqual(row["support_evidence"], "LOW_CONFIDENCE")
+        self.assertEqual(row["resistance_evidence"], "CANDIDATE_ONLY")
+
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {
             "ticker": "TEST",

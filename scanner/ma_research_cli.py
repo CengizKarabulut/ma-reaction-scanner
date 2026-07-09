@@ -59,6 +59,10 @@ except ImportError:  # direct script execution
 
 
 LOG = logging.getLogger("ma_research")
+SURVIVORSHIP_WARNING = (
+    "Survivorship warning: BIST universes use currently available membership lists "
+    "unless a historical membership snapshot is supplied."
+)
 
 
 FAST_LARGE_SCAN_PERIODS: tuple[int, ...] = (20, 50, 100, 200)
@@ -428,14 +432,18 @@ def main(argv: list[str] | None = None) -> int:
     if not confluence.empty:
         confluence.to_csv(output_dir / "confluence.csv", index=False)
     summary_text = format_instrument_summary(summary)
-    (output_dir / "instrument_summary.txt").write_text(summary_text, encoding="utf-8")
-    (output_dir / "panel.txt").write_text(summary_text, encoding="utf-8")
+    summary_text_with_warning = summary_text + f"\n\n{SURVIVORSHIP_WARNING}"
+    (output_dir / "instrument_summary.txt").write_text(
+        summary_text_with_warning, encoding="utf-8"
+    )
+    (output_dir / "panel.txt").write_text(summary_text_with_warning, encoding="utf-8")
     (output_dir / "panel_detail.txt").write_text(format_panel(panel), encoding="utf-8")
     try:
         summary_markdown = "# Tekilleştirilmiş Varlık Özeti\n\n" + summary.to_markdown(
             index=False
         )
         summary_markdown += "\n\n> Her varlık bu özette yalnızca bir kez gösterilir."
+        summary_markdown += f"\n\n> {SURVIVORSHIP_WARNING}"
         (output_dir / "instrument_summary.md").write_text(
             summary_markdown, encoding="utf-8"
         )
@@ -457,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
             "candidate_only": "Location information only; not validated evidence.",
             "confluence": "Context cluster; timeframes are correlated, not independent votes.",
             "instrument_summary": "Exactly one row per typed instrument; MA details are separate.",
+            "survivorship_warning": SURVIVORSHIP_WARNING,
         },
     }
     (output_dir / "run_metadata.json").write_text(
