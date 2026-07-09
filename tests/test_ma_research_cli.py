@@ -4,10 +4,20 @@ from scanner.ma_research_cli import _cap_fast_periods, _resolve_instruments, bui
 
 
 class ResearchCliBudgetTests(unittest.TestCase):
-    def test_fast_large_scan_prefers_operational_period_core(self):
+    def test_fast_large_scan_prefers_full_operational_period_core(self):
         periods = [5, 8, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
 
         self.assertEqual(_cap_fast_periods(periods, 100, 1), [20, 50, 100, 200])
+
+    def test_fast_large_scan_tops_up_partial_core_periods(self):
+        periods = [5, 8, 13, 20, 21, 34, 55, 89]
+
+        self.assertEqual(_cap_fast_periods(periods, 100, 1), [20, 5, 8, 13, 21, 34])
+
+    def test_fast_large_scan_without_core_uses_first_periods(self):
+        periods = [5, 8, 13, 21, 34, 55, 89]
+
+        self.assertEqual(_cap_fast_periods(periods, 100, 1), [5, 8, 13, 21, 34, 55])
 
     def test_fast_small_scan_keeps_research_periods(self):
         periods = [5, 8, 13, 20, 21, 34, 50, 55]
