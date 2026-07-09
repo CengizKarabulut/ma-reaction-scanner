@@ -36,9 +36,10 @@ yalniz guncel aktif destek/direnc tarafi test edilir, fiyattan 4 ATR'den uzak MA
 seviyeleri pahali random kontrolden gecirilmeden konum satiri olarak birakilir ve
 `null_iterations` 29 ustune cikarilsa bile hizli profilde 29'a kirpilir. Genis
 evrenlerde uzun periyot listeleri de operasyonel cekirdege (`20,50,100,200`)
-indirgenir. Bu mod gunluk aday listesi uretmek icindir. Daha agir 499 iterasyonlu kanit taramasi icin
-**Guarded Single Instrument Analysis** veya kucuk evrenli **Guarded MA Research
-Panel** kullanin.
+indirgenir. Bu mod gunluk aday listesi uretmek icindir; hizli profilde ham gecis
+olsa bile satir `CERTIFIED` degil `LOW_CONFIDENCE`/aday olarak etiketlenir. Daha
+agir 499 iterasyonlu kanit taramasi icin **Guarded Single Instrument Analysis**
+veya kucuk evrenli **Guarded MA Research Panel** kullanin.
 
 ## Kod yazmadan evren seçimi
 
@@ -122,7 +123,7 @@ Ana özette şu toplulaştırılmış alanlar bulunur:
 
 - test edilen aktif seviye sayısı
 - discovery kapısını geçen seviye sayısı
-- sertifikalı ve aksiyon alınabilir seviye sayısı
+- sertifikali, dusuk-guven ve aksiyon alinabilir seviye sayisi
 - sertifikasyon oranı
 - sertifikalı seviyelerin ortalama holdout isabet oranı
 - sertifikalı seviyelerin ortalama holdout ATR getirisi
@@ -136,7 +137,7 @@ ayrı satırlara dağılmaz; her varlık bir kez görünür.
 hiçbiri discovery, kontrol, validation ve holdout kapılarının tamamını
 geçememiştir. Bu durumda Telegram tablosu boş oranlar yerine en yakın güncel
 adayı; MA, taraf, seviye, ATR/yüzde uzaklık, olay sayısı ve elenme durumuyla
-gösterir. `CANDIDATE_ONLY` bir işlem sinyali değildir.
+gosterir. `CANDIDATE_ONLY` ve `LOW_CONFIDENCE` islem sinyali degildir.
 
 ## Telegram bildirimi
 
@@ -202,5 +203,7 @@ python -m unittest discover -s tests -v
 
 Kod içi testler gelecekteki kârlılığı kanıtlamaz. Sağlayıcı fiyat ayarlamalarının,
 survivorship bias'ın, gerçek işlem maliyetlerinin ve ileriye dönük paper-test
-sonuçlarının ayrıca izlenmesi gerekir. Zaman dilimi confluence'ı bağlamsaldır;
-korelasyonlu zaman dilimleri bağımsız oy sayılmaz.
+sonuclarinin ayrica izlenmesi gerekir. Guncel BIST evrenleri tarihsel uyelik
+snapshot'i degildir; bu nedenle ozet ve metadata ciktilari acik survivorship
+uyarisi basar. Zaman dilimi confluence'i baglamsaldir; korelasyonlu zaman
+dilimleri bagimsiz oy sayilmaz.

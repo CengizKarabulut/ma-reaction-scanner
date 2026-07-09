@@ -19,6 +19,20 @@ _PRICE_TIMEFRAME_PRIORITY = {
 }
 
 
+def _is_true(value: object) -> bool:
+    """Return True only for explicit boolean true values."""
+
+    return isinstance(value, (bool, np.bool_)) and bool(value)
+
+
+def _true_mask(frame: pd.DataFrame, column: str) -> pd.Series:
+    """Return a boolean mask without treating NaN/object values as true."""
+
+    if column not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    return frame[column].eq(True).fillna(False).astype(bool)
+
+
 def _best_level(group: pd.DataFrame, side: str) -> pd.Series | None:
     rows = group[(group["active_side"]) & (group["side"] == side)].copy()
     if rows.empty:
@@ -61,9 +75,14 @@ def _level_fields(prefix: str, row: pd.Series | None) -> dict[str, object]:
             f"{prefix}_discovery_pass": False,
             f"{prefix}_validation_pass": False,
             f"{prefix}_holdout_pass": False,
+            f"{prefix}_low_confidence": False,
             f"{prefix}_evidence": "NONE",
         }
     q_value = row.get("q_value", np.nan)
+    low_confidence = _is_true(row.get("low_confidence", False))
+    evidence = "CERTIFIED" if bool(row["certified"]) else (
+        "LOW_CONFIDENCE" if low_confidence else "CANDIDATE_ONLY"
+    )
     return {
         f"{prefix}_timeframe": str(row["timeframe"]),
         f"{prefix}_ma": str(row["ma_type"]),
@@ -77,9 +96,8 @@ def _level_fields(prefix: str, row: pd.Series | None) -> dict[str, object]:
         f"{prefix}_discovery_pass": bool(row.get("discovery_pass", False)),
         f"{prefix}_validation_pass": bool(row.get("validation_pass", False)),
         f"{prefix}_holdout_pass": bool(row.get("holdout_pass", False)),
-        f"{prefix}_evidence": "CERTIFIED"
-        if bool(row["certified"])
-        else "CANDIDATE_ONLY",
+        f"{prefix}_low_confidence": low_confidence,
+        f"{prefix}_evidence": evidence,
     }
 
 
@@ -161,28 +179,14 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
         price = _price_row(group)
         support = _best_level(group, "support")
         resistance = _best_level(group, "resistance")
-        active = group[group["active_side"].fillna(False).astype(bool)].copy()
-        discovery = (
-            active[active["discovery_pass"].fillna(False).astype(bool)]
-            if "discovery_pass" in active
-            else active.iloc[0:0]
-        )
-        certified = active[active["certified"].fillna(False).astype(bool)]
-        actionable = (
-            certified[certified["actionable"].fillna(False).astype(bool)]
-            if "actionable" in certified
-            else certified.iloc[0:0]
-        )
-        screen_skipped = (
-            active[active["screen_skipped"].fillna(False).astype(bool)]
-            if "screen_skipped" in active
-            else active.iloc[0:0]
-        )
-        evaluated = (
-            active[~active["screen_skipped"].fillna(False).astype(bool)]
-            if "screen_skipped" in active
-            else active
-        )
+        active = group[_true_mask(group, "active_side")].copy()
+        discovery = active[_true_mask(active, "discovery_pass")]
+        certified = active[_true_mask(active, "certified")]
+        low_confidence = active[_true_mask(active, "low_confidence")]
+        thin_holdout = active[_true_mask(active, "certified_thin_holdout")]
+        actionable = certified[_true_mask(certified, "actionable")]
+        screen_skipped = active[_true_mask(active, "screen_skipped")]
+        evaluated = active[~_true_mask(active, "screen_skipped")]
         active_count = len(active)
         evaluated_count = len(evaluated)
         certified_count = len(certified)
@@ -201,6 +205,8 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
             "screen_skipped_level_count": len(screen_skipped),
             "discovery_pass_count": len(discovery),
             "certified_level_count": certified_count,
+            "low_confidence_level_count": len(low_confidence),
+            "thin_holdout_level_count": len(thin_holdout),
             "actionable_level_count": len(actionable),
             "certification_rate_pct": (
                 100.0 * certified_count / evaluated_count if evaluated_count else 0.0
@@ -212,7 +218,9 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
                 certified, "holdout_median_fixed_atr"
             ),
             "avg_q_value": _mean_metric(certified, "q_value"),
-            "overall_evidence": "CERTIFIED" if certified_count else "CANDIDATE_ONLY",
+            "overall_evidence": "CERTIFIED" if certified_count else (
+                "LOW_CONFIDENCE" if len(low_confidence) else "CANDIDATE_ONLY"
+            ),
         }
         record.update(_level_fields("support", support))
         record.update(_level_fields("resistance", resistance))

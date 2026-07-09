@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ from scanner.ma_core import (
     evaluate_candidate,
     measure_event,
     normalize_ohlcv,
+    prepare_frame,
     select_panel_levels,
 )
 
@@ -85,6 +87,35 @@ class CoreMathTests(unittest.TestCase):
         pd.testing.assert_series_equal(
             compute_ma("ALMA", close, volume, 3), expected_alma
         )
+
+    def test_volatility_bins_do_not_change_when_future_data_is_appended(self):
+        close = np.linspace(100.0, 104.0, 90)
+        base = pd.DataFrame(
+            {
+                "Open": close,
+                "High": close + 1.0,
+                "Low": close - 1.0,
+                "Close": close,
+                "Volume": 1_000_000.0,
+            },
+            index=pd.date_range("2024-01-01", periods=len(close), freq="D"),
+        )
+        shock = pd.DataFrame(
+            {
+                "Open": [150.0],
+                "High": [190.0],
+                "Low": [110.0],
+                "Close": [150.0],
+                "Volume": [1_000_000.0],
+            },
+            index=[base.index[-1] + pd.Timedelta(days=1)],
+        )
+        cfg = AnalysisConfig()
+
+        original = prepare_frame(base, cfg)["VOL_BIN"]
+        extended_prefix = prepare_frame(pd.concat([base, shock]), cfg)["VOL_BIN"].iloc[:-1]
+
+        pd.testing.assert_series_equal(original, extended_prefix, check_freq=False)
 
     def test_invalid_ohlc_is_rejected(self):
         raw = pd.DataFrame(
@@ -204,12 +235,80 @@ class PresentationTests(unittest.TestCase):
         self.assertTrue(bool(row["screen_skipped"]))
         self.assertEqual(row["status"], "distance_skipped")
 
+    def _passing_candidate(self, *, holdout_events=5, holdout_thin=False):
+        return {
+            "ma_type": "SMA",
+            "period": 20,
+            "side": "support",
+            "discovery_events": 12,
+            "discovery_score": 1.0,
+            "discovery_wilson_lower": 0.60,
+            "validation_score": 1.0,
+            "validation_median_fixed_atr": 0.40,
+            "validation_pass": True,
+            "holdout_events": holdout_events,
+            "holdout_score": 1.0,
+            "holdout_median_fixed_atr": 0.35,
+            "holdout_wilson_lower": 0.60,
+            "holdout_wilson_pass": True,
+            "holdout_pass": True,
+            "holdout_thin": holdout_thin,
+            "p_value": 0.001,
+            "p_random": 0.001,
+            "p_shift": 0.001,
+            "p_horizontal": 0.001,
+            "shift_control_pass": True,
+            "horizontal_control_pass": True,
+            "secondary_controls_pass": True,
+            "shift_score_threshold": 0.0,
+            "horizontal_score_threshold": 0.0,
+            "random_score_threshold": 0.0,
+        }
+
+    def test_fast_profile_downgrades_raw_certification(self):
+        frame = analysis_frame(np.linspace(100.0, 130.0, 180))
+        cfg = AnalysisConfig(
+            null_iterations=29,
+            use_shift_control=False,
+            use_horizontal_control=False,
+        )
+        with patch("scanner.ma_core.evaluate_candidate", return_value=self._passing_candidate()):
+            result = analyze_ma_universe(
+                frame, "TEST", "1d", cfg, ma_types=("SMA",), periods=(20,), active_only=True
+            )
+
+        row = result.iloc[0]
+        self.assertTrue(bool(row["raw_certified"]))
+        self.assertTrue(bool(row["low_confidence_fast"]))
+        self.assertTrue(bool(row["low_confidence"]))
+        self.assertFalse(bool(row["certified"]))
+        self.assertEqual(row["status"], "low_confidence_fast")
+
+    def test_thin_holdout_downgrades_raw_certification(self):
+        frame = analysis_frame(np.linspace(100.0, 130.0, 180))
+        cfg = AnalysisConfig(null_iterations=499)
+        candidate = self._passing_candidate(holdout_events=3, holdout_thin=True)
+        with patch("scanner.ma_core.evaluate_candidate", return_value=candidate):
+            result = analyze_ma_universe(
+                frame, "TEST", "1d", cfg, ma_types=("SMA",), periods=(20,), active_only=True
+            )
+
+        row = result.iloc[0]
+        self.assertTrue(bool(row["raw_certified"]))
+        self.assertTrue(bool(row["certified_thin_holdout"]))
+        self.assertTrue(bool(row["low_confidence"]))
+        self.assertFalse(bool(row["certified"]))
+        self.assertEqual(row["status"], "certified_thin_holdout")
+
     def test_panel_labels_unverified_rows_as_candidates(self):
         rows = pd.DataFrame(
             [
                 {"ticker": "TEST", "timeframe": "1d", "side": "support", "active_side": True,
                  "ma_type": "SMA", "period": 20, "certified": False, "actionable": False,
                  "rank_score": 1.0, "distance_atr": -1.0},
+                {"ticker": "TEST", "timeframe": "1d", "side": "support", "active_side": True,
+                 "ma_type": "WMA", "period": 34, "certified": False, "actionable": False,
+                 "low_confidence": True, "rank_score": 20.0, "distance_atr": -2.0},
                 {"ticker": "TEST", "timeframe": "1d", "side": "resistance", "active_side": True,
                  "ma_type": "EMA", "period": 50, "certified": True, "actionable": True,
                  "rank_score": 100.0, "distance_atr": 2.0},
@@ -217,7 +316,8 @@ class PresentationTests(unittest.TestCase):
         )
         panel = select_panel_levels(rows, top_n=3)
         labels = dict(zip(panel["side"], panel["evidence_label"]))
-        self.assertEqual(labels["support"], "CANDIDATE_ONLY")
+        self.assertIn("CANDIDATE_ONLY", set(panel["evidence_label"]))
+        self.assertIn("LOW_CONFIDENCE", set(panel["evidence_label"]))
         self.assertEqual(labels["resistance"], "CERTIFIED")
 
     def test_confluence_is_context_not_independent_proof(self):

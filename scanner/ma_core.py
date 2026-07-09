@@ -27,6 +27,8 @@ DEFAULT_PERIODS: tuple[int, ...] = (
     3, 5, 8, 10, 13, 20, 21, 22, 34, 50,
     55, 89, 100, 144, 200, 233, 250, 377, 610, 987,
 )
+STRICT_CERTIFICATION_MIN_NULL_ITERATIONS = 99
+FULL_CERTIFICATION_MIN_HOLDOUT_EVENTS = 5
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class AnalysisConfig:
     fdr_method: str = "bh"
     min_wilson: float = 0.35
     max_actionable_distance_atr: float = 4.0
+    volatility_bin_edges: tuple[float, float, float] = (0.015, 0.030, 0.050)
     random_seed: int = 1729
     use_shift_control: bool = True
     use_horizontal_control: bool = True
@@ -70,6 +73,10 @@ class AnalysisConfig:
             raise ValueError("a non-trivial holdout segment is required")
         if self.fdr_method not in {"bh", "by"}:
             raise ValueError("fdr_method must be 'bh' or 'by'")
+        if tuple(self.volatility_bin_edges) != tuple(sorted(self.volatility_bin_edges)):
+            raise ValueError("volatility_bin_edges must be sorted")
+        if any(edge <= 0 for edge in self.volatility_bin_edges):
+            raise ValueError("volatility_bin_edges must be positive")
 
 
 TIMEFRAME_CONFIGS: Mapping[str, AnalysisConfig] = {
@@ -293,8 +300,11 @@ def prepare_frame(frame: pd.DataFrame, config: AnalysisConfig) -> pd.DataFrame:
     df["ATR"] = atr(df["High"], df["Low"], df["Close"], config.atr_period)
     df["ADX"] = adx(df["High"], df["Low"], df["Close"], config.adx_period)
     volatility = (df["ATR"] / df["Close"]).replace([np.inf, -np.inf], np.nan)
-    ranked = volatility.rank(method="first", pct=True)
-    df["VOL_BIN"] = np.minimum((ranked.fillna(0.5) * 4).astype(int), 3)
+    volatility_values = volatility.to_numpy(dtype=float)
+    edges = np.asarray(config.volatility_bin_edges, dtype=float)
+    vol_bins = np.searchsorted(edges, volatility_values, side="right")
+    vol_bins = np.where(np.isfinite(volatility_values), vol_bins, 1)
+    df["VOL_BIN"] = np.clip(vol_bins, 0, len(edges)).astype(int)
     if isinstance(df.index, pd.DatetimeIndex) and any(df.index.hour != 0):
         df["SESSION_BIN"] = np.where(df.index.hour < 14, 0, 1)
     else:
@@ -718,11 +728,21 @@ def evaluate_candidate(
             and v_metrics["score"] > 0
             and v_metrics["median_fixed_atr"] > 0
         ),
+        "holdout_wilson_pass": bool(h_metrics["wilson_lower"] >= config.min_wilson),
         "holdout_pass": bool(
             h_metrics["events"] >= config.min_segment_events
             and np.isfinite(h_metrics["score"])
             and h_metrics["score"] > 0
             and h_metrics["median_fixed_atr"] > 0
+            and h_metrics["wilson_lower"] >= config.min_wilson
+        ),
+        "holdout_thin": bool(
+            h_metrics["events"] >= config.min_segment_events
+            and h_metrics["events"] < FULL_CERTIFICATION_MIN_HOLDOUT_EVENTS
+            and np.isfinite(h_metrics["score"])
+            and h_metrics["score"] > 0
+            and h_metrics["median_fixed_atr"] > 0
+            and h_metrics["wilson_lower"] >= config.min_wilson
         ),
     })
     return result
@@ -752,7 +772,13 @@ def _location_only_candidate(ma_type: str, period: int, side: int) -> dict[str, 
         "horizontal_score_threshold": np.nan,
         "random_score_threshold": np.nan,
         "validation_pass": False,
+        "holdout_wilson_pass": False,
         "holdout_pass": False,
+        "holdout_thin": False,
+        "raw_certified": False,
+        "low_confidence": False,
+        "low_confidence_fast": False,
+        "certified_thin_holdout": False,
         "screen_skipped": True,
     })
     return result
@@ -861,8 +887,26 @@ def analyze_ma_universe(
         & (result["discovery_wilson_lower"] >= cfg.min_wilson)
         & (result["q_value"] <= cfg.fdr_q)
     )
-    result["certified"] = (
+    result["raw_certified"] = (
         result["discovery_pass"] & result["validation_pass"] & result["holdout_pass"]
+    )
+    low_confidence_profile = (
+        cfg.null_iterations < STRICT_CERTIFICATION_MIN_NULL_ITERATIONS
+        or not cfg.use_shift_control
+        or not cfg.use_horizontal_control
+    )
+    result["low_confidence_fast"] = result["raw_certified"] & bool(low_confidence_profile)
+    result["certified_thin_holdout"] = (
+        result["raw_certified"]
+        & result["holdout_thin"].fillna(False).astype(bool)
+    )
+    result["low_confidence"] = (
+        result["low_confidence_fast"] | result["certified_thin_holdout"]
+    )
+    result["certified"] = (
+        result["raw_certified"]
+        & ~result["low_confidence_fast"]
+        & ~result["certified_thin_holdout"]
     )
     result["actionable"] = result["certified"] & (
         result["distance_atr"].abs() <= cfg.max_actionable_distance_atr
@@ -874,6 +918,8 @@ def analyze_ma_universe(
     result.loc[
         result["discovery_pass"] & result["validation_pass"] & ~result["holdout_pass"], "status"
     ] = "holdout_failed"
+    result.loc[result["certified_thin_holdout"], "status"] = "certified_thin_holdout"
+    result.loc[result["low_confidence_fast"], "status"] = "low_confidence_fast"
     result.loc[result["certified"], "status"] = "certified"
     result.loc[result["certified"] & ~result["actionable"], "status"] = "certified_but_far"
     result.loc[result["screen_skipped"].fillna(False), "status"] = "distance_skipped"
@@ -885,6 +931,8 @@ def analyze_ma_universe(
     )
     result["rank_score"] = (
         100.0 * result["certified"].astype(float)
+        + 45.0 * result["certified_thin_holdout"].astype(float)
+        + 35.0 * result["low_confidence_fast"].astype(float)
         + 20.0 * result["discovery_pass"].astype(float)
         + quality
     )
@@ -911,9 +959,14 @@ def select_panel_levels(results: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
         selected.append(chosen)
     out = pd.concat(selected, ignore_index=True) if selected else pd.DataFrame()
     if not out.empty:
-        out["evidence_label"] = np.where(
-            out["certified"], "CERTIFIED", "CANDIDATE_ONLY"
-        )
+        out["evidence_label"] = "CANDIDATE_ONLY"
+        low_confidence = out.get("low_confidence", False)
+        if isinstance(low_confidence, bool):
+            low_confidence_mask = pd.Series(low_confidence, index=out.index, dtype=bool)
+        else:
+            low_confidence_mask = low_confidence.eq(True).fillna(False)
+        out.loc[low_confidence_mask, "evidence_label"] = "LOW_CONFIDENCE"
+        out.loc[out["certified"], "evidence_label"] = "CERTIFIED"
     return out
 
 
