@@ -81,9 +81,15 @@ def _cap_fast_periods(
     if len(periods) <= FAST_LARGE_SCAN_MAX_PERIODS:
         return list(periods)
     preferred = [period for period in FAST_LARGE_SCAN_PERIODS if period in periods]
-    if preferred:
+    if len(preferred) == len(FAST_LARGE_SCAN_PERIODS):
         return preferred
-    return list(periods[:FAST_LARGE_SCAN_MAX_PERIODS])
+    capped = list(preferred)
+    for period in periods:
+        if period not in capped:
+            capped.append(period)
+        if len(capped) >= FAST_LARGE_SCAN_MAX_PERIODS:
+            return capped
+    return capped
 
 
 def _resolve_instruments(args: argparse.Namespace):
