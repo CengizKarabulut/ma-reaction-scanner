@@ -176,11 +176,26 @@ def ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False, min_periods=period).mean()
 
 
+def _weighted_rolling(series: pd.Series, weights: np.ndarray) -> pd.Series:
+    """Fast weighted rolling mean with pandas rolling-apply NaN semantics."""
+
+    weights = np.asarray(weights, dtype=float)
+    period = len(weights)
+    out = np.full(len(series), np.nan, dtype=float)
+    if period < 1 or len(series) < period:
+        return pd.Series(out, index=series.index)
+    values = series.to_numpy(dtype=float)
+    finite = np.isfinite(values)
+    clean_values = np.where(finite, values, 0.0)
+    weighted = np.correlate(clean_values, weights, mode="valid") / float(weights.sum())
+    valid = np.correlate(finite.astype(float), np.ones(period), mode="valid") == period
+    out[period - 1 :] = np.where(valid, weighted, np.nan)
+    return pd.Series(out, index=series.index)
+
+
 def wma(series: pd.Series, period: int) -> pd.Series:
     weights = np.arange(1, period + 1, dtype=float)
-    return series.rolling(period, min_periods=period).apply(
-        lambda x: float(np.dot(x, weights) / weights.sum()), raw=True
-    )
+    return _weighted_rolling(series, weights)
 
 
 def vwma(close: pd.Series, volume: pd.Series, period: int) -> pd.Series:
@@ -214,9 +229,7 @@ def alma(series: pd.Series, period: int, offset: float = 0.85, sigma: float = 6.
     x = np.arange(period)
     weights = np.exp(-((x - center) ** 2) / (2 * width * width))
     weights /= weights.sum()
-    return series.rolling(period, min_periods=period).apply(
-        lambda values: float(np.dot(values, weights)), raw=True
-    )
+    return _weighted_rolling(series, weights)
 
 
 def hma(series: pd.Series, period: int) -> pd.Series:
