@@ -473,6 +473,90 @@ def ledger_summary(ledger: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def ledger_equity_curve(ledger: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "cohort_id",
+        "evidence_status",
+        "resolved_at",
+        "ticker",
+        "timeframe",
+        "side",
+        "outcome",
+        "net_fixed_return_atr",
+        "cumulative_net_atr",
+        "rolling_expectancy_atr",
+        "rolling_target_rate",
+    ]
+    if ledger.empty:
+        return pd.DataFrame(columns=columns)
+    working = ledger.copy()
+    if "cohort_id" not in working:
+        working["cohort_id"] = "legacy"
+    if "evidence_status" not in working:
+        working["evidence_status"] = "UNLABELLED"
+    if "net_fixed_return_atr" not in working:
+        working["net_fixed_return_atr"] = np.nan
+    resolved = working[working["state"] == "RESOLVED"].copy()
+    if resolved.empty:
+        return pd.DataFrame(columns=columns)
+    resolved["_resolved_at"] = pd.to_datetime(resolved["resolved_at"], errors="coerce")
+    resolved = resolved.sort_values(
+        ["cohort_id", "evidence_status", "_resolved_at", "ticker", "timeframe"],
+        na_position="last",
+    )
+    rows = []
+    for (cohort_id, evidence_status), group in resolved.groupby(
+        ["cohort_id", "evidence_status"], dropna=False, sort=True
+    ):
+        cumulative = 0.0
+        targets = 0
+        count = 0
+        for _, row in group.iterrows():
+            value = pd.to_numeric(
+                pd.Series([row.get("net_fixed_return_atr")]), errors="coerce"
+            ).iloc[0]
+            if pd.isna(value):
+                value = pd.to_numeric(
+                    pd.Series([row.get("fixed_return_atr")]), errors="coerce"
+                ).iloc[0]
+            if pd.isna(value):
+                continue
+            count += 1
+            cumulative += float(value)
+            targets += int(str(row.get("outcome", "")).upper() == "TARGET")
+            rows.append(
+                {
+                    "cohort_id": cohort_id,
+                    "evidence_status": evidence_status,
+                    "resolved_at": row.get("resolved_at", ""),
+                    "ticker": row.get("ticker", ""),
+                    "timeframe": row.get("timeframe", ""),
+                    "side": row.get("side", ""),
+                    "outcome": row.get("outcome", ""),
+                    "net_fixed_return_atr": float(value),
+                    "cumulative_net_atr": cumulative,
+                    "rolling_expectancy_atr": cumulative / count,
+                    "rolling_target_rate": targets / count,
+                }
+            )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def write_artifacts(ledger: pd.DataFrame, output_dir: str | Path) -> dict[str, Path]:
+    folder = Path(output_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "summary": folder / "summary.csv",
+        "equity_curve": folder / "equity_curve.csv",
+        "open_watches": folder / "open_watches.csv",
+    }
+    ledger_summary(ledger).to_csv(paths["summary"], index=False)
+    ledger_equity_curve(ledger).to_csv(paths["equity_curve"], index=False)
+    open_watches = ledger[ledger["state"] != "RESOLVED"].copy() if not ledger.empty else ledger
+    open_watches.to_csv(paths["open_watches"], index=False)
+    return paths
+
+
 def load_run_provenance(
     path: str | Path,
 ) -> tuple[str | None, dict[tuple[str, str], dict]]:
@@ -503,8 +587,18 @@ def main(argv: list[str] | None = None) -> int:
         default=25.0,
         help="Frozen round-trip execution cost in basis points",
     )
+    create.add_argument(
+        "--artifacts-dir",
+        default="paper/artifacts",
+        help="Write prospective summary/equity artifacts here",
+    )
     update = sub.add_parser("update")
     update.add_argument("--ledger", default="paper/ma_watchlist.csv")
+    update.add_argument(
+        "--artifacts-dir",
+        default="paper/artifacts",
+        help="Write prospective summary/equity artifacts here",
+    )
     update.add_argument(
         "--source", choices=["auto", "borsapy", "yfinance"], default="auto"
     )
@@ -525,7 +619,9 @@ def main(argv: list[str] | None = None) -> int:
             roundtrip_cost_bps=args.roundtrip_cost_bps,
         )
         combined = append_watchlist(args.ledger, rows)
+        paths = write_artifacts(combined, args.artifacts_dir)
         print(ledger_summary(combined).to_string(index=False))
+        print("Artifacts:", ", ".join(f"{name}={path}" for name, path in paths.items()))
         return 0
 
     ledger_path = Path(args.ledger)
@@ -538,7 +634,9 @@ def main(argv: list[str] | None = None) -> int:
         lambda ticker, tf, **metadata: provider.fetch(ticker, tf, **metadata).frame,
     )
     advanced.to_csv(ledger_path, index=False)
+    paths = write_artifacts(advanced, args.artifacts_dir)
     print(ledger_summary(advanced).to_string(index=False))
+    print("Artifacts:", ", ".join(f"{name}={path}" for name, path in paths.items()))
     return 0
 
 
