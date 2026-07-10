@@ -31,13 +31,14 @@ Run all tests:
 python -m unittest discover -s tests -v
 ```
 
-Fast diagnostic scan (cannot be treated as certification research):
+Small candidate scan:
 
 ```bash
 python -m scanner.ma_research_cli \
   --tickers GARAN,THYAO,AKBNK \
-  --timeframes 5m,15m,30m,1h,4h,1d,1wk,1mo \
-  --source auto --top 5 --fast
+  --timeframes 1d \
+  --periods 5,8,13,21,22,34,50,55,89,100,144,200,233,377 \
+  --source auto --top 5 --null-iterations 499
 ```
 
 Full research scan:

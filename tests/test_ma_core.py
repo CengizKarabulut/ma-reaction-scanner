@@ -285,7 +285,7 @@ class StatisticalGateTests(unittest.TestCase):
 
 
 class PresentationTests(unittest.TestCase):
-    def test_active_only_distance_screen_keeps_location_row(self):
+    def test_distance_argument_no_longer_skips_evidence_tests(self):
         frame = analysis_frame(np.linspace(100.0, 150.0, 160))
         cfg = AnalysisConfig(
             horizon=4,
@@ -307,8 +307,8 @@ class PresentationTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         row = result.iloc[0]
         self.assertTrue(bool(row["active_side"]))
-        self.assertTrue(bool(row["screen_skipped"]))
-        self.assertEqual(row["status"], "distance_skipped")
+        self.assertFalse(bool(row["screen_skipped"]))
+        self.assertNotEqual(row["status"], "distance_skipped")
 
     def _passing_candidate(self, *, holdout_events=5, holdout_thin=False):
         return {
