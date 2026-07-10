@@ -31,15 +31,12 @@ Eski Endeks Tarama, Weekly, Sektör Cache ve Keepalive workflow'ları kaldırıl
 Daily, Multi-Timeframe ve Tek Varlık artık eski v6 tarayıcısını değil guarded
 çekirdeği çağırır.
 
-Daily ve Multi-Timeframe genis evrenlerde **hizli gunluk eleme** profiliyle calisir:
-yalniz guncel aktif destek/direnc tarafi test edilir, fiyattan 4 ATR'den uzak MA
-seviyeleri pahali random kontrolden gecirilmeden konum satiri olarak birakilir ve
-`null_iterations` 29 ustune cikarilsa bile hizli profilde 29'a kirpilir. Genis
-evrenlerde uzun periyot listeleri de operasyonel cekirdege (`20,50,100,200`)
-indirgenir. Bu mod gunluk aday listesi uretmek icindir; hizli profilde ham gecis
-olsa bile satir `CERTIFIED` degil `LOW_CONFIDENCE`/aday olarak etiketlenir. Daha
-agir 499 iterasyonlu kanit taramasi icin **Guarded Single Instrument Analysis**
-veya kucuk evrenli **Guarded MA Research Panel** kullanin.
+Daily, Multi-Timeframe, Manual ve Tek Varlik ayni kanit profiliyle calisir:
+varsayilan 499 null iterasyonu, shift/horizontal kontroller ve tam operasyonel
+periyot listesi kullanilir. `--fast` geriye uyumluluk icin kabul edilir ama artik
+iterasyon, kontrol veya periyot kisitlamaz. Uzak MA seviyeleri de kanit testinden
+kacirilmaz; uzaklik yalniz `actionable=False` / `certified_but_far` gibi cikti
+yorumunu etkiler.
 
 ## Kod yazmadan evren seçimi
 
@@ -66,16 +63,16 @@ seçin ve Türkçe sektör adını menüden belirleyin. Endeks kodu yazmak gerek
 ```text
 universe: bist30_stocks veya bist_sector_stocks
 timeframes/interval: 1d
-periods: 20,50,100,200
+periods: 5,8,13,21,22,34,50,55,89,100,144,200,233,377
 source: auto
 top: 5
-null_iterations: Daily/Multi icin 29, Single/Manual kanit taramasi icin 499
+null_iterations: 499
 ```
 
-Tum BIST ve uc zaman dilimi birlikte cok maliyetlidir. Daily/Multi bunu otomatik
-hizli eleme profiline alir. Gercek kanit uretmek istediginizde evreni kucultun
-(tek hisse, BIST 30 veya tek sektor) ve Single/Manual workflow'da 499 iterasyon
-kullanin.
+Tum BIST ve uc zaman dilimi birlikte hala maliyetlidir; ancak null sonucu
+onhesaplama sayesinde 499 iterasyon genis evrenlerde de ana profil haline
+gelmistir. Sure yine uzarsa evreni kucultmek veya GitHub Actions matrix ile
+parcalamak tercih edilmelidir; istatistiksel kanit kapilari gevsetilmez.
 
 ## Tek varlık analizi
 
@@ -86,7 +83,7 @@ workflow'unu kullanın:
 2. `market`: `BIST`
 3. `symbol`: yalnızca hisse kodu, örneğin `THYAO`
 4. `timeframes`: ilk denemede `1d`
-5. `periods`: `20,50,100,200`
+5. `periods`: `5,8,13,21,22,34,50,55,89,100,144,200,233,377`
 6. `source`: `auto`
 7. `top`: `5`
 8. `null_iterations`: gerçek taramada `499`
@@ -179,7 +176,7 @@ BIST 30 günlük tarama:
 python -m scanner.ma_research_cli \
   --universe bist30_stocks \
   --timeframes 1d \
-  --periods 20,50,100,200 \
+  --periods 5,8,13,21,22,34,50,55,89,100,144,200,233,377 \
   --source auto \
   --null-iterations 499
 ```

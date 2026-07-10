@@ -36,7 +36,6 @@ except ImportError:  # direct script execution
 
 try:
     from .ma_core import (
-        DEFAULT_PERIODS,
         MA_TYPES,
         TIMEFRAME_CONFIGS,
         analyze_ma_universe,
@@ -47,7 +46,6 @@ try:
     from .ma_data import MarketDataProvider, TIMEFRAMES
 except ImportError:  # direct script execution
     from ma_core import (
-        DEFAULT_PERIODS,
         MA_TYPES,
         TIMEFRAME_CONFIGS,
         analyze_ma_universe,
@@ -65,35 +63,26 @@ SURVIVORSHIP_WARNING = (
 )
 
 
-FAST_LARGE_SCAN_PERIODS: tuple[int, ...] = (20, 50, 100, 200)
-FAST_LARGE_SCAN_MAX_PERIODS = 6
-FAST_LARGE_SCAN_MIN_WORK_UNITS = 30
+DEFAULT_SCAN_PERIODS: tuple[int, ...] = (
+    5,
+    8,
+    13,
+    21,
+    22,
+    34,
+    50,
+    55,
+    89,
+    100,
+    144,
+    200,
+    233,
+    377,
+)
 
 
 def _csv_list(value: str) -> list[str]:
     return [x.strip() for x in value.split(",") if x.strip()]
-
-
-def _cap_fast_periods(
-    periods: list[int], instrument_count: int, timeframe_count: int
-) -> list[int]:
-    """Keep broad fast scans operational even when users enter research grids."""
-
-    work_units = instrument_count * timeframe_count
-    if work_units < FAST_LARGE_SCAN_MIN_WORK_UNITS:
-        return list(periods)
-    if len(periods) <= FAST_LARGE_SCAN_MAX_PERIODS:
-        return list(periods)
-    preferred = [period for period in FAST_LARGE_SCAN_PERIODS if period in periods]
-    if len(preferred) == len(FAST_LARGE_SCAN_PERIODS):
-        return preferred
-    capped = list(preferred)
-    for period in periods:
-        if period not in capped:
-            capped.append(period)
-        if len(capped) >= FAST_LARGE_SCAN_MAX_PERIODS:
-            return capped
-    return capped
 
 
 def _resolve_instruments(args: argparse.Namespace):
@@ -172,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--top", type=int, default=5, help="Candidates shown per side/timeframe"
     )
-    parser.add_argument("--periods", default=",".join(map(str, DEFAULT_PERIODS)))
+    parser.add_argument("--periods", default=",".join(map(str, DEFAULT_SCAN_PERIODS)))
     parser.add_argument("--ma-types", default=",".join(MA_TYPES))
     parser.add_argument("--null-iterations", type=int, default=None)
     parser.add_argument("--fdr-q", type=float, default=None)
@@ -185,15 +174,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-evaluated-distance-atr",
         type=float,
         default=None,
-        help=(
-            "Skip expensive evidence tests for active MA levels farther than this "
-            "ATR distance; a current-location row is still emitted"
-        ),
+        help="Deprecated no-op; distance is now only an actionable/output concept",
     )
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="Diagnostic run: fewer null draws, no secondary controls",
+        help="Deprecated no-op kept for old workflows; scans use configured evidence settings",
     )
     parser.add_argument(
         "--probe", action="store_true", help="Only test provider/interval availability"
@@ -241,14 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"Unsupported timeframes: {invalid_timeframes}")
     periods = [int(x) for x in _csv_list(args.periods)]
     if args.fast:
-        requested_periods = list(periods)
-        periods = _cap_fast_periods(periods, len(instruments), len(timeframes))
-        if periods != requested_periods:
-            LOG.warning(
-                "Fast broad scan period cap: %s -> %s. Use Manual/Single for exhaustive research grids.",
-                requested_periods,
-                periods,
-            )
+        LOG.warning("--fast is deprecated and no longer changes iterations, controls, or periods")
     ma_types = [x.upper() for x in _csv_list(args.ma_types)]
     invalid_mas = sorted(set(ma_types) - set(MA_TYPES))
     if invalid_mas:
@@ -266,14 +245,9 @@ def main(argv: list[str] | None = None) -> int:
         side_factor,
         estimated_hypotheses,
     )
-    if args.fast:
-        LOG.info(
-            "Hizli tarama modu: null_iterations en fazla 29, shift/horizontal kontroller kapali"
-        )
     if args.max_evaluated_distance_atr is not None:
-        LOG.info(
-            "Uzaklik freni: |distance_atr| > %.2f olan aktif seviyeler konum satiri olarak birakilir",
-            args.max_evaluated_distance_atr,
+        LOG.warning(
+            "--max-evaluated-distance-atr is deprecated and no longer skips evidence tests"
         )
 
     provider = MarketDataProvider(
@@ -319,17 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         provider_ticker = instrument.provider_symbol
         for timeframe in timeframes:
             cfg = TIMEFRAME_CONFIGS[timeframe]
-            if args.fast:
-                fast_null_iterations = (
-                    29 if args.null_iterations is None else min(args.null_iterations, 29)
-                )
-                cfg = replace(
-                    cfg,
-                    null_iterations=fast_null_iterations,
-                    use_shift_control=False,
-                    use_horizontal_control=False,
-                )
-            elif args.null_iterations is not None:
+            if args.null_iterations is not None:
                 cfg = replace(cfg, null_iterations=args.null_iterations)
             if args.fdr_q is not None:
                 cfg = replace(cfg, fdr_q=args.fdr_q)
@@ -357,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
                     ma_types=ma_types,
                     periods=periods,
                     active_only=args.active_only,
-                    max_evaluated_distance_atr=args.max_evaluated_distance_atr,
+                    max_evaluated_distance_atr=None,
                 )
                 if result.empty:
                     raise RuntimeError("no MA candidate had enough calculable history")

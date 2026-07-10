@@ -73,7 +73,7 @@ on:
       periods:
         description: 'MA periyotları'
         required: true
-        default: '20,50,100,200'
+        default: '5,8,13,21,22,34,50,55,89,100,144,200,233,377'
       source:
         description: 'Veri kaynağı'
         required: true
@@ -85,9 +85,9 @@ on:
         required: true
         default: '5'
       null_iterations:
-        description: 'Multi-TF hizli taramada 29 ustu otomatik kirpilir'
+        description: 'Kanit null iterasyonu'
         required: true
-        default: '29'
+        default: '499'
 
 permissions:
   contents: read
@@ -139,9 +139,7 @@ jobs:
             --source "$INPUT_SOURCE" \
             --top "$INPUT_TOP" \
             --null-iterations "$INPUT_NULL_ITERATIONS" \
-            --fast \
             --active-only \
-            --max-evaluated-distance-atr 4.0 \
             --output-dir reports/multi_tf
       - name: Telegram tekilleştirilmiş özet
         if: success()

@@ -31,7 +31,7 @@ These words are intentionally different:
 - **Discovery pass:** historical reactions beat the matched null after FDR.
 - **Certified:** discovery pass also remains positive in validation and untouched
   holdout segments, including the configured holdout Wilson lower-bound gate.
-- **Low confidence:** a raw pass produced by a fast/underpowered profile, or by a
+- **Low confidence:** a raw pass produced by an explicitly underpowered profile, or by a
   holdout segment with only 3-4 events. These rows are downgraded from strict
   certification and labelled `LOW_CONFIDENCE`, `low_confidence_fast`, or
   `certified_thin_holdout`.
@@ -92,9 +92,9 @@ MA tests are positively dependent. `fdr_method="by"` is available for a more
 conservative arbitrary-dependence audit, but it requires substantially more null
 draws. No individual raw p-value is presented as proof after scanning many MAs.
 
-Fast operational scans are intentionally underpowered candidate screens. When
-`null_iterations` is below 99, or when shift/horizontal controls are disabled, a
-raw pass is downgraded to `LOW_CONFIDENCE` instead of `CERTIFIED` because the
+Operational scans use the same evidence profile by default. When a caller
+explicitly sets `null_iterations` below 99, or disables shift/horizontal controls,
+a raw pass is downgraded to `LOW_CONFIDENCE` instead of `CERTIFIED` because the
 minimum attainable empirical p-value and missing secondary controls are not enough
 for strict certification.
 
@@ -116,7 +116,7 @@ required segment is labelled insufficient rather than rescued with a looser fall
 ## Ranking score constants
 
 `rank_score` is a presentation ranking, not a trading expectancy. Strict
-certification receives the largest bonus, thin-holdout and fast low-confidence
+certification receives the largest bonus, thin-holdout and low-confidence
 passes receive smaller bonuses, discovery pass receives a context bonus, and the
 remaining quality term rewards positive discovery/validation/holdout scores while
 penalizing distance from current price. The constants are deliberately ordinal:

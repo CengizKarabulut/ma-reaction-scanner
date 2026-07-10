@@ -45,7 +45,7 @@ _STATUS_LABELS = {
     "unverified_candidate": "Kanıt kapıları geçilmedi",
     "validation_failed": "Validation geçmedi",
     "holdout_failed": "Holdout geçmedi",
-    "low_confidence_fast": "Dusuk guven: hizli tarama",
+    "low_confidence_fast": "Dusuk guven: zayif kanit profili",
     "certified_thin_holdout": "Dusuk guven: az holdout",
     "certified_but_far": "Sertifikalı ama uzak",
     "certified": "Sertifikalı",

@@ -978,12 +978,8 @@ def analyze_ma_universe(
             )
             sides = (current_direction,) if active_only else (1, -1)
             for side in sides:
-                too_far_for_screen = (
-                    max_evaluated_distance_atr is not None
-                    and side == current_direction
-                    and np.isfinite(distance_atr)
-                    and abs(distance_atr) > max_evaluated_distance_atr
-                )
+                # Deprecated: distance is an actionable/output concept, not an evidence shortcut.
+                too_far_for_screen = False
                 if too_far_for_screen:
                     row = _location_only_candidate(ma_type, int(period), side)
                 else:

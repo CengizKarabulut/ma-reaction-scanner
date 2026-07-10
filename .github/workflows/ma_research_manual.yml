@@ -71,7 +71,7 @@ on:
       periods:
         description: 'MA periods (operational default)'
         required: true
-        default: '20,50,100,200'
+        default: '5,8,13,21,22,34,50,55,89,100,144,200,233,377'
       source:
         description: 'Market-data source'
         required: true
