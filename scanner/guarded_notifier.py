@@ -21,10 +21,13 @@ _REQUIRED_COLUMNS = {
     "current_price",
     "tested_level_count",
     "certified_level_count",
+    "low_confidence_level_count",
     "actionable_level_count",
     "certification_rate_pct",
+    "max_sr_strength_score",
     "avg_holdout_hit_rate_pct",
     "avg_holdout_return_atr",
+    "avg_holdout_net_return_atr",
     "nearest_timeframe",
     "nearest_side",
     "nearest_ma",
@@ -34,6 +37,7 @@ _REQUIRED_COLUMNS = {
     "nearest_abs_distance_atr",
     "nearest_status",
     "nearest_discovery_events",
+    "nearest_sr_strength_score",
 }
 
 _STATUS_LABELS = {
@@ -61,15 +65,16 @@ def select_top_instruments(summary: pd.DataFrame, top_n: int = 20) -> pd.DataFra
     descending = [
         "certified_level_count",
         "actionable_level_count",
+        "max_sr_strength_score",
         "certification_rate_pct",
         "avg_holdout_hit_rate_pct",
-        "avg_holdout_return_atr",
+        "avg_holdout_net_return_atr",
     ]
     for column in [*descending, "nearest_abs_distance_atr"]:
         ranked[column] = pd.to_numeric(ranked[column], errors="coerce")
     ranked = ranked.sort_values(
         descending + ["nearest_abs_distance_atr", "symbol"],
-        ascending=[False, False, False, False, False, True, True],
+        ascending=[False, False, False, False, False, False, True, True],
         na_position="last",
     )
     ranked = ranked.drop_duplicates(["asset_label", "symbol"], keep="first")
@@ -114,6 +119,7 @@ def _candidate_rows(top: pd.DataFrame) -> list[list[str]]:
                 _price(row["nearest_level"]),
                 _number(row["nearest_abs_distance_atr"], 2),
                 _number(abs(float(row["nearest_distance_pct"])), 2, "%"),
+                _number(row["nearest_sr_strength_score"], 1),
                 str(int(row["nearest_discovery_events"])),
                 _STATUS_LABELS.get(
                     str(row["nearest_status"]), str(row["nearest_status"])
@@ -142,6 +148,7 @@ def build_guarded_table(
             "Seviye",
             "Uzak ATR",
             "Uzak %",
+            "SR Guc",
             "Olay",
             "Durum",
         ]
@@ -152,29 +159,34 @@ def build_guarded_table(
     for _, row in top.iterrows():
         tested = int(row["tested_level_count"])
         certified = int(row["certified_level_count"])
+        low_confidence = int(row["low_confidence_level_count"])
         actionable = int(row["actionable_level_count"])
         rows.append(
             [
                 str(row["symbol"]),
                 str(row["asset_label"]),
                 _price(row["current_price"]),
-                f"{certified}/{tested}",
+                f"{certified}+{low_confidence}/{tested}",
+                _number(row["max_sr_strength_score"], 1),
                 _number(row["certification_rate_pct"], 1, "%"),
                 str(actionable),
                 _number(row["avg_holdout_hit_rate_pct"], 1, "%"),
                 _number(row["avg_holdout_return_atr"], 2),
+                _number(row["avg_holdout_net_return_atr"], 2),
             ]
         )
         colors[0].append("#7fc97f")
     headers = [
-        "Varlık",
-        "Tür",
+        "Varlik",
+        "Tur",
         "Fiyat",
-        "Sert./Test",
+        "Sert.+DG/Test",
+        "SR Guc",
         "Oran",
-        "Hazır",
+        "Hazir",
         "Holdout WR",
         "Holdout ATR",
+        "Net ATR",
     ]
     title = f"Sertifikalı Top {len(rows)} — Her Varlık Tek Satır"
     return headers, rows, colors, title
@@ -192,6 +204,7 @@ def send_guarded_summary(
     tested_levels = int(summary["tested_level_count"].sum())
     discovery_levels = int(summary.get("discovery_pass_count", pd.Series(dtype=float)).sum())
     certified_levels = int(summary["certified_level_count"].sum())
+    low_confidence_levels = int(summary.get("low_confidence_level_count", pd.Series(dtype=float)).sum())
     certified_instruments = int((summary["certified_level_count"] > 0).sum())
     actionable_count = int((summary["actionable_level_count"] > 0).sum())
     explanation = (
@@ -205,8 +218,9 @@ def send_guarded_summary(
         f"Benzersiz varlık: *{unique_count}*\n"
         f"Test edilen aktif seviye: *{tested_levels}*\n"
         f"Discovery geçen seviye: *{discovery_levels}*\n"
-        f"Sertifikalı seviye/varlık: *{certified_levels}/{certified_instruments}*\n"
-        f"Yakın/aksiyon alınabilir varlık: *{actionable_count}*\n\n"
+        f"Sertifikali seviye/varlik: *{certified_levels}/{certified_instruments}*\n"
+        f"Dusuk-guven seviye: *{low_confidence_levels}*\n"
+        f"Yakin/aksiyon alinabilir varlik: *{actionable_count}*\n\n"
         f"_{explanation}_"
     )
     ok = send_telegram(token, chat_id, header, parse_mode="Markdown")

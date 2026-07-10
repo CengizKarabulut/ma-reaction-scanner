@@ -64,6 +64,9 @@ Every event is measured in ATR units known at the touch:
 
 MFE is never used as if a trader exited at the future peak. If target and stop
 are both touched in one OHLC bar, the event is conservatively treated as a stop.
+Certified and low-confidence rows also report holdout median fixed-horizon ATR
+with a deterministic bootstrap confidence interval, plus a net median ATR after
+subtracting the configured round-trip cost converted into ATR units.
 
 ## Controls
 
@@ -120,6 +123,16 @@ penalizing distance from current price. The constants are deliberately ordinal:
 they keep strict certified rows ahead of downgraded evidence and keep mere
 candidates behind both. Changing them should be treated as UI ranking sensitivity,
 not a change to the statistical gates.
+
+## Strong S/R score
+
+`sr_strength_score` is a presentation score for active levels. It deliberately
+requires three ingredients to be high at the same time: independent touch count,
+reaction reliability (`discovery_wilson_lower` and hit rate), and positive median
+ATR reaction size. A level that is touched often but does not reject price cleanly
+will not rank as strong. Strict certified rows keep the full multiplier,
+low-confidence rows are visible with a smaller multiplier, discovery-only rows are
+below them, and location-only candidates remain weakest.
 
 ## Cross-timeframe confluence
 

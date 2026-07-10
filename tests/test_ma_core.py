@@ -184,6 +184,8 @@ class StatisticalGateTests(unittest.TestCase):
         self.assertLessEqual(result["p_random"], 0.10)
         self.assertTrue(result["validation_pass"])
         self.assertTrue(result["holdout_pass"])
+        self.assertTrue(np.isfinite(result["holdout_median_fixed_atr_ci_low"]))
+        self.assertTrue(np.isfinite(result["holdout_median_fixed_atr_ci_high"]))
 
     def test_holdout_rejects_a_decay_pattern(self):
         frame = repeated_support_bounces(cycles=60, fail_after=46)
@@ -242,13 +244,17 @@ class PresentationTests(unittest.TestCase):
             "side": "support",
             "discovery_events": 12,
             "discovery_score": 1.0,
+            "discovery_hit_rate": 0.75,
             "discovery_wilson_lower": 0.60,
+            "discovery_median_fixed_atr": 0.50,
             "validation_score": 1.0,
             "validation_median_fixed_atr": 0.40,
             "validation_pass": True,
             "holdout_events": holdout_events,
             "holdout_score": 1.0,
             "holdout_median_fixed_atr": 0.35,
+            "holdout_median_fixed_atr_ci_low": 0.20,
+            "holdout_median_fixed_atr_ci_high": 0.50,
             "holdout_wilson_lower": 0.60,
             "holdout_wilson_pass": True,
             "holdout_pass": True,
@@ -283,6 +289,8 @@ class PresentationTests(unittest.TestCase):
         self.assertTrue(bool(row["low_confidence"]))
         self.assertFalse(bool(row["certified"]))
         self.assertEqual(row["status"], "low_confidence_fast")
+        self.assertGreater(float(row["sr_strength_score"]), 0.0)
+        self.assertIn("holdout_net_median_fixed_atr", result.columns)
 
     def test_thin_holdout_downgrades_raw_certification(self):
         frame = analysis_frame(np.linspace(100.0, 130.0, 180))

@@ -55,6 +55,7 @@ class AnalysisConfig:
     fdr_method: str = "bh"
     min_wilson: float = 0.35
     max_actionable_distance_atr: float = 4.0
+    roundtrip_cost_bps: float = 25.0
     volatility_bin_edges: tuple[float, float, float] = (0.015, 0.030, 0.050)
     random_seed: int = 1729
     use_shift_control: bool = True
@@ -73,6 +74,8 @@ class AnalysisConfig:
             raise ValueError("a non-trivial holdout segment is required")
         if self.fdr_method not in {"bh", "by"}:
             raise ValueError("fdr_method must be 'bh' or 'by'")
+        if self.roundtrip_cost_bps < 0:
+            raise ValueError("roundtrip_cost_bps cannot be negative")
         if tuple(self.volatility_bin_edges) != tuple(sorted(self.volatility_bin_edges)):
             raise ValueError("volatility_bin_edges must be sorted")
         if any(edge <= 0 for edge in self.volatility_bin_edges):
@@ -516,6 +519,27 @@ def summarize_measurements(measurements: Sequence[EventMeasurement]) -> dict[str
     }
 
 
+def _bootstrap_median_fixed_ci(
+    measurements: Sequence[EventMeasurement],
+    *,
+    seed: int,
+    iterations: int = 399,
+) -> tuple[float, float]:
+    """Return a deterministic bootstrap CI for fixed-horizon ATR median."""
+
+    values = np.asarray([m.fixed_return_atr for m in measurements], dtype=float)
+    values = values[np.isfinite(values)]
+    if len(values) == 0:
+        return np.nan, np.nan
+    if len(values) == 1:
+        value = float(values[0])
+        return value, value
+    rng = np.random.default_rng(seed)
+    samples = rng.choice(values, size=(iterations, len(values)), replace=True)
+    medians = np.median(samples, axis=1)
+    return float(np.quantile(medians, 0.025)), float(np.quantile(medians, 0.975))
+
+
 def _segment_bounds(length: int, config: AnalysisConfig) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
     discovery_end = int(length * config.discovery_fraction)
     validation_end = int(length * (config.discovery_fraction + config.validation_fraction))
@@ -660,9 +684,15 @@ def evaluate_candidate(
 ) -> dict[str, object]:
     events = detect_independent_touches(df, ma_series, config)
     discovery, validation, holdout = _segment_bounds(len(df), config)
-    d_metrics = summarize_measurements(_measure_events(df, events, config, *discovery, side))
-    v_metrics = summarize_measurements(_measure_events(df, events, config, *validation, side))
-    h_metrics = summarize_measurements(_measure_events(df, events, config, *holdout, side))
+    d_measurements = _measure_events(df, events, config, *discovery, side)
+    v_measurements = _measure_events(df, events, config, *validation, side)
+    h_measurements = _measure_events(df, events, config, *holdout, side)
+    d_metrics = summarize_measurements(d_measurements)
+    v_metrics = summarize_measurements(v_measurements)
+    h_metrics = summarize_measurements(h_measurements)
+    holdout_ci_low, holdout_ci_high = _bootstrap_median_fixed_ci(
+        h_measurements, seed=seed + 17
+    )
     result: dict[str, object] = {
         "ma_type": ma_type,
         "period": int(period),
@@ -728,6 +758,8 @@ def evaluate_candidate(
             and v_metrics["score"] > 0
             and v_metrics["median_fixed_atr"] > 0
         ),
+        "holdout_median_fixed_atr_ci_low": holdout_ci_low,
+        "holdout_median_fixed_atr_ci_high": holdout_ci_high,
         "holdout_wilson_pass": bool(h_metrics["wilson_lower"] >= config.min_wilson),
         "holdout_pass": bool(
             h_metrics["events"] >= config.min_segment_events
@@ -772,6 +804,8 @@ def _location_only_candidate(ma_type: str, period: int, side: int) -> dict[str, 
         "horizontal_score_threshold": np.nan,
         "random_score_threshold": np.nan,
         "validation_pass": False,
+        "holdout_median_fixed_atr_ci_low": np.nan,
+        "holdout_median_fixed_atr_ci_high": np.nan,
         "holdout_wilson_pass": False,
         "holdout_pass": False,
         "holdout_thin": False,
@@ -863,6 +897,7 @@ def analyze_ma_universe(
                     "ticker": ticker.upper(),
                     "timeframe": timeframe,
                     "current_price": current_price,
+                    "current_atr": current_atr,
                     "current_ma": current_ma,
                     "distance_pct": 100.0 * (current_ma - current_price) / current_price,
                     "distance_atr": distance_atr,
@@ -911,6 +946,14 @@ def analyze_ma_universe(
     result["actionable"] = result["certified"] & (
         result["distance_atr"].abs() <= cfg.max_actionable_distance_atr
     )
+    result["roundtrip_cost_bps"] = float(cfg.roundtrip_cost_bps)
+    cost_atr = (
+        (float(cfg.roundtrip_cost_bps) / 10_000.0) * result["current_price"] / result["current_atr"]
+    )
+    result["estimated_roundtrip_cost_atr"] = cost_atr.replace([np.inf, -np.inf], np.nan)
+    result["holdout_net_median_fixed_atr"] = (
+        result["holdout_median_fixed_atr"] - result["estimated_roundtrip_cost_atr"]
+    )
     result["status"] = "unverified_candidate"
     result.loc[~result["active_side"], "status"] = "inactive_side_history"
     result.loc[result["discovery_events"] < cfg.min_events, "status"] = "insufficient_history"
@@ -923,6 +966,30 @@ def analyze_ma_universe(
     result.loc[result["certified"], "status"] = "certified"
     result.loc[result["certified"] & ~result["actionable"], "status"] = "certified_but_far"
     result.loc[result["screen_skipped"].fillna(False), "status"] = "distance_skipped"
+    touch_component = np.clip(
+        np.log1p(pd.to_numeric(result["discovery_events"], errors="coerce").fillna(0).clip(lower=0))
+        / np.log1p(max(cfg.min_events * 4, 30)),
+        0.0,
+        1.0,
+    )
+    reliability_component = np.clip(
+        0.65 * pd.to_numeric(result["discovery_wilson_lower"], errors="coerce").fillna(0)
+        + 0.35 * pd.to_numeric(result["discovery_hit_rate"], errors="coerce").fillna(0),
+        0.0,
+        1.0,
+    )
+    median_effect = pd.to_numeric(result["discovery_median_fixed_atr"], errors="coerce")
+    effect_component = np.clip(median_effect.fillna(0).clip(lower=0) / max(cfg.target_atr, 0.1), 0.0, 1.0)
+    evidence_multiplier = pd.Series(0.35, index=result.index, dtype=float)
+    evidence_multiplier.loc[result["discovery_pass"].fillna(False).astype(bool)] = 0.65
+    evidence_multiplier.loc[result["low_confidence"].fillna(False).astype(bool)] = 0.85
+    evidence_multiplier.loc[result["certified"].fillna(False).astype(bool)] = 1.00
+    result["sr_touch_score"] = 100.0 * touch_component
+    result["sr_reliability_score"] = 100.0 * reliability_component
+    result["sr_effect_score"] = 100.0 * effect_component
+    result["sr_strength_score"] = (
+        100.0 * touch_component * reliability_component * effect_component * evidence_multiplier
+    )
     quality = (
         result["discovery_score"].fillna(-10)
         + result["validation_score"].fillna(-10)
