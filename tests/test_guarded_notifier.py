@@ -5,7 +5,7 @@ import pandas as pd
 from scanner.guarded_notifier import build_guarded_table, select_top_instruments
 
 
-def _nearest(distance=0.4, side="support", ma="EMA", period=50):
+def _nearest(distance=0.4, side="support", ma="EMA", period=50, strength=50.0):
     return {
         "nearest_timeframe": "1d",
         "nearest_side": side,
@@ -16,6 +16,7 @@ def _nearest(distance=0.4, side="support", ma="EMA", period=50):
         "nearest_abs_distance_atr": distance,
         "nearest_status": "unverified_candidate",
         "nearest_discovery_events": 12,
+        "nearest_sr_strength_score": strength,
     }
 
 
@@ -29,10 +30,13 @@ class GuardedNotifierTests(unittest.TestCase):
                     "current_price": 120.0,
                     "tested_level_count": 28,
                     "certified_level_count": 4,
+                    "low_confidence_level_count": 0,
                     "actionable_level_count": 2,
                     "certification_rate_pct": 14.285,
+                    "max_sr_strength_score": 77.0,
                     "avg_holdout_hit_rate_pct": 72.5,
                     "avg_holdout_return_atr": 0.81,
+                    "avg_holdout_net_return_atr": 0.55,
                     **_nearest(),
                 },
                 {
@@ -41,10 +45,13 @@ class GuardedNotifierTests(unittest.TestCase):
                     "current_price": 120.0,
                     "tested_level_count": 28,
                     "certified_level_count": 1,
+                    "low_confidence_level_count": 2,
                     "actionable_level_count": 0,
                     "certification_rate_pct": 3.57,
+                    "max_sr_strength_score": 70.0,
                     "avg_holdout_hit_rate_pct": 55.0,
                     "avg_holdout_return_atr": 0.2,
+                    "avg_holdout_net_return_atr": -0.1,
                     **_nearest(0.2),
                 },
                 {
@@ -53,10 +60,13 @@ class GuardedNotifierTests(unittest.TestCase):
                     "current_price": 42.65,
                     "tested_level_count": 28,
                     "certified_level_count": 2,
+                    "low_confidence_level_count": 1,
                     "actionable_level_count": 1,
                     "certification_rate_pct": 7.14,
+                    "max_sr_strength_score": 66.0,
                     "avg_holdout_hit_rate_pct": 68.0,
                     "avg_holdout_return_atr": 0.55,
+                    "avg_holdout_net_return_atr": 0.31,
                     **_nearest(0.3),
                 },
             ]
@@ -70,8 +80,11 @@ class GuardedNotifierTests(unittest.TestCase):
         headers, rows, _, title = build_guarded_table(self._summary(), top_n=20)
         self.assertIn("Oran", headers)
         self.assertIn("Holdout WR", headers)
-        self.assertEqual(rows[0][3], "4/28")
-        self.assertEqual(rows[0][4], "14.3%")
+        self.assertIn("SR Guc", headers)
+        self.assertIn("Net ATR", headers)
+        self.assertEqual(rows[0][3], "4+0/28")
+        self.assertEqual(rows[0][4], "77.0")
+        self.assertEqual(rows[0][5], "14.3%")
         self.assertIn("Tek Satır", title)
 
     def test_uncertified_fallback_is_ranked_by_candidate_proximity(self):
@@ -84,11 +97,14 @@ class GuardedNotifierTests(unittest.TestCase):
                     "current_price": 100.0,
                     "tested_level_count": 28,
                     "certified_level_count": 0,
+                    "low_confidence_level_count": 0,
                     "actionable_level_count": 0,
                     "certification_rate_pct": 0.0,
+                    "max_sr_strength_score": 1.0,
                     "avg_holdout_hit_rate_pct": float("nan"),
                     "avg_holdout_return_atr": float("nan"),
-                    **_nearest(distance, side="resistance", ma="HMA", period=20),
+                    "avg_holdout_net_return_atr": float("nan"),
+                    **_nearest(distance, side="resistance", ma="HMA", period=20, strength=1.0),
                 }
             )
         summary = pd.DataFrame(rows)

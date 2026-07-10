@@ -34,20 +34,22 @@ def _true_mask(frame: pd.DataFrame, column: str) -> pd.Series:
 
 
 def _best_level(group: pd.DataFrame, side: str) -> pd.Series | None:
-    rows = group[(group["active_side"]) & (group["side"] == side)].copy()
+    rows = group[_true_mask(group, "active_side") & (group["side"] == side)].copy()
     if rows.empty:
         return None
-    certified = rows[rows["certified"]].copy()
+    rows["absolute_distance_atr"] = rows["distance_atr"].abs()
+    if "sr_strength_score" not in rows:
+        rows["sr_strength_score"] = np.nan
+    certified = rows[_true_mask(rows, "certified")].copy()
     if not certified.empty:
         return certified.sort_values(
-            ["actionable", "rank_score", "q_value"],
-            ascending=[False, False, True],
+            ["actionable", "sr_strength_score", "rank_score", "q_value"],
+            ascending=[False, False, False, True],
             na_position="last",
         ).iloc[0]
-    rows["absolute_distance_atr"] = rows["distance_atr"].abs()
     return rows.sort_values(
-        ["absolute_distance_atr", "rank_score"],
-        ascending=[True, False],
+        ["sr_strength_score", "absolute_distance_atr", "rank_score"],
+        ascending=[False, True, False],
         na_position="last",
     ).iloc[0]
 
@@ -76,6 +78,10 @@ def _level_fields(prefix: str, row: pd.Series | None) -> dict[str, object]:
             f"{prefix}_validation_pass": False,
             f"{prefix}_holdout_pass": False,
             f"{prefix}_low_confidence": False,
+            f"{prefix}_sr_strength_score": np.nan,
+            f"{prefix}_holdout_median_fixed_atr_ci_low": np.nan,
+            f"{prefix}_holdout_median_fixed_atr_ci_high": np.nan,
+            f"{prefix}_holdout_net_median_fixed_atr": np.nan,
             f"{prefix}_evidence": "NONE",
         }
     q_value = row.get("q_value", np.nan)
@@ -97,7 +103,52 @@ def _level_fields(prefix: str, row: pd.Series | None) -> dict[str, object]:
         f"{prefix}_validation_pass": bool(row.get("validation_pass", False)),
         f"{prefix}_holdout_pass": bool(row.get("holdout_pass", False)),
         f"{prefix}_low_confidence": low_confidence,
+        f"{prefix}_sr_strength_score": float(row.get("sr_strength_score", np.nan)),
+        f"{prefix}_holdout_median_fixed_atr_ci_low": float(
+            row.get("holdout_median_fixed_atr_ci_low", np.nan)
+        ),
+        f"{prefix}_holdout_median_fixed_atr_ci_high": float(
+            row.get("holdout_median_fixed_atr_ci_high", np.nan)
+        ),
+        f"{prefix}_holdout_net_median_fixed_atr": float(
+            row.get("holdout_net_median_fixed_atr", np.nan)
+        ),
         f"{prefix}_evidence": evidence,
+    }
+
+
+def _strongest_fields(active: pd.DataFrame) -> dict[str, object]:
+    empty = {
+        "strongest_timeframe": "",
+        "strongest_side": "",
+        "strongest_ma": "",
+        "strongest_period": np.nan,
+        "strongest_level": np.nan,
+        "strongest_sr_strength_score": np.nan,
+        "strongest_evidence": "NONE",
+    }
+    if active.empty or "sr_strength_score" not in active:
+        return empty
+    rows = active.copy()
+    rows["sr_strength_score"] = pd.to_numeric(
+        rows["sr_strength_score"], errors="coerce"
+    )
+    rows = rows[np.isfinite(rows["sr_strength_score"])]
+    if rows.empty:
+        return empty
+    row = rows.sort_values("sr_strength_score", ascending=False).iloc[0]
+    low_confidence = _is_true(row.get("low_confidence", False))
+    evidence = "CERTIFIED" if _is_true(row.get("certified", False)) else (
+        "LOW_CONFIDENCE" if low_confidence else "CANDIDATE_ONLY"
+    )
+    return {
+        "strongest_timeframe": str(row["timeframe"]),
+        "strongest_side": str(row["side"]),
+        "strongest_ma": str(row["ma_type"]),
+        "strongest_period": int(row["period"]),
+        "strongest_level": float(row["current_ma"]),
+        "strongest_sr_strength_score": float(row["sr_strength_score"]),
+        "strongest_evidence": evidence,
     }
 
 
@@ -121,6 +172,7 @@ def _nearest_fields(
             "nearest_abs_distance_atr": np.nan,
             "nearest_status": "none",
             "nearest_discovery_events": 0,
+            "nearest_sr_strength_score": np.nan,
             "nearest_discovery_pass": False,
             "nearest_validation_pass": False,
             "nearest_holdout_pass": False,
@@ -138,6 +190,7 @@ def _nearest_fields(
         "nearest_abs_distance_atr": abs(distance_atr),
         "nearest_status": str(row.get("status", "unverified_candidate")),
         "nearest_discovery_events": int(row.get("discovery_events", 0) or 0),
+        "nearest_sr_strength_score": float(row.get("sr_strength_score", np.nan)),
         "nearest_discovery_pass": bool(row.get("discovery_pass", False)),
         "nearest_validation_pass": bool(row.get("validation_pass", False)),
         "nearest_holdout_pass": bool(row.get("holdout_pass", False)),
@@ -161,6 +214,16 @@ def _mean_metric(group: pd.DataFrame, column: str, scale: float = 1.0) -> float:
     values = pd.to_numeric(group[column], errors="coerce")
     values = values[np.isfinite(values)]
     return float(values.mean() * scale) if not values.empty else np.nan
+
+
+def _max_metric(group: pd.DataFrame, column: str) -> float:
+    """Return a finite numeric maximum without inventing missing evidence."""
+
+    if column not in group or group.empty:
+        return np.nan
+    values = pd.to_numeric(group[column], errors="coerce")
+    values = values[np.isfinite(values)]
+    return float(values.max()) if not values.empty else np.nan
 
 
 def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
@@ -217,13 +280,18 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
             "avg_holdout_return_atr": _mean_metric(
                 certified, "holdout_median_fixed_atr"
             ),
+            "avg_holdout_net_return_atr": _mean_metric(
+                certified, "holdout_net_median_fixed_atr"
+            ),
             "avg_q_value": _mean_metric(certified, "q_value"),
+            "max_sr_strength_score": _max_metric(active, "sr_strength_score"),
             "overall_evidence": "CERTIFIED" if certified_count else (
                 "LOW_CONFIDENCE" if len(low_confidence) else "CANDIDATE_ONLY"
             ),
         }
         record.update(_level_fields("support", support))
         record.update(_level_fields("resistance", resistance))
+        record.update(_strongest_fields(active))
         record.update(_nearest_fields(support, resistance))
         records.append(record)
     return (
@@ -232,10 +300,11 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
             [
                 "asset_class",
                 "certified_level_count",
+                "max_sr_strength_score",
                 "nearest_abs_distance_atr",
                 "symbol",
             ],
-            ascending=[True, False, True, True],
+            ascending=[True, False, False, True, True],
             na_position="last",
         )
         .reset_index(drop=True)
@@ -266,9 +335,16 @@ def format_instrument_summary(summary: pd.DataFrame) -> str:
                 classification += f" | sektör={row['sector']}"
             if row.get("index_memberships"):
                 classification += f" | endeksler={row['index_memberships']}"
+            strongest = (
+                f"{row['strongest_side']} {row['strongest_timeframe']}:"
+                f"{row['strongest_ma']}{int(row['strongest_period'])} "
+                f"guc={row['strongest_sr_strength_score']:.1f} [{row['strongest_evidence']}]"
+                if row["strongest_evidence"] != "NONE"
+                else "yok"
+            )
             lines.append(
                 f"  {row['symbol']} ({row['display_name']}){classification} | fiyat={row['current_price']:.4f} "
-                f"| destek={support} | direnç={resistance}"
+                f"| guclu_sr={strongest} | destek={support} | direnc={resistance}"
             )
     lines.append("\nHer varlık bu özette yalnızca bir kez gösterilir.")
     return "\n".join(lines)

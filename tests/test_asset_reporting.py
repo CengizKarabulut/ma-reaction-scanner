@@ -138,6 +138,8 @@ class AssetReportingTests(unittest.TestCase):
                 "distance_atr": -0.2,
                 "low_confidence": True,
                 "certified_thin_holdout": True,
+                "sr_strength_score": 72.0,
+                "holdout_net_median_fixed_atr": 0.25,
             },
             {
                 **base,
@@ -147,6 +149,8 @@ class AssetReportingTests(unittest.TestCase):
                 "distance_atr": 0.3,
                 "low_confidence": float("nan"),
                 "certified_thin_holdout": float("nan"),
+                "sr_strength_score": 10.0,
+                "holdout_net_median_fixed_atr": float("nan"),
             },
         ]
 
@@ -158,6 +162,9 @@ class AssetReportingTests(unittest.TestCase):
         self.assertEqual(row["overall_evidence"], "LOW_CONFIDENCE")
         self.assertEqual(row["support_evidence"], "LOW_CONFIDENCE")
         self.assertEqual(row["resistance_evidence"], "CANDIDATE_ONLY")
+        self.assertEqual(row["strongest_ma"], "SMA")
+        self.assertAlmostEqual(row["max_sr_strength_score"], 72.0)
+        self.assertAlmostEqual(row["support_holdout_net_median_fixed_atr"], 0.25)
 
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {
