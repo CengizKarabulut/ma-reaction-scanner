@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from scanner.ma_core import (
+    _matched_random_scores,
     AnalysisConfig,
     adjust_fdr,
     analyze_ma_universe,
@@ -14,6 +15,7 @@ from scanner.ma_core import (
     evaluate_candidate,
     measure_event,
     normalize_ohlcv,
+    precompute_forward_outcomes,
     prepare_frame,
     select_panel_levels,
 )
@@ -153,6 +155,77 @@ class CoreMathTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.first_hit, -1)
         self.assertTrue(result.ambiguous_bar)
+
+    def test_forward_outcomes_match_measure_event_field_by_field(self):
+        frame = analysis_frame([105, 104, 103, 100, 102, 104, 106, 103, 99, 101] * 6)
+        cfg = AnalysisConfig(horizon=5, target_atr=1.0, stop_atr=1.0, null_iterations=19)
+        outcomes = precompute_forward_outcomes(frame, cfg)
+
+        for position in (3, 8, 12, 20, 35):
+            for direction in (1, -1):
+                direct = measure_event(frame, position, direction, cfg)
+                cached = outcomes.measurement(position, direction)
+                self.assertIsNotNone(direct)
+                self.assertIsNotNone(cached)
+                self.assertEqual(direct.position, cached.position)
+                self.assertEqual(direct.direction, cached.direction)
+                self.assertEqual(direct.first_hit, cached.first_hit)
+                self.assertAlmostEqual(direct.fixed_return_atr, cached.fixed_return_atr)
+                self.assertAlmostEqual(direct.favorable_atr, cached.favorable_atr)
+                self.assertAlmostEqual(direct.adverse_atr, cached.adverse_atr)
+                if np.isnan(direct.bars_to_target):
+                    self.assertTrue(np.isnan(cached.bars_to_target))
+                else:
+                    self.assertAlmostEqual(direct.bars_to_target, cached.bars_to_target)
+                self.assertEqual(direct.retested, cached.retested)
+                self.assertEqual(direct.ambiguous_bar, cached.ambiguous_bar)
+
+    def test_matched_random_scores_are_identical_with_forward_outcomes(self):
+        bounce = [105, 105, 104, 103, 101, 100, 102, 104, 105, 104, 105, 105]
+        values = []
+        for _ in range(30):
+            values.extend(bounce)
+        frame = analysis_frame(values)
+        ma = pd.Series(100.0, index=frame.index)
+        cfg = AnalysisConfig(
+            horizon=4,
+            target_atr=1.0,
+            stop_atr=1.0,
+            separation_atr=2.0,
+            min_events=3,
+            min_segment_events=1,
+            null_iterations=29,
+            use_shift_control=False,
+            use_horizontal_control=False,
+            random_seed=99,
+        )
+        events = detect_independent_touches(frame, ma, cfg)
+        discovery_end = int(len(frame) * cfg.discovery_fraction)
+        outcomes = precompute_forward_outcomes(frame, cfg)
+
+        legacy = _matched_random_scores(
+            frame,
+            ma,
+            events,
+            1,
+            0,
+            discovery_end,
+            cfg,
+            np.random.default_rng(123),
+        )
+        cached = _matched_random_scores(
+            frame,
+            ma,
+            events,
+            1,
+            0,
+            discovery_end,
+            cfg,
+            np.random.default_rng(123),
+            outcomes,
+        )
+
+        self.assertEqual(legacy, cached)
 
 
 class StatisticalGateTests(unittest.TestCase):

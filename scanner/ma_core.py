@@ -121,6 +121,44 @@ class EventMeasurement:
     ambiguous_bar: bool
 
 
+def _direction_row(direction: int) -> int:
+    if direction == 1:
+        return 0
+    if direction == -1:
+        return 1
+    raise ValueError("direction must be +1 or -1")
+
+
+@dataclass(frozen=True)
+class ForwardOutcomes:
+    """Position/direction outcome cache for fixed-horizon event measurement."""
+
+    first_hit: np.ndarray
+    fixed_return_atr: np.ndarray
+    favorable_atr: np.ndarray
+    adverse_atr: np.ndarray
+    bars_to_target: np.ndarray
+    retested: np.ndarray
+    ambiguous_bar: np.ndarray
+    valid: np.ndarray
+
+    def measurement(self, position: int, direction: int) -> EventMeasurement | None:
+        row = _direction_row(direction)
+        if position < 0 or position >= self.valid.shape[1] or not self.valid[row, position]:
+            return None
+        return EventMeasurement(
+            position=int(position),
+            direction=int(direction),
+            first_hit=int(self.first_hit[row, position]),
+            fixed_return_atr=float(self.fixed_return_atr[row, position]),
+            favorable_atr=float(self.favorable_atr[row, position]),
+            adverse_atr=float(self.adverse_atr[row, position]),
+            bars_to_target=float(self.bars_to_target[row, position]),
+            retested=bool(self.retested[row, position]),
+            ambiguous_bar=bool(self.ambiguous_bar[row, position]),
+        )
+
+
 def normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     """Return sorted numeric OHLCV data with canonical column names."""
 
@@ -450,6 +488,46 @@ def measure_event(
     )
 
 
+def precompute_forward_outcomes(df: pd.DataFrame, config: AnalysisConfig) -> ForwardOutcomes:
+    """Precompute measure_event outputs for every valid position and direction."""
+
+    shape = (2, len(df))
+    first_hit = np.zeros(shape, dtype=np.int8)
+    fixed_return_atr = np.full(shape, np.nan, dtype=float)
+    favorable_atr = np.full(shape, np.nan, dtype=float)
+    adverse_atr = np.full(shape, np.nan, dtype=float)
+    bars_to_target = np.full(shape, np.nan, dtype=float)
+    retested = np.zeros(shape, dtype=bool)
+    ambiguous_bar = np.zeros(shape, dtype=bool)
+    valid = np.zeros(shape, dtype=bool)
+
+    for direction in (1, -1):
+        row = _direction_row(direction)
+        for position in range(0, max(0, len(df) - config.horizon)):
+            measurement = measure_event(df, position, direction, config)
+            if measurement is None:
+                continue
+            first_hit[row, position] = measurement.first_hit
+            fixed_return_atr[row, position] = measurement.fixed_return_atr
+            favorable_atr[row, position] = measurement.favorable_atr
+            adverse_atr[row, position] = measurement.adverse_atr
+            bars_to_target[row, position] = measurement.bars_to_target
+            retested[row, position] = measurement.retested
+            ambiguous_bar[row, position] = measurement.ambiguous_bar
+            valid[row, position] = True
+
+    return ForwardOutcomes(
+        first_hit=first_hit,
+        fixed_return_atr=fixed_return_atr,
+        favorable_atr=favorable_atr,
+        adverse_atr=adverse_atr,
+        bars_to_target=bars_to_target,
+        retested=retested,
+        ambiguous_bar=ambiguous_bar,
+        valid=valid,
+    )
+
+
 def _measure_events(
     df: pd.DataFrame,
     events: Iterable[TouchEvent],
@@ -457,6 +535,7 @@ def _measure_events(
     start: int,
     end: int,
     side: int,
+    forward_outcomes: ForwardOutcomes | None = None,
 ) -> list[EventMeasurement]:
     measured = []
     for event in events:
@@ -464,7 +543,10 @@ def _measure_events(
             continue
         if event.position < start or event.position + config.horizon >= end:
             continue
-        outcome = measure_event(df, event.position, event.direction, config)
+        if forward_outcomes is None:
+            outcome = measure_event(df, event.position, event.direction, config)
+        else:
+            outcome = forward_outcomes.measurement(event.position, event.direction)
         if outcome is not None:
             measured.append(outcome)
     return measured
@@ -566,6 +648,7 @@ def _matched_random_scores(
     end: int,
     config: AnalysisConfig,
     rng: np.random.Generator,
+    forward_outcomes: ForwardOutcomes | None = None,
 ) -> list[float]:
     events = [e for e in actual_events if e.direction == side and start <= e.position < end - config.horizon]
     if not events:
@@ -609,7 +692,12 @@ def _matched_random_scores(
             if not pool:
                 pool = all_pool
             sample_positions.append(int(rng.choice(pool)))
-        outcomes = [measure_event(df, pos, side, config) for pos in sample_positions]
+        if forward_outcomes is None:
+            outcomes = [measure_event(df, pos, side, config) for pos in sample_positions]
+        else:
+            outcomes = [
+                forward_outcomes.measurement(pos, side) for pos in sample_positions
+            ]
         metrics = summarize_measurements([x for x in outcomes if x is not None])
         if np.isfinite(metrics["score"]):
             scores.append(float(metrics["score"]))
@@ -624,6 +712,7 @@ def _shift_control_scores(
     end: int,
     period: int,
     config: AnalysisConfig,
+    forward_outcomes: ForwardOutcomes | None = None,
 ) -> list[float]:
     length = end - start
     if length < max(80, period * 2):
@@ -635,7 +724,9 @@ def _shift_control_scores(
     for lag in lags:
         shifted = ma_series.shift(lag)
         events = detect_independent_touches(df, shifted, config)
-        metrics = summarize_measurements(_measure_events(df, events, config, start, end, side))
+        metrics = summarize_measurements(
+            _measure_events(df, events, config, start, end, side, forward_outcomes)
+        )
         if np.isfinite(metrics["score"]):
             scores.append(float(metrics["score"]))
     return scores
@@ -661,13 +752,16 @@ def _horizontal_control_scores(
     end: int,
     period: int,
     config: AnalysisConfig,
+    forward_outcomes: ForwardOutcomes | None = None,
 ) -> list[float]:
     block = max(config.horizon * 3, min(max(period, 20), max(20, (end - start) // 4)))
     scores = []
     for offset in sorted(set((0, block // 3, (2 * block) // 3))):
         level = _piecewise_horizontal_level(df["Close"], block, offset)
         events = detect_independent_touches(df, level, config)
-        metrics = summarize_measurements(_measure_events(df, events, config, start, end, side))
+        metrics = summarize_measurements(
+            _measure_events(df, events, config, start, end, side, forward_outcomes)
+        )
         if np.isfinite(metrics["score"]):
             scores.append(float(metrics["score"]))
     return scores
@@ -681,12 +775,19 @@ def evaluate_candidate(
     side: int,
     config: AnalysisConfig,
     seed: int,
+    forward_outcomes: ForwardOutcomes | None = None,
 ) -> dict[str, object]:
     events = detect_independent_touches(df, ma_series, config)
     discovery, validation, holdout = _segment_bounds(len(df), config)
-    d_measurements = _measure_events(df, events, config, *discovery, side)
-    v_measurements = _measure_events(df, events, config, *validation, side)
-    h_measurements = _measure_events(df, events, config, *holdout, side)
+    d_measurements = _measure_events(
+        df, events, config, *discovery, side, forward_outcomes
+    )
+    v_measurements = _measure_events(
+        df, events, config, *validation, side, forward_outcomes
+    )
+    h_measurements = _measure_events(
+        df, events, config, *holdout, side, forward_outcomes
+    )
     d_metrics = summarize_measurements(d_measurements)
     v_metrics = summarize_measurements(v_measurements)
     h_metrics = summarize_measurements(h_measurements)
@@ -709,7 +810,7 @@ def evaluate_candidate(
     if d_metrics["events"] >= config.min_events and np.isfinite(d_metrics["score"]):
         rng = np.random.default_rng(seed)
         random_scores = _matched_random_scores(
-            df, ma_series, events, side, *discovery, config, rng
+            df, ma_series, events, side, *discovery, config, rng, forward_outcomes
         )
         p_random = _empirical_pvalue(float(d_metrics["score"]), random_scores)
         if random_scores:
@@ -717,12 +818,12 @@ def evaluate_candidate(
         # Expensive controls are only useful for candidates that are not clearly noise.
         if config.use_shift_control and (not np.isfinite(p_random) or p_random <= 0.25):
             shift_scores = _shift_control_scores(
-                df, ma_series, side, *discovery, period, config
+                df, ma_series, side, *discovery, period, config, forward_outcomes
             )
             p_shift = _empirical_pvalue(float(d_metrics["score"]), shift_scores)
         if config.use_horizontal_control and (not np.isfinite(p_random) or p_random <= 0.25):
             horizontal_scores = _horizontal_control_scores(
-                df, side, *discovery, period, config
+                df, side, *discovery, period, config, forward_outcomes
             )
             p_horizontal = _empirical_pvalue(float(d_metrics["score"]), horizontal_scores)
 
@@ -854,6 +955,7 @@ def analyze_ma_universe(
 
     cfg = config or TIMEFRAME_CONFIGS.get(timeframe, AnalysisConfig())
     df = prepare_frame(frame, cfg)
+    forward_outcomes = precompute_forward_outcomes(df, cfg)
     rows: list[dict[str, object]] = []
     current_price = float(df["Close"].iloc[-1])
     current_atr = float(df["ATR"].iloc[-1])
@@ -891,7 +993,16 @@ def analyze_ma_universe(
                         + int(period) * 101
                         + (1 if side == 1 else 2)
                     )
-                    row = evaluate_candidate(df, ma_series, ma_type, int(period), side, cfg, seed)
+                    row = evaluate_candidate(
+                        df,
+                        ma_series,
+                        ma_type,
+                        int(period),
+                        side,
+                        cfg,
+                        seed,
+                        forward_outcomes,
+                    )
                     row["screen_skipped"] = False
                 row.update({
                     "ticker": ticker.upper(),
