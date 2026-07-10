@@ -196,6 +196,13 @@ Testler:
 python -m unittest discover -s tests -v
 ```
 
+## Paper-test artifactleri
+
+`scanner.paper_tracker` artik her create/update kosusunda `summary.csv`,
+`equity_curve.csv` ve `open_watches.csv` artifactleri uretebilir. Bu dosyalar
+sertifikalarin ileriye donuk expectancy'sini ve rejim curumesini izlemek icin
+kullanilmalidir; gecmis backtest kaniti yerine gecmez.
+
 ## Araştırma sınırı
 
 Kod içi testler gelecekteki kârlılığı kanıtlamaz. Sağlayıcı fiyat ayarlamalarının,

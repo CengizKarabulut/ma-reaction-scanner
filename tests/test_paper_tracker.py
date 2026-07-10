@@ -13,7 +13,9 @@ from scanner.paper_tracker import (
     advance_watchlist,
     append_watchlist,
     build_watchlist,
+    ledger_equity_curve,
     ledger_summary,
+    write_artifacts,
 )
 from scanner.ma_core import TIMEFRAME_CONFIGS
 
@@ -272,6 +274,40 @@ class PaperTrackerTests(unittest.TestCase):
         )
         summary = ledger_summary(advanced)
         self.assertEqual(int(summary.iloc[0]["resolved"]), 1)
+
+    def test_artifacts_include_equity_curve_and_summary(self):
+        panel = pd.DataFrame(
+            [
+                {
+                    "ticker": "TEST",
+                    "timeframe": "1d",
+                    "side": "support",
+                    "ma_type": "SMA",
+                    "period": 20,
+                    "current_ma": 100,
+                    "current_price": 102,
+                    "q_value": 0.02,
+                    "certified": True,
+                }
+            ]
+        )
+        ledger = build_watchlist(panel, created_at="2025-01-01", cohort_id="pilot-v1")
+        ledger.loc[0, "state"] = "RESOLVED"
+        ledger.loc[0, "outcome"] = "TARGET"
+        ledger.loc[0, "resolved_at"] = "2025-01-10"
+        ledger.loc[0, "fixed_return_atr"] = 1.25
+        ledger.loc[0, "net_fixed_return_atr"] = 1.00
+
+        curve = ledger_equity_curve(ledger)
+        self.assertEqual(float(curve.iloc[0]["cumulative_net_atr"]), 1.0)
+        self.assertEqual(float(curve.iloc[0]["rolling_target_rate"]), 1.0)
+
+        with TemporaryDirectory() as tmp:
+            paths = write_artifacts(ledger, tmp)
+            self.assertTrue(paths["summary"].exists())
+            self.assertTrue(paths["equity_curve"].exists())
+            stored = pd.read_csv(paths["equity_curve"])
+            self.assertEqual(float(stored.iloc[0]["rolling_expectancy_atr"]), 1.0)
 
 
 if __name__ == "__main__":

@@ -145,8 +145,11 @@ uncertified level into statistical evidence.
 
 `ma_validation.py` enters at the next bar open, handles long and short targets,
 uses one exit per event, assumes stop-first on ambiguous bars, applies commission,
-spread and slippage, sizes by risk, and compares holdout return with equal-count
-random entries. This replaces the legacy repeated-TP1 and missing-short logic.
+BSMV-on-commission, spread, slippage, tick-size rounding and documented T+2
+settlement metadata, sizes by risk, and compares holdout return with equal-count
+random entries. Short-side rows are labelled as direction forecasts unless the
+caller explicitly marks short simulation as executable. This replaces the legacy
+repeated-TP1 and missing-short logic.
 
 ## Alternative level families
 
@@ -164,7 +167,8 @@ enabled, the project still needs:
 - historical-universe data for true point-in-time membership. Until that exists,
   run summaries and metadata print an explicit survivorship-bias warning because
   BIST universes use currently available membership lists;
-- realistic broker-specific costs and short-sale constraints;
+- broker-specific commission/tick schedules beyond the conservative default model;
 - a frozen prospective paper-test protocol with enough completed events;
-- periodic monitoring for regime decay.
+- periodic monitoring for regime decay using the exported paper-test summary and
+  equity-curve artifacts.
 

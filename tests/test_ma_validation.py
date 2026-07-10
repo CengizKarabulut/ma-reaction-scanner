@@ -58,6 +58,8 @@ class ValidationTests(unittest.TestCase):
         )
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades.iloc[0]["reason"], "TARGET")
+        self.assertEqual(trades.iloc[0]["execution_mode"], "direction_forecast_only")
+        self.assertIn("not assumed executable", trades.iloc[0]["execution_note"])
         self.assertGreater(trades.iloc[0]["net_pnl"], 0)
 
     def test_costs_reduce_return(self):
@@ -67,6 +69,25 @@ class ValidationTests(unittest.TestCase):
         free = simulate_event_trades(frame, [event(frame, 10, 1)], cfg, 1, 0, len(frame), CostModel(0, 0, 0))
         costly = simulate_event_trades(frame, [event(frame, 10, 1)], cfg, 1, 0, len(frame), CostModel(10, 20, 10))
         self.assertLess(costly.iloc[0]["net_pnl"], free.iloc[0]["net_pnl"])
+
+    def test_bist_cost_model_reports_bsmv_tick_and_t_plus_two(self):
+        frame = trade_frame()
+        frame.loc[frame.index[12], "High"] = 102.0
+        cfg = AnalysisConfig(horizon=5, null_iterations=19)
+        trades = simulate_event_trades(
+            frame,
+            [event(frame, 10, 1)],
+            cfg,
+            1,
+            0,
+            len(frame),
+            CostModel(commission_bps=10, spread_bps=0, slippage_bps=0, tick_size=0.05),
+        )
+        row = trades.iloc[0]
+        self.assertGreater(row["bsmv"], 0)
+        self.assertEqual(row["settlement_lag_days"], 2)
+        self.assertAlmostEqual((row["entry"] / 0.05) % 1, 0.0)
+        self.assertEqual(trade_statistics(trades)["direction_forecast_only_trades"], 0)
 
     def test_random_benchmark_reports_empirical_probability(self):
         frame = trade_frame()
