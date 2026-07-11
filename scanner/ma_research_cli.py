@@ -81,7 +81,6 @@ DEFAULT_SCAN_PERIODS: tuple[int, ...] = (
     21,
     22,
     34,
-    50,
     55,
     89,
     100,
