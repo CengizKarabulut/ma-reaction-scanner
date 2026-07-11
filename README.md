@@ -132,11 +132,16 @@ ayrı satırlara dağılmaz; her varlık bir kez görünür.
 
 Ek olarak her kosu ilk amaca donen uc davranis tablosu uretir:
 
-- ma_behavior_most_visited.csv: varligin en sik ugradigi ortalamalar
-- ma_behavior_best_reactions.csv: en guclu tepki istatistigi veren ortalamalar
-- ma_behavior_near_price.csv: fiyata yakin destek/direnc adaylari; varsayilan olarak her varlik icin 5 destek + 5 direnc
+- ma_behavior_most_visited.csv: evren icinde en cok temas alan MA seviyeleri
+- ma_behavior_best_reactions.csv: temas sonrasi en iyi tepki istatistigi veren MA seviyeleri
+- ma_behavior_near_price.csv: bugunku fiyata en yakin temasli destek/direnc adaylari
 
-Bu tablolar ma_behavior_profile.txt ve ma_behavior_profile.md icinde birlikte ozetlenir, Telegrama da ayri tablolar olarak gonderilir. Amac sertifika uretmek degil, bu hisse hangi ortalamalara sik gidiyor ve oralarda nasil tepki vermis sorusunu gorunur yapmaktir. Kanit seviyesi CERTIFIED, LOW_CONFIDENCE, DISCOVERY_ONLY veya CANDIDATE_ONLY etiketiyle ayrica gosterilir.
+Bu tablolara Temas=0 olan seviye girmez. Genis evren taramalarinda Telegram
+tablolari evren genelinden top 20 varligi gosterir; ayni varlik tabloyu
+doldurmaz. Tek sembol taramasinda ise ayni sembolun en iyi MA satirlari
+gosterilir. Tablolarda fiyat, MA seviyesi, uzaklik, temas sayisi, tepki orani,
+MedATR ve skor vardir; arastirma kanit etiketleri bu pratik davranis
+tablolarinda gosterilmez.
 
 `0/28`, veri bulunamadı demek değildir: 28 aktif MA seviyesi test edilmiş fakat
 hiçbiri discovery, kontrol, validation ve holdout kapılarının tamamını

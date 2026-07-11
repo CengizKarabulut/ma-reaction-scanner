@@ -16,6 +16,7 @@ def _nearest(distance=0.4, side="support", ma="EMA", period=50, strength=50.0):
         "nearest_abs_distance_atr": distance,
         "nearest_status": "unverified_candidate",
         "nearest_discovery_events": 12,
+        "nearest_total_touch_events": 12,
         "nearest_sr_strength_score": strength,
     }
 
@@ -115,6 +116,34 @@ class GuardedNotifierTests(unittest.TestCase):
         self.assertEqual(table_rows[0][0], "ZZZ")
         self.assertEqual(table_rows[0][2], "1d:HMA20")
         self.assertIn("En Yakın", title)
+
+    def test_uncertified_fallback_excludes_zero_touch_candidates(self):
+        rows = []
+        for symbol, touches in (("ZERO", 0), ("LIVE", 7)):
+            nearest = _nearest(0.1, side="resistance", ma="EMA", period=55, strength=1.0)
+            nearest["nearest_discovery_events"] = touches
+            nearest["nearest_total_touch_events"] = touches
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "asset_label": "Hisse",
+                    "current_price": 100.0,
+                    "tested_level_count": 28,
+                    "certified_level_count": 0,
+                    "low_confidence_level_count": 0,
+                    "actionable_level_count": 0,
+                    "certification_rate_pct": 0.0,
+                    "max_sr_strength_score": 1.0,
+                    "avg_holdout_hit_rate_pct": float("nan"),
+                    "avg_holdout_return_atr": float("nan"),
+                    "avg_holdout_net_return_atr": float("nan"),
+                    **nearest,
+                }
+            )
+
+        top = select_top_instruments(pd.DataFrame(rows), top_n=20)
+
+        self.assertEqual(top["symbol"].tolist(), ["LIVE"])
 
 
 if __name__ == "__main__":

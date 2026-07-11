@@ -33,6 +33,9 @@ class AssetReportingTests(unittest.TestCase):
                     "certified": certified,
                     "actionable": certified,
                     "rank_score": 100.0 if certified else 1.0,
+                    "discovery_events": 5,
+                    "validation_events": 0,
+                    "holdout_events": 0,
                 }
             )
         summary = build_instrument_summary(pd.DataFrame(rows))
@@ -128,6 +131,9 @@ class AssetReportingTests(unittest.TestCase):
             "certified": False,
             "actionable": False,
             "rank_score": 1.0,
+            "discovery_events": 4,
+            "validation_events": 0,
+            "holdout_events": 0,
         }
         rows = [
             {
@@ -222,6 +228,54 @@ class AssetReportingTests(unittest.TestCase):
             near[near["side"] == "resistance"].iloc[0]["ma_label"],
             "1d:VWMA89",
         )
+
+    def test_behavior_profiles_exclude_zero_touch_and_rank_broad_scans_globally(self):
+        rows = []
+        for symbol, events, distance in (
+            ("AAA", 0, 0.01),
+            ("BBB", 40, 1.50),
+            ("CCC", 25, 0.10),
+            ("DDD", 10, 0.05),
+        ):
+            rows.append(
+                {
+                    "ticker": symbol,
+                    "asset_class": "stock",
+                    "asset_label": "Hisse",
+                    "universe": "bist_all_stocks",
+                    "display_name": symbol,
+                    "timeframe": "1d",
+                    "current_price": 100.0,
+                    "current_ma": 100.0 + distance,
+                    "ma_type": "EMA",
+                    "period": 55,
+                    "side": "resistance",
+                    "active_side": True,
+                    "distance_pct": distance,
+                    "distance_atr": distance,
+                    "discovery_events": events,
+                    "validation_events": 0,
+                    "holdout_events": 0,
+                    "discovery_hit_rate": 0.50,
+                    "validation_hit_rate": 0.0,
+                    "holdout_hit_rate": 0.0,
+                    "discovery_median_fixed_atr": 0.20,
+                    "validation_median_fixed_atr": 0.0,
+                    "holdout_median_fixed_atr": 0.0,
+                    "sr_strength_score": 20.0,
+                    "discovery_pass": False,
+                    "certified": False,
+                    "low_confidence": False,
+                    "status": "unverified_candidate",
+                }
+            )
+
+        profiles = build_behavior_profiles(pd.DataFrame(rows), top_n=2)
+
+        self.assertNotIn("AAA", set(profiles["most_visited"]["symbol"]))
+        self.assertEqual(profiles["most_visited"]["symbol"].tolist(), ["BBB", "CCC"])
+        self.assertEqual(profiles["near_price"]["symbol"].tolist(), ["DDD", "CCC"])
+        self.assertTrue((profiles["near_price"]["total_touch_events"] > 0).all())
 
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {
