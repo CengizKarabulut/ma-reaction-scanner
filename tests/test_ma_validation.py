@@ -89,6 +89,42 @@ class ValidationTests(unittest.TestCase):
         self.assertAlmostEqual((row["entry"] / 0.05) % 1, 0.0)
         self.assertEqual(trade_statistics(trades)["direction_forecast_only_trades"], 0)
 
+    def test_profit_target_rounds_away_from_entry(self):
+        frame = trade_frame()
+        frame.loc[frame.index[12], "High"] = 101.24
+        cfg = AnalysisConfig(horizon=5, target_atr=1.23, stop_atr=1.0, null_iterations=19)
+        trades = simulate_event_trades(
+            frame,
+            [event(frame, 10, 1)],
+            cfg,
+            1,
+            0,
+            len(frame),
+            CostModel(0, 0, 0, tick_size=0.05),
+        )
+
+        row = trades.iloc[0]
+        self.assertAlmostEqual(row["target"], 101.25)
+        self.assertEqual(row["reason"], "TIME")
+
+    def test_short_profit_target_rounds_away_from_entry(self):
+        frame = trade_frame()
+        frame.loc[frame.index[22], "Low"] = 98.76
+        cfg = AnalysisConfig(horizon=5, target_atr=1.23, stop_atr=1.0, null_iterations=19)
+        trades = simulate_event_trades(
+            frame,
+            [event(frame, 20, -1)],
+            cfg,
+            -1,
+            0,
+            len(frame),
+            CostModel(0, 0, 0, tick_size=0.05),
+        )
+
+        row = trades.iloc[0]
+        self.assertAlmostEqual(row["target"], 98.75)
+        self.assertEqual(row["reason"], "TIME")
+
     def test_random_benchmark_reports_empirical_probability(self):
         frame = trade_frame()
         frame.loc[frame.index[12], "High"] = 102.0
