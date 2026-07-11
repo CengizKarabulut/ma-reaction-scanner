@@ -10,6 +10,8 @@ class ResearchCliBudgetTests(unittest.TestCase):
         parsed_periods = [int(value) for value in args.periods.split(",")]
         self.assertEqual(parsed_periods, list(DEFAULT_SCAN_PERIODS))
         self.assertIn(20, parsed_periods)
+        self.assertNotIn(50, parsed_periods)
+        self.assertEqual(len(parsed_periods), 14)
         self.assertEqual(args.behavior_min_touches, 10)
 
     def test_fast_flag_is_backward_compatible_noop(self):

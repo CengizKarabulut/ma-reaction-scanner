@@ -185,9 +185,7 @@ def _nearest_fields(
         }
     row = min(candidates, key=lambda item: abs(float(item["distance_atr"])))
     distance_atr = float(row["distance_atr"])
-    total_touch_events = int(
-        sum(float(row.get(f"{prefix}_events", 0) or 0) for prefix in ("discovery", "validation", "holdout"))
-    )
+    total_touch_events = _row_total_touch_events(row)
     return {
         "nearest_timeframe": str(row["timeframe"]),
         "nearest_side": str(row["side"]),
@@ -205,6 +203,25 @@ def _nearest_fields(
         "nearest_validation_pass": bool(row.get("validation_pass", False)),
         "nearest_holdout_pass": bool(row.get("holdout_pass", False)),
     }
+
+
+def _numeric_value(value: object, default: float = 0.0) -> float:
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if np.isfinite(number):
+        return float(number)
+    return default
+
+
+def _row_total_touch_events(row: pd.Series) -> int:
+    if "behavior_events" in row.index:
+        behavior_events = _numeric_value(row.get("behavior_events"), np.nan)
+        if np.isfinite(behavior_events):
+            return int(max(0.0, behavior_events))
+    total = sum(
+        _numeric_value(row.get(f"{prefix}_events", 0.0))
+        for prefix in ("discovery", "validation", "holdout")
+    )
+    return int(max(0.0, total))
 
 
 def _metadata_text(group: pd.DataFrame, column: str) -> str:
