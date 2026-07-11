@@ -109,7 +109,7 @@ def simulate_event_trades(
         target = _round_to_tick(
             entry + side * config.target_atr * atr_value,
             cost.tick_size,
-            -side,
+            side,
         )
         stop = _round_to_tick(
             entry - side * config.stop_atr * atr_value,
