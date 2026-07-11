@@ -238,9 +238,17 @@ def send_behavior_tables(
     behavior_dir: str | Path,
     *,
     top_n: int = 20,
+    notify_empty: bool = False,
 ) -> bool:
     folder = Path(behavior_dir)
     if not folder.exists():
+        if notify_empty:
+            return send_telegram(
+                token,
+                chat_id,
+                "Davranış tabloları bulunamadı: çıktı klasöründe ma_behavior_*.csv yok.",
+                parse_mode=None,
+            )
         return True
     specs = [
         ("ma_behavior_most_visited.csv", "En Cok Temas Alan Ortalamalar"),
@@ -261,6 +269,7 @@ def send_behavior_tables(
         "Skor",
     ]
     ok = True
+    sent_any = False
     max_rows = max(int(top_n), 10)
     for filename, title in specs:
         path = folder / filename
@@ -276,6 +285,9 @@ def send_behavior_tables(
         if table.empty:
             continue
         rows = _behavior_rows(table, max_rows=max_rows)
+        if not rows:
+            continue
+        sent_any = True
         images = render_table_image(headers, rows, title=title)
         if images:
             for index, image in enumerate(images, 1):
@@ -286,6 +298,14 @@ def send_behavior_tables(
             lines.extend(" | ".join(row) for row in rows)
             lines.append("```")
             ok = send_telegram(token, chat_id, "\n".join(lines), parse_mode="Markdown") and ok
+    if notify_empty and not sent_any:
+        ok = send_telegram(
+            token,
+            chat_id,
+            "Davranış tablosu gönderilmedi: minimum 10 ham temas eşiğini geçen MA bulunamadı. "
+            "Daha gevşek keşif için workflow'da behavior_min_touches değerini düşürebilirsin.",
+            parse_mode=None,
+        ) and ok
     return ok
 
 
@@ -307,7 +327,7 @@ def send_guarded_summary(
     actionable_count = int((summary["actionable_level_count"] > 0).sum())
     explanation = (
         "Veri bulundu; ancak tüm kanıt kapılarını geçen seviye yok. "
-        "Aşağıdaki tablo en yakın güncel adayları gösterir."
+        "Yakın aday ve MA davranış tabloları mevcutsa aşağıda gösterilir."
         if certified_levels == 0
         else "Her varlık tabloda yalnızca bir kez gösterilir."
     )
@@ -324,6 +344,10 @@ def send_guarded_summary(
     ok = send_telegram(token, chat_id, header, parse_mode="Markdown")
     headers, rows, colors, title = build_guarded_table(summary, top_n=top_n)
     if not rows:
+        if behavior_dir is not None:
+            ok = send_behavior_tables(
+                token, chat_id, behavior_dir, top_n=top_n, notify_empty=True
+            ) and ok
         return ok
     images = render_table_image(headers, rows, title=title, col_colors=colors)
     if images:
