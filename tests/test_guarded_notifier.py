@@ -1,7 +1,10 @@
+from pathlib import Path
+import tempfile
 import unittest
 
 import pandas as pd
 
+import scanner.guarded_notifier as guarded_notifier
 from scanner.guarded_notifier import build_guarded_table, select_top_instruments
 
 
@@ -144,6 +147,139 @@ class GuardedNotifierTests(unittest.TestCase):
         top = select_top_instruments(pd.DataFrame(rows), top_n=20)
 
         self.assertEqual(top["symbol"].tolist(), ["LIVE"])
+
+    def test_behavior_tables_are_sent_when_guarded_fallback_is_empty(self):
+        nearest = _nearest(0.08, side="resistance", ma="HMA", period=13, strength=0.0)
+        nearest["nearest_discovery_events"] = 0
+        nearest["nearest_total_touch_events"] = 0
+        summary = pd.DataFrame(
+            [
+                {
+                    "symbol": "NETCD",
+                    "asset_label": "Hisse",
+                    "current_price": 146.90,
+                    "tested_level_count": 61,
+                    "certified_level_count": 0,
+                    "low_confidence_level_count": 0,
+                    "actionable_level_count": 0,
+                    "certification_rate_pct": 0.0,
+                    "max_sr_strength_score": 0.0,
+                    "avg_holdout_hit_rate_pct": float("nan"),
+                    "avg_holdout_return_atr": float("nan"),
+                    "avg_holdout_net_return_atr": float("nan"),
+                    **nearest,
+                }
+            ]
+        )
+        behavior = pd.DataFrame(
+            [
+                {
+                    "symbol": "NETCD",
+                    "current_price": 146.90,
+                    "side": "resistance",
+                    "ma_label": "1d:HMA13",
+                    "current_ma": 147.69,
+                    "abs_distance_atr": 0.08,
+                    "distance_pct": 0.54,
+                    "total_touch_events": 18,
+                    "reaction_hit_rate_pct": 61.0,
+                    "reaction_median_fixed_atr": 0.42,
+                    "reaction_quality_score": 55.0,
+                }
+            ]
+        )
+
+        messages: list[str] = []
+        photos: list[tuple[str, str | None]] = []
+        original_send_telegram = guarded_notifier.send_telegram
+        original_send_photo = guarded_notifier.send_photo
+        original_render_table_image = guarded_notifier.render_table_image
+        try:
+            guarded_notifier.send_telegram = (
+                lambda _token, _chat_id, text, **_kwargs: messages.append(text) or True
+            )
+            guarded_notifier.send_photo = (
+                lambda _token, _chat_id, image, caption=None: photos.append((image, caption))
+                or True
+            )
+            guarded_notifier.render_table_image = (
+                lambda _headers, _rows, title, **_kwargs: [f"{title}.png"]
+            )
+            with tempfile.TemporaryDirectory() as temp_dir:
+                behavior.to_csv(Path(temp_dir) / "ma_behavior_most_visited.csv", index=False)
+
+                ok = guarded_notifier.send_guarded_summary(
+                    "token",
+                    "chat",
+                    summary,
+                    label="Guarded Tek Varlık: NETCD",
+                    top_n=1,
+                    behavior_dir=temp_dir,
+                )
+        finally:
+            guarded_notifier.send_telegram = original_send_telegram
+            guarded_notifier.send_photo = original_send_photo
+            guarded_notifier.render_table_image = original_render_table_image
+
+        self.assertTrue(ok)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(
+            photos,
+            [("En Cok Temas Alan Ortalamalar.png", "En Cok Temas Alan Ortalamalar")],
+        )
+
+    def test_empty_behavior_notice_is_sent_when_no_guarded_rows_or_behavior_rows(self):
+        nearest = _nearest(0.08, side="resistance", ma="HMA", period=13, strength=0.0)
+        nearest["nearest_discovery_events"] = 0
+        nearest["nearest_total_touch_events"] = 0
+        summary = pd.DataFrame(
+            [
+                {
+                    "symbol": "NETCD",
+                    "asset_label": "Hisse",
+                    "current_price": 146.90,
+                    "tested_level_count": 61,
+                    "certified_level_count": 0,
+                    "low_confidence_level_count": 0,
+                    "actionable_level_count": 0,
+                    "certification_rate_pct": 0.0,
+                    "max_sr_strength_score": 0.0,
+                    "avg_holdout_hit_rate_pct": float("nan"),
+                    "avg_holdout_return_atr": float("nan"),
+                    "avg_holdout_net_return_atr": float("nan"),
+                    **nearest,
+                }
+            ]
+        )
+
+        messages: list[str] = []
+        photos: list[tuple[str, str | None]] = []
+        original_send_telegram = guarded_notifier.send_telegram
+        original_send_photo = guarded_notifier.send_photo
+        try:
+            guarded_notifier.send_telegram = (
+                lambda _token, _chat_id, text, **_kwargs: messages.append(text) or True
+            )
+            guarded_notifier.send_photo = (
+                lambda _token, _chat_id, image, caption=None: photos.append((image, caption))
+                or True
+            )
+            with tempfile.TemporaryDirectory() as temp_dir:
+                ok = guarded_notifier.send_guarded_summary(
+                    "token",
+                    "chat",
+                    summary,
+                    label="Guarded Tek Varlık: NETCD",
+                    top_n=1,
+                    behavior_dir=temp_dir,
+                )
+        finally:
+            guarded_notifier.send_telegram = original_send_telegram
+            guarded_notifier.send_photo = original_send_photo
+
+        self.assertTrue(ok)
+        self.assertEqual(photos, [])
+        self.assertTrue(any("minimum 10 ham temas" in message for message in messages))
 
 
 if __name__ == "__main__":
