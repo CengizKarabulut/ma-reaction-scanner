@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from scanner.asset_reporting import build_instrument_summary
+from scanner.asset_reporting import build_behavior_profiles, build_instrument_summary
 
 
 class AssetReportingTests(unittest.TestCase):
@@ -165,6 +165,63 @@ class AssetReportingTests(unittest.TestCase):
         self.assertEqual(row["strongest_ma"], "SMA")
         self.assertAlmostEqual(row["max_sr_strength_score"], 72.0)
         self.assertAlmostEqual(row["support_holdout_net_median_fixed_atr"], 0.25)
+
+
+    def test_behavior_profiles_keep_frequency_reaction_and_nearby_sides(self):
+        rows = []
+        for side, sign in (("support", -1), ("resistance", 1)):
+            for index in range(6):
+                rows.append(
+                    {
+                        "ticker": "NETCD",
+                        "asset_class": "stock",
+                        "asset_label": "Hisse",
+                        "universe": "custom",
+                        "display_name": "NETCD",
+                        "timeframe": "1d",
+                        "current_price": 146.90,
+                        "current_ma": 146.90 + sign * (index + 1) * 0.10,
+                        "ma_type": "VWMA" if index == 0 else "EMA",
+                        "period": 89 + index,
+                        "side": side,
+                        "active_side": True,
+                        "distance_pct": sign * (index + 1) * 0.07,
+                        "distance_atr": sign * (index + 1) * 0.20,
+                        "discovery_events": 20 - index,
+                        "validation_events": 4,
+                        "holdout_events": 3,
+                        "discovery_hit_rate": 0.55 + index * 0.02,
+                        "validation_hit_rate": 0.50,
+                        "holdout_hit_rate": 0.50,
+                        "discovery_median_fixed_atr": 0.20 + index * 0.05,
+                        "validation_median_fixed_atr": 0.10,
+                        "holdout_median_fixed_atr": 0.10,
+                        "sr_strength_score": 10.0 + index,
+                        "discovery_pass": index == 5,
+                        "certified": False,
+                        "low_confidence": False,
+                        "status": "unverified_candidate",
+                    }
+                )
+
+        profiles = build_behavior_profiles(pd.DataFrame(rows), top_n=5)
+
+        self.assertEqual(set(profiles), {"most_visited", "best_reactions", "near_price"})
+        self.assertEqual(len(profiles["most_visited"]), 5)
+        self.assertEqual(int(profiles["most_visited"].iloc[0]["total_touch_events"]), 27)
+        self.assertEqual(len(profiles["best_reactions"]), 5)
+        self.assertIn("reaction_quality_score", profiles["best_reactions"].columns)
+        near = profiles["near_price"]
+        self.assertEqual(len(near), 10)
+        self.assertEqual(set(near.groupby("side").size()), {5})
+        self.assertEqual(
+            near[near["side"] == "support"].iloc[0]["ma_label"],
+            "1d:VWMA89",
+        )
+        self.assertEqual(
+            near[near["side"] == "resistance"].iloc[0]["ma_label"],
+            "1d:VWMA89",
+        )
 
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {

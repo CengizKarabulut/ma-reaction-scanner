@@ -130,6 +130,14 @@ Ana özette şu toplulaştırılmış alanlar bulunur:
 Telegram “Top 20” tablosu da bu özeti kullanır. Aynı hissenin farklı MA'ları artık
 ayrı satırlara dağılmaz; her varlık bir kez görünür.
 
+Ek olarak her kosu ilk amaca donen uc davranis tablosu uretir:
+
+- ma_behavior_most_visited.csv: varligin en sik ugradigi ortalamalar
+- ma_behavior_best_reactions.csv: en guclu tepki istatistigi veren ortalamalar
+- ma_behavior_near_price.csv: fiyata yakin destek/direnc adaylari; varsayilan olarak her varlik icin 5 destek + 5 direnc
+
+Bu tablolar ma_behavior_profile.txt ve ma_behavior_profile.md icinde birlikte ozetlenir, Telegrama da ayri tablolar olarak gonderilir. Amac sertifika uretmek degil, bu hisse hangi ortalamalara sik gidiyor ve oralarda nasil tepki vermis sorusunu gorunur yapmaktir. Kanit seviyesi CERTIFIED, LOW_CONFIDENCE, DISCOVERY_ONLY veya CANDIDATE_ONLY etiketiyle ayrica gosterilir.
+
 `0/28`, veri bulunamadı demek değildir: 28 aktif MA seviyesi test edilmiş fakat
 hiçbiri discovery, kontrol, validation ve holdout kapılarının tamamını
 geçememiştir. Bu durumda Telegram tablosu boş oranlar yerine en yakın güncel
