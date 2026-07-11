@@ -71,16 +71,27 @@ def select_top_instruments(summary: pd.DataFrame, top_n: int = 20) -> pd.DataFra
         "avg_holdout_hit_rate_pct",
         "avg_holdout_net_return_atr",
     ]
-    for column in [*descending, "nearest_abs_distance_atr"]:
+    if "nearest_total_touch_events" not in ranked:
+        ranked["nearest_total_touch_events"] = ranked["nearest_discovery_events"]
+    for column in [*descending, "nearest_abs_distance_atr", "nearest_total_touch_events"]:
         ranked[column] = pd.to_numeric(ranked[column], errors="coerce")
-    ranked = ranked.sort_values(
-        descending + ["nearest_abs_distance_atr", "symbol"],
-        ascending=[False, False, False, False, False, False, True, True],
-        na_position="last",
-    )
     ranked = ranked.drop_duplicates(["asset_label", "symbol"], keep="first")
     certified = ranked[ranked["certified_level_count"] > 0]
-    chosen = certified if not certified.empty else ranked
+    if not certified.empty:
+        chosen = certified.sort_values(
+            descending + ["nearest_abs_distance_atr", "symbol"],
+            ascending=[False, False, False, False, False, False, True, True],
+            na_position="last",
+        )
+    else:
+        chosen = ranked[
+            (ranked["nearest_total_touch_events"].fillna(0) > 0)
+            & (ranked["nearest_status"].astype(str) != "none")
+        ].sort_values(
+            ["nearest_abs_distance_atr", "nearest_total_touch_events", "max_sr_strength_score", "symbol"],
+            ascending=[True, False, False, True],
+            na_position="last",
+        )
     return chosen if top_n == 0 else chosen.head(top_n)
 
 
@@ -121,7 +132,7 @@ def _candidate_rows(top: pd.DataFrame) -> list[list[str]]:
                 _number(row["nearest_abs_distance_atr"], 2),
                 _number(abs(float(row["nearest_distance_pct"])), 2, "%"),
                 _number(row["nearest_sr_strength_score"], 1),
-                str(int(row["nearest_discovery_events"])),
+                str(int(row.get("nearest_total_touch_events", row["nearest_discovery_events"]))),
                 _STATUS_LABELS.get(
                     str(row["nearest_status"]), str(row["nearest_status"])
                 ),
@@ -196,19 +207,25 @@ def build_guarded_table(
 def _behavior_rows(table: pd.DataFrame, max_rows: int) -> list[list[str]]:
     rows: list[list[str]] = []
     for _, row in table.head(max_rows).iterrows():
+        distance_pct = pd.to_numeric(
+            pd.Series([row.get("distance_pct", 0.0)]), errors="coerce"
+        ).fillna(0.0).iloc[0]
+        touch_events = pd.to_numeric(
+            pd.Series([row.get("total_touch_events", 0)]), errors="coerce"
+        ).fillna(0).iloc[0]
         rows.append(
             [
                 str(row.get("symbol", "")),
+                _price(row.get("current_price")),
                 _SIDE_LABELS.get(str(row.get("side", "")), str(row.get("side", ""))),
                 str(row.get("ma_label", "")),
                 _price(row.get("current_ma")),
                 _number(row.get("abs_distance_atr"), 2),
-                _number(abs(float(row.get("distance_pct", 0.0))), 2, "%"),
-                str(int(pd.to_numeric(pd.Series([row.get("total_touch_events", 0)]), errors="coerce").fillna(0).iloc[0])),
+                _number(abs(float(distance_pct)), 2, "%"),
+                str(int(touch_events)),
                 _number(row.get("reaction_hit_rate_pct"), 1, "%"),
                 _number(row.get("reaction_median_fixed_atr"), 2),
                 _number(row.get("reaction_quality_score"), 1),
-                str(row.get("evidence_label", "")),
             ]
         )
     return rows
@@ -225,12 +242,13 @@ def send_behavior_tables(
     if not folder.exists():
         return True
     specs = [
-        ("ma_behavior_most_visited.csv", "En Sik Ugradigi Ortalamalar"),
-        ("ma_behavior_best_reactions.csv", "En Cok Tepki Aldigi Ortalamalar"),
-        ("ma_behavior_near_price.csv", "Fiyata Yakin Destek/Direnc Adaylari"),
+        ("ma_behavior_most_visited.csv", "En Cok Temas Alan Ortalamalar"),
+        ("ma_behavior_best_reactions.csv", "En Iyi Tepki Veren Ortalamalar"),
+        ("ma_behavior_near_price.csv", "Fiyata Yakin Temasli Destek/Direnc"),
     ]
     headers = [
         "Varlik",
+        "Fiyat",
         "Taraf",
         "MA",
         "Seviye",
@@ -240,7 +258,6 @@ def send_behavior_tables(
         "Tepki%",
         "MedATR",
         "Skor",
-        "Kanit",
     ]
     ok = True
     max_rows = max(int(top_n), 10)
@@ -249,6 +266,12 @@ def send_behavior_tables(
         if not path.exists():
             continue
         table = pd.read_csv(path)
+        if table.empty:
+            continue
+        touch_events = pd.to_numeric(
+            table.get("total_touch_events", pd.Series(dtype=float)), errors="coerce"
+        ).fillna(0)
+        table = table[touch_events > 0].copy()
         if table.empty:
             continue
         rows = _behavior_rows(table, max_rows=max_rows)

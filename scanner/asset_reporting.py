@@ -47,6 +47,9 @@ def _best_level(group: pd.DataFrame, side: str) -> pd.Series | None:
             ascending=[False, False, False, True],
             na_position="last",
         ).iloc[0]
+    rows = rows[_total_touch_events(rows) > 0].copy()
+    if rows.empty:
+        return None
     return rows.sort_values(
         ["sr_strength_score", "absolute_distance_atr", "rank_score"],
         ascending=[False, True, False],
@@ -172,6 +175,7 @@ def _nearest_fields(
             "nearest_abs_distance_atr": np.nan,
             "nearest_status": "none",
             "nearest_discovery_events": 0,
+            "nearest_total_touch_events": 0,
             "nearest_sr_strength_score": np.nan,
             "nearest_discovery_pass": False,
             "nearest_validation_pass": False,
@@ -179,6 +183,9 @@ def _nearest_fields(
         }
     row = min(candidates, key=lambda item: abs(float(item["distance_atr"])))
     distance_atr = float(row["distance_atr"])
+    total_touch_events = int(
+        sum(float(row.get(f"{prefix}_events", 0) or 0) for prefix in ("discovery", "validation", "holdout"))
+    )
     return {
         "nearest_timeframe": str(row["timeframe"]),
         "nearest_side": str(row["side"]),
@@ -190,6 +197,7 @@ def _nearest_fields(
         "nearest_abs_distance_atr": abs(distance_atr),
         "nearest_status": str(row.get("status", "unverified_candidate")),
         "nearest_discovery_events": int(row.get("discovery_events", 0) or 0),
+        "nearest_total_touch_events": total_touch_events,
         "nearest_sr_strength_score": float(row.get("sr_strength_score", np.nan)),
         "nearest_discovery_pass": bool(row.get("discovery_pass", False)),
         "nearest_validation_pass": bool(row.get("validation_pass", False)),
@@ -349,6 +357,14 @@ def _numeric(frame: pd.DataFrame, column: str, default: float = 0.0) -> pd.Serie
     return pd.to_numeric(frame[column], errors="coerce").fillna(default)
 
 
+def _total_touch_events(frame: pd.DataFrame) -> pd.Series:
+    return (
+        _numeric(frame, "discovery_events")
+        + _numeric(frame, "validation_events")
+        + _numeric(frame, "holdout_events")
+    )
+
+
 def _weighted_metric(frame: pd.DataFrame, suffix: str) -> pd.Series:
     total = pd.Series(0.0, index=frame.index, dtype=float)
     weighted = pd.Series(0.0, index=frame.index, dtype=float)
@@ -397,6 +413,11 @@ def _prepare_behavior_rows(candidates: pd.DataFrame) -> pd.DataFrame:
     rows["total_touch_events"] = (
         discovery_events + validation_events + holdout_events
     ).astype(int)
+    rows = rows[rows["total_touch_events"] > 0].copy()
+    if rows.empty:
+        return pd.DataFrame(columns=_BEHAVIOR_OUTPUT_COLUMNS)
+    validation_events = _numeric(rows, "validation_events")
+    holdout_events = _numeric(rows, "holdout_events")
     rows["recent_touch_events"] = (validation_events + holdout_events).astype(int)
     rows["abs_distance_atr"] = _numeric(rows, "distance_atr", np.nan).abs()
     rows["reaction_hit_rate_pct"] = _weighted_metric(rows, "hit_rate") * 100.0
@@ -434,23 +455,22 @@ def _prepare_behavior_rows(candidates: pd.DataFrame) -> pd.DataFrame:
     return rows[_BEHAVIOR_OUTPUT_COLUMNS].copy()
 
 
-def _take_per_instrument(
+def _rank_behavior_rows(
     rows: pd.DataFrame,
     sort_columns: list[str],
     ascending: list[bool],
     top_n: int,
+    *,
+    one_row_per_instrument: bool,
 ) -> pd.DataFrame:
-    selected = []
-    for _, group in rows.groupby(["asset_class", "symbol"], sort=False):
-        ranked = group.sort_values(
-            sort_columns,
-            ascending=ascending,
-            na_position="last",
-        )
-        selected.append(ranked.head(top_n))
-    if not selected:
-        return pd.DataFrame(columns=_BEHAVIOR_OUTPUT_COLUMNS)
-    return pd.concat(selected, ignore_index=True)
+    ranked = rows.sort_values(
+        sort_columns,
+        ascending=ascending,
+        na_position="last",
+    )
+    if one_row_per_instrument:
+        ranked = ranked.drop_duplicates(["asset_class", "symbol"], keep="first")
+    return ranked.head(top_n).reset_index(drop=True)
 
 
 def build_behavior_profiles(candidates: pd.DataFrame, top_n: int = 5) -> dict[str, pd.DataFrame]:
@@ -465,7 +485,10 @@ def build_behavior_profiles(candidates: pd.DataFrame, top_n: int = 5) -> dict[st
             "near_price": empty.copy(),
         }
     top_n = max(1, int(top_n))
-    most_visited = _take_per_instrument(
+    one_row_per_instrument = (
+        rows[["asset_class", "symbol"]].drop_duplicates().shape[0] > 1
+    )
+    most_visited = _rank_behavior_rows(
         rows,
         [
             "total_touch_events",
@@ -475,8 +498,9 @@ def build_behavior_profiles(candidates: pd.DataFrame, top_n: int = 5) -> dict[st
         ],
         [False, False, False, True],
         top_n,
+        one_row_per_instrument=one_row_per_instrument,
     )
-    best_reactions = _take_per_instrument(
+    best_reactions = _rank_behavior_rows(
         rows,
         [
             "reaction_quality_score",
@@ -487,26 +511,40 @@ def build_behavior_profiles(candidates: pd.DataFrame, top_n: int = 5) -> dict[st
         ],
         [False, False, False, False, True],
         top_n,
+        one_row_per_instrument=one_row_per_instrument,
     )
 
-    near_selected = []
-    for _, group in rows.groupby(["asset_class", "symbol", "side"], sort=False):
-        ranked = group.sort_values(
-            [
-                "abs_distance_atr",
-                "total_touch_events",
-                "reaction_quality_score",
-                "sr_strength_score",
-            ],
-            ascending=[True, False, False, False],
-            na_position="last",
+    near_sort_columns = [
+        "abs_distance_atr",
+        "total_touch_events",
+        "reaction_quality_score",
+        "sr_strength_score",
+    ]
+    near_ascending = [True, False, False, False]
+    if one_row_per_instrument:
+        near_price = _rank_behavior_rows(
+            rows,
+            near_sort_columns,
+            near_ascending,
+            top_n,
+            one_row_per_instrument=True,
         )
-        near_selected.append(ranked.head(top_n))
-    near_price = (
-        pd.concat(near_selected, ignore_index=True)
-        if near_selected
-        else empty.copy()
-    )
+    else:
+        near_selected = []
+        side_n = min(top_n, 5)
+        for _, group in rows.groupby(["asset_class", "symbol", "side"], sort=False):
+            near_selected.append(
+                group.sort_values(
+                    near_sort_columns,
+                    ascending=near_ascending,
+                    na_position="last",
+                ).head(side_n)
+            )
+        near_price = (
+            pd.concat(near_selected, ignore_index=True)
+            if near_selected
+            else empty.copy()
+        )
     return {
         "most_visited": most_visited.reset_index(drop=True),
         "best_reactions": best_reactions.reset_index(drop=True),
@@ -531,8 +569,7 @@ def _format_behavior_table(title: str, table: pd.DataFrame, max_rows: int = 80) 
                 f"temas={int(row['total_touch_events'])} "
                 f"tepki={_fmt_float(row['reaction_hit_rate_pct'], 1)}% "
                 f"medATR={_fmt_float(row['reaction_median_fixed_atr'], 2)} "
-                f"skor={_fmt_float(row['reaction_quality_score'], 1)} "
-                f"[{row['evidence_label']}]"
+                f"skor={_fmt_float(row['reaction_quality_score'], 1)}"
             )
     if len(table) > len(shown):
         lines.append(f"  ... +{len(table) - len(shown)} more rows")

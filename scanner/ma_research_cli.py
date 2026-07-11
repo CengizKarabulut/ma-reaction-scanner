@@ -174,8 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--behavior-top",
         type=int,
-        default=5,
-        help="Rows per instrument for MA behavior profile tables",
+        default=20,
+        help="Rows for MA behavior profile tables; broad scans show top instruments, single-symbol scans show top MA rows",
     )
     parser.add_argument("--periods", default=",".join(map(str, DEFAULT_SCAN_PERIODS)))
     parser.add_argument("--ma-types", default=",".join(MA_TYPES))
