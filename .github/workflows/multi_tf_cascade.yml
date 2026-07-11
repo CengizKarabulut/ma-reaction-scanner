@@ -73,7 +73,7 @@ on:
       periods:
         description: 'MA periyotları'
         required: true
-        default: '5,8,13,21,22,34,50,55,89,100,144,200,233,377'
+        default: '5,8,13,20,21,22,34,55,89,100,144,200,233,377'
       source:
         description: 'Veri kaynağı'
         required: true
@@ -88,6 +88,10 @@ on:
         description: 'Kanit null iterasyonu'
         required: true
         default: '499'
+      behavior_min_touches:
+        description: 'Davranis tablolari icin minimum temas'
+        required: true
+        default: '10'
 
 permissions:
   contents: read
@@ -106,6 +110,7 @@ jobs:
       INPUT_SOURCE: ${{ inputs.source }}
       INPUT_TOP: ${{ inputs.top }}
       INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
+      INPUT_BEHAVIOR_MIN_TOUCHES: ${{ inputs.behavior_min_touches }}
     steps:
       - name: Repo checkout
         uses: actions/checkout@v4
@@ -139,6 +144,7 @@ jobs:
             --source "$INPUT_SOURCE" \
             --top "$INPUT_TOP" \
             --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES" \
             --active-only \
             --output-dir reports/multi_tf
       - name: Telegram tekilleştirilmiş özet

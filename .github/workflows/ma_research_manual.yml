@@ -71,7 +71,7 @@ on:
       periods:
         description: 'MA periods (operational default)'
         required: true
-        default: '5,8,13,21,22,34,50,55,89,100,144,200,233,377'
+        default: '5,8,13,20,21,22,34,55,89,100,144,200,233,377'
       source:
         description: 'Market-data source'
         required: true
@@ -86,6 +86,10 @@ on:
         description: 'Matched-null iterations'
         required: true
         default: '499'
+      behavior_min_touches:
+        description: 'Davranis tablolari icin minimum temas'
+        required: true
+        default: '10'
 
 permissions:
   contents: read
@@ -105,6 +109,7 @@ jobs:
       INPUT_SOURCE: ${{ inputs.source }}
       INPUT_TOP: ${{ inputs.top }}
       INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
+      INPUT_BEHAVIOR_MIN_TOUCHES: ${{ inputs.behavior_min_touches }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -127,6 +132,7 @@ jobs:
             --source "$INPUT_SOURCE" \
             --top "$INPUT_TOP" \
             --null-iterations "$INPUT_NULL_ITERATIONS" \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES" \
             --active-only \
             --output-dir reports/guarded
       - name: Telegram tekilleştirilmiş özet
