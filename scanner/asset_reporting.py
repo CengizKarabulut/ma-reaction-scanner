@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 
 
+DEFAULT_BEHAVIOR_MIN_TOUCHES = 10
+
 _PRICE_TIMEFRAME_PRIORITY = {
     "1d": 0,
     "4h": 1,
@@ -47,7 +49,7 @@ def _best_level(group: pd.DataFrame, side: str) -> pd.Series | None:
             ascending=[False, False, False, True],
             na_position="last",
         ).iloc[0]
-    rows = rows[_total_touch_events(rows) > 0].copy()
+    rows = rows[_total_touch_events(rows) >= DEFAULT_BEHAVIOR_MIN_TOUCHES].copy()
     if rows.empty:
         return None
     return rows.sort_values(
@@ -358,6 +360,8 @@ def _numeric(frame: pd.DataFrame, column: str, default: float = 0.0) -> pd.Serie
 
 
 def _total_touch_events(frame: pd.DataFrame) -> pd.Series:
+    if "behavior_events" in frame:
+        return _numeric(frame, "behavior_events")
     return (
         _numeric(frame, "discovery_events")
         + _numeric(frame, "validation_events")
@@ -366,6 +370,9 @@ def _total_touch_events(frame: pd.DataFrame) -> pd.Series:
 
 
 def _weighted_metric(frame: pd.DataFrame, suffix: str) -> pd.Series:
+    behavior_column = f"behavior_{suffix}"
+    if behavior_column in frame:
+        return _numeric(frame, behavior_column, np.nan)
     total = pd.Series(0.0, index=frame.index, dtype=float)
     weighted = pd.Series(0.0, index=frame.index, dtype=float)
     for prefix in ("discovery", "validation", "holdout"):
@@ -386,7 +393,7 @@ def _evidence_label(row: pd.Series) -> str:
     return "CANDIDATE_ONLY"
 
 
-def _prepare_behavior_rows(candidates: pd.DataFrame) -> pd.DataFrame:
+def _prepare_behavior_rows(candidates: pd.DataFrame, min_touches: int = DEFAULT_BEHAVIOR_MIN_TOUCHES) -> pd.DataFrame:
     if candidates is None or candidates.empty:
         return pd.DataFrame(columns=_BEHAVIOR_OUTPUT_COLUMNS)
     rows = candidates[_true_mask(candidates, "active_side")].copy()
@@ -407,13 +414,8 @@ def _prepare_behavior_rows(candidates: pd.DataFrame) -> pd.DataFrame:
         if column not in rows:
             rows[column] = ""
 
-    discovery_events = _numeric(rows, "discovery_events")
-    validation_events = _numeric(rows, "validation_events")
-    holdout_events = _numeric(rows, "holdout_events")
-    rows["total_touch_events"] = (
-        discovery_events + validation_events + holdout_events
-    ).astype(int)
-    rows = rows[rows["total_touch_events"] > 0].copy()
+    rows["total_touch_events"] = _total_touch_events(rows).astype(int)
+    rows = rows[rows["total_touch_events"] >= max(1, int(min_touches))].copy()
     if rows.empty:
         return pd.DataFrame(columns=_BEHAVIOR_OUTPUT_COLUMNS)
     validation_events = _numeric(rows, "validation_events")
@@ -473,10 +475,14 @@ def _rank_behavior_rows(
     return ranked.head(top_n).reset_index(drop=True)
 
 
-def build_behavior_profiles(candidates: pd.DataFrame, top_n: int = 5) -> dict[str, pd.DataFrame]:
+def build_behavior_profiles(
+    candidates: pd.DataFrame,
+    top_n: int = 20,
+    min_touches: int = DEFAULT_BEHAVIOR_MIN_TOUCHES,
+) -> dict[str, pd.DataFrame]:
     """Build explanatory MA behaviour tables independent of strict certification."""
 
-    rows = _prepare_behavior_rows(candidates)
+    rows = _prepare_behavior_rows(candidates, min_touches=min_touches)
     empty = pd.DataFrame(columns=_BEHAVIOR_OUTPUT_COLUMNS)
     if rows.empty:
         return {

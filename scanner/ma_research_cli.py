@@ -77,6 +77,7 @@ DEFAULT_SCAN_PERIODS: tuple[int, ...] = (
     5,
     8,
     13,
+    20,
     21,
     22,
     34,
@@ -178,6 +179,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rows for MA behavior profile tables; broad scans show top instruments, single-symbol scans show top MA rows",
     )
     parser.add_argument("--periods", default=",".join(map(str, DEFAULT_SCAN_PERIODS)))
+    parser.add_argument(
+        "--behavior-min-touches",
+        type=int,
+        default=10,
+        help="Minimum historical MA visits required for behavior profile tables",
+    )
     parser.add_argument("--ma-types", default=",".join(MA_TYPES))
     parser.add_argument("--null-iterations", type=int, default=None)
     parser.add_argument("--fdr-q", type=float, default=None)
@@ -401,7 +408,11 @@ def main(argv: list[str] | None = None) -> int:
         pd.concat(panel_results, ignore_index=True) if panel_results else pd.DataFrame()
     )
     summary = build_instrument_summary(candidates)
-    behavior_profiles = build_behavior_profiles(candidates, top_n=args.behavior_top)
+    behavior_profiles = build_behavior_profiles(
+        candidates,
+        top_n=args.behavior_top,
+        min_touches=args.behavior_min_touches,
+    )
     confluence = build_confluence(panel)
     if not candidates.empty:
         candidates.to_csv(output_dir / "all_candidates.csv", index=False)
@@ -464,7 +475,8 @@ def main(argv: list[str] | None = None) -> int:
             "candidate_only": "Location information only; not validated evidence.",
             "confluence": "Context cluster; timeframes are correlated, not independent votes.",
             "instrument_summary": "Exactly one row per typed instrument; MA details are separate.",
-            "behavior_profile": "Explains most visited MAs, strongest reactions, and near-price support/resistance candidates without requiring certification.",
+            "behavior_profile": "Explains most visited MAs, strongest reactions, and near-price support/resistance candidates using raw historical MA visits above the minimum touch threshold.",
+            "behavior_min_touches": args.behavior_min_touches,
             "survivorship_warning": SURVIVORSHIP_WARNING,
         },
     }

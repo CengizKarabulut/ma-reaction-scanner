@@ -119,7 +119,7 @@ class GuardedNotifierTests(unittest.TestCase):
 
     def test_uncertified_fallback_excludes_zero_touch_candidates(self):
         rows = []
-        for symbol, touches in (("ZERO", 0), ("LIVE", 7)):
+        for symbol, touches in (("ZERO", 0), ("LIVE", 12)):
             nearest = _nearest(0.1, side="resistance", ma="EMA", period=55, strength=1.0)
             nearest["nearest_discovery_events"] = touches
             nearest["nearest_total_touch_events"] = touches

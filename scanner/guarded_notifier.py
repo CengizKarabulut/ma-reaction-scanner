@@ -53,6 +53,7 @@ _STATUS_LABELS = {
     "none": "Aday yok",
 }
 _SIDE_LABELS = {"support": "Destek", "resistance": "Direnç"}
+_MIN_DISPLAY_TOUCHES = 10
 
 
 def select_top_instruments(summary: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
@@ -85,7 +86,7 @@ def select_top_instruments(summary: pd.DataFrame, top_n: int = 20) -> pd.DataFra
         )
     else:
         chosen = ranked[
-            (ranked["nearest_total_touch_events"].fillna(0) > 0)
+            (ranked["nearest_total_touch_events"].fillna(0) >= _MIN_DISPLAY_TOUCHES)
             & (ranked["nearest_status"].astype(str) != "none")
         ].sort_values(
             ["nearest_abs_distance_atr", "nearest_total_touch_events", "max_sr_strength_score", "symbol"],
@@ -271,7 +272,7 @@ def send_behavior_tables(
         touch_events = pd.to_numeric(
             table.get("total_touch_events", pd.Series(dtype=float)), errors="coerce"
         ).fillna(0)
-        table = table[touch_events > 0].copy()
+        table = table[touch_events >= _MIN_DISPLAY_TOUCHES].copy()
         if table.empty:
             continue
         rows = _behavior_rows(table, max_rows=max_rows)

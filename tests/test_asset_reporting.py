@@ -33,7 +33,7 @@ class AssetReportingTests(unittest.TestCase):
                     "certified": certified,
                     "actionable": certified,
                     "rank_score": 100.0 if certified else 1.0,
-                    "discovery_events": 5,
+                    "discovery_events": 12,
                     "validation_events": 0,
                     "holdout_events": 0,
                 }
@@ -131,7 +131,7 @@ class AssetReportingTests(unittest.TestCase):
             "certified": False,
             "actionable": False,
             "rank_score": 1.0,
-            "discovery_events": 4,
+            "discovery_events": 12,
             "validation_events": 0,
             "holdout_events": 0,
         }
@@ -276,6 +276,74 @@ class AssetReportingTests(unittest.TestCase):
         self.assertEqual(profiles["most_visited"]["symbol"].tolist(), ["BBB", "CCC"])
         self.assertEqual(profiles["near_price"]["symbol"].tolist(), ["DDD", "CCC"])
         self.assertTrue((profiles["near_price"]["total_touch_events"] > 0).all())
+
+    def test_behavior_profiles_use_raw_behavior_touches_over_certification_events(self):
+        row = {
+            "ticker": "NETCD",
+            "asset_class": "stock",
+            "asset_label": "Hisse",
+            "universe": "custom",
+            "display_name": "NETCD",
+            "timeframe": "1d",
+            "current_price": 146.90,
+            "current_ma": 147.69,
+            "ma_type": "HMA",
+            "period": 13,
+            "side": "resistance",
+            "active_side": True,
+            "distance_pct": 0.54,
+            "distance_atr": 0.08,
+            "discovery_events": 1,
+            "validation_events": 0,
+            "holdout_events": 0,
+            "behavior_events": 18,
+            "behavior_hit_rate": 0.61,
+            "behavior_median_fixed_atr": 0.42,
+            "sr_strength_score": 30.0,
+            "discovery_pass": False,
+            "certified": False,
+            "low_confidence": False,
+            "status": "unverified_candidate",
+        }
+
+        profiles = build_behavior_profiles(pd.DataFrame([row]), top_n=5, min_touches=10)
+        result = profiles["most_visited"].iloc[0]
+
+        self.assertEqual(int(result["total_touch_events"]), 18)
+        self.assertAlmostEqual(result["reaction_hit_rate_pct"], 61.0)
+        self.assertAlmostEqual(result["reaction_median_fixed_atr"], 0.42)
+
+    def test_behavior_profiles_drop_rows_below_minimum_touch_threshold(self):
+        row = {
+            "ticker": "NETCD",
+            "asset_class": "stock",
+            "asset_label": "Hisse",
+            "universe": "custom",
+            "display_name": "NETCD",
+            "timeframe": "1d",
+            "current_price": 146.90,
+            "current_ma": 147.69,
+            "ma_type": "HMA",
+            "period": 13,
+            "side": "resistance",
+            "active_side": True,
+            "distance_pct": 0.54,
+            "distance_atr": 0.08,
+            "behavior_events": 2,
+            "behavior_hit_rate": 0.50,
+            "behavior_median_fixed_atr": -4.01,
+            "sr_strength_score": 0.0,
+            "discovery_pass": False,
+            "certified": False,
+            "low_confidence": False,
+            "status": "unverified_candidate",
+        }
+
+        profiles = build_behavior_profiles(pd.DataFrame([row]), top_n=5, min_touches=10)
+
+        self.assertTrue(profiles["most_visited"].empty)
+        self.assertTrue(profiles["best_reactions"].empty)
+        self.assertTrue(profiles["near_price"].empty)
 
     def test_same_symbol_in_two_asset_classes_is_not_merged(self):
         base = {

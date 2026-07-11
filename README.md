@@ -63,7 +63,7 @@ seçin ve Türkçe sektör adını menüden belirleyin. Endeks kodu yazmak gerek
 ```text
 universe: bist30_stocks veya bist_sector_stocks
 timeframes/interval: 1d
-periods: 5,8,13,21,22,34,50,55,89,100,144,200,233,377
+periods: 5,8,13,20,21,22,34,55,89,100,144,200,233,377
 source: auto
 top: 5
 null_iterations: 499
@@ -83,7 +83,7 @@ workflow'unu kullanın:
 2. `market`: `BIST`
 3. `symbol`: yalnızca hisse kodu, örneğin `THYAO`
 4. `timeframes`: ilk denemede `1d`
-5. `periods`: `5,8,13,21,22,34,50,55,89,100,144,200,233,377`
+5. `periods`: `5,8,13,20,21,22,34,55,89,100,144,200,233,377`
 6. `source`: `auto`
 7. `top`: `5`
 8. `null_iterations`: gerçek taramada `499`
@@ -136,12 +136,14 @@ Ek olarak her kosu ilk amaca donen uc davranis tablosu uretir:
 - ma_behavior_best_reactions.csv: temas sonrasi en iyi tepki istatistigi veren MA seviyeleri
 - ma_behavior_near_price.csv: bugunku fiyata en yakin temasli destek/direnc adaylari
 
-Bu tablolara Temas=0 olan seviye girmez. Genis evren taramalarinda Telegram
+Bu tablolardaki Temas sayisi sertifikasyon olay sayisi degil, tum gecmis veri
+uzerinde MA bandina pratik ziyaret sayisidir. Varsayilan olarak Temas < 10 olan
+seviyeler davranis tablolarina girmez. Genis evren taramalarinda Telegram
 tablolari evren genelinden top 20 varligi gosterir; ayni varlik tabloyu
-doldurmaz. Tek sembol taramasinda ise ayni sembolun en iyi MA satirlari
-gosterilir. Tablolarda fiyat, MA seviyesi, uzaklik, temas sayisi, tepki orani,
-MedATR ve skor vardir; arastirma kanit etiketleri bu pratik davranis
-tablolarinda gosterilmez.
+doldurmaz. Tek sembol taramasinda ise ayni sembolun minimum temas esigini gecen
+en iyi MA satirlari gosterilir. Tablolarda fiyat, MA seviyesi, uzaklik, temas
+sayisi, tepki orani, MedATR ve skor vardir; arastirma kanit etiketleri bu pratik
+davranis tablolarinda gosterilmez.
 
 `0/28`, veri bulunamadı demek değildir: 28 aktif MA seviyesi test edilmiş fakat
 hiçbiri discovery, kontrol, validation ve holdout kapılarının tamamını
@@ -189,7 +191,7 @@ BIST 30 günlük tarama:
 python -m scanner.ma_research_cli \
   --universe bist30_stocks \
   --timeframes 1d \
-  --periods 5,8,13,21,22,34,50,55,89,100,144,200,233,377 \
+  --periods 5,8,13,20,21,22,34,55,89,100,144,200,233,377 \
   --source auto \
   --null-iterations 499
 ```

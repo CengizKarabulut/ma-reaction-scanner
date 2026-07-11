@@ -421,6 +421,73 @@ def detect_independent_touches(
     return events
 
 
+def detect_behavior_touches(
+    df: pd.DataFrame,
+    ma_series: pd.Series,
+    config: AnalysisConfig,
+    side: int,
+) -> list[TouchEvent]:
+    """Count practical MA visits for behaviour tables, independent of certification gates.
+
+    The guarded certification path deliberately uses stricter non-overlapping
+    evidence events.  The user-facing behaviour tables answer a different
+    question: how often did price visit this MA after moving meaningfully away
+    from it, and what happened next?  Consecutive bars inside the same MA band
+    count as one visit, but no FDR/null/segment gate is applied here.
+    """
+
+    ma = ma_series.reindex(df.index).to_numpy(dtype=float)
+    close = df["Close"].to_numpy(dtype=float)
+    high = df["High"].to_numpy(dtype=float)
+    low = df["Low"].to_numpy(dtype=float)
+    atr_values = df["ATR"].to_numpy(dtype=float)
+    adx_values = df["ADX"].to_numpy(dtype=float)
+    vol_bins = df["VOL_BIN"].to_numpy(dtype=int)
+    session_bins = df["SESSION_BIN"].to_numpy(dtype=int)
+    events: list[TouchEvent] = []
+    was_far = False
+    previous_in_zone = False
+
+    for i in range(1, len(df) - config.horizon):
+        if not (np.isfinite(ma[i]) and np.isfinite(atr_values[i]) and atr_values[i] > 0):
+            was_far = False
+            previous_in_zone = False
+            continue
+        signed_distance = (close[i] - ma[i]) / atr_values[i]
+        zone = config.zone_atr * atr_values[i]
+        in_zone = low[i] <= ma[i] + zone and high[i] >= ma[i] - zone
+        if not in_zone:
+            if side == 1 and signed_distance >= config.separation_atr:
+                was_far = True
+            elif side == -1 and signed_distance <= -config.separation_atr:
+                was_far = True
+
+        if in_zone and not previous_in_zone and was_far:
+            regime = "trend" if np.isfinite(adx_values[i]) and adx_values[i] >= config.adx_threshold else "range"
+            lookback = max(0, i - config.horizon)
+            approach_strength = max(
+                0.0,
+                -side * (close[i - 1] - close[lookback]) / atr_values[i],
+            )
+            events.append(
+                TouchEvent(
+                    position=i,
+                    timestamp=df.index[i],
+                    direction=side,
+                    regime=regime,
+                    atr=float(atr_values[i]),
+                    entry=float(close[i]),
+                    ma_value=float(ma[i]),
+                    volatility_bin=int(vol_bins[i]),
+                    session_bin=int(session_bins[i]),
+                    approach_bin=int(min(3, np.floor(approach_strength))),
+                )
+            )
+            was_far = False
+        previous_in_zone = in_zone
+    return events
+
+
 def measure_event(
     df: pd.DataFrame,
     position: int,
@@ -778,6 +845,11 @@ def evaluate_candidate(
     forward_outcomes: ForwardOutcomes | None = None,
 ) -> dict[str, object]:
     events = detect_independent_touches(df, ma_series, config)
+    behavior_events = detect_behavior_touches(df, ma_series, config, side)
+    behavior_measurements = _measure_events(
+        df, behavior_events, config, 0, len(df), side, forward_outcomes
+    )
+    behavior_metrics = summarize_measurements(behavior_measurements)
     discovery, validation, holdout = _segment_bounds(len(df), config)
     d_measurements = _measure_events(
         df, events, config, *discovery, side, forward_outcomes
@@ -799,7 +871,7 @@ def evaluate_candidate(
         "period": int(period),
         "side": "support" if side == 1 else "resistance",
     }
-    for prefix, metrics in (("discovery", d_metrics), ("validation", v_metrics), ("holdout", h_metrics)):
+    for prefix, metrics in (("discovery", d_metrics), ("validation", v_metrics), ("holdout", h_metrics), ("behavior", behavior_metrics)):
         for key, value in metrics.items():
             result[f"{prefix}_{key}"] = value
 

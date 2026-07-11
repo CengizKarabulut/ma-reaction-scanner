@@ -7,10 +7,10 @@ class ResearchCliBudgetTests(unittest.TestCase):
     def test_default_scan_periods_keep_full_operational_research_list(self):
         args = build_parser().parse_args([])
 
-        self.assertEqual(
-            [int(value) for value in args.periods.split(",")],
-            list(DEFAULT_SCAN_PERIODS),
-        )
+        parsed_periods = [int(value) for value in args.periods.split(",")]
+        self.assertEqual(parsed_periods, list(DEFAULT_SCAN_PERIODS))
+        self.assertIn(20, parsed_periods)
+        self.assertEqual(args.behavior_min_touches, 10)
 
     def test_fast_flag_is_backward_compatible_noop(self):
         args = build_parser().parse_args(["--fast", "--periods", "5,8,13,21,34,55"])
