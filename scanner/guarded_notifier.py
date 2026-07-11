@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 import sys
 
 import pandas as pd
@@ -192,6 +193,78 @@ def build_guarded_table(
     return headers, rows, colors, title
 
 
+def _behavior_rows(table: pd.DataFrame, max_rows: int) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for _, row in table.head(max_rows).iterrows():
+        rows.append(
+            [
+                str(row.get("symbol", "")),
+                _SIDE_LABELS.get(str(row.get("side", "")), str(row.get("side", ""))),
+                str(row.get("ma_label", "")),
+                _price(row.get("current_ma")),
+                _number(row.get("abs_distance_atr"), 2),
+                _number(abs(float(row.get("distance_pct", 0.0))), 2, "%"),
+                str(int(pd.to_numeric(pd.Series([row.get("total_touch_events", 0)]), errors="coerce").fillna(0).iloc[0])),
+                _number(row.get("reaction_hit_rate_pct"), 1, "%"),
+                _number(row.get("reaction_median_fixed_atr"), 2),
+                _number(row.get("reaction_quality_score"), 1),
+                str(row.get("evidence_label", "")),
+            ]
+        )
+    return rows
+
+
+def send_behavior_tables(
+    token: str,
+    chat_id: str,
+    behavior_dir: str | Path,
+    *,
+    top_n: int = 20,
+) -> bool:
+    folder = Path(behavior_dir)
+    if not folder.exists():
+        return True
+    specs = [
+        ("ma_behavior_most_visited.csv", "En Sik Ugradigi Ortalamalar"),
+        ("ma_behavior_best_reactions.csv", "En Cok Tepki Aldigi Ortalamalar"),
+        ("ma_behavior_near_price.csv", "Fiyata Yakin Destek/Direnc Adaylari"),
+    ]
+    headers = [
+        "Varlik",
+        "Taraf",
+        "MA",
+        "Seviye",
+        "Uzak ATR",
+        "Uzak %",
+        "Temas",
+        "Tepki%",
+        "MedATR",
+        "Skor",
+        "Kanit",
+    ]
+    ok = True
+    max_rows = max(int(top_n), 10)
+    for filename, title in specs:
+        path = folder / filename
+        if not path.exists():
+            continue
+        table = pd.read_csv(path)
+        if table.empty:
+            continue
+        rows = _behavior_rows(table, max_rows=max_rows)
+        images = render_table_image(headers, rows, title=title)
+        if images:
+            for index, image in enumerate(images, 1):
+                caption = title if len(images) == 1 else f"{title} - Sayfa {index}/{len(images)}"
+                ok = send_photo(token, chat_id, image, caption=caption) and ok
+        else:
+            lines = [title, "```", " | ".join(headers), "-" * 60]
+            lines.extend(" | ".join(row) for row in rows)
+            lines.append("```")
+            ok = send_telegram(token, chat_id, "\n".join(lines), parse_mode="Markdown") and ok
+    return ok
+
+
 def send_guarded_summary(
     token: str,
     chat_id: str,
@@ -199,6 +272,7 @@ def send_guarded_summary(
     *,
     label: str,
     top_n: int = 20,
+    behavior_dir: str | Path | None = None,
 ) -> bool:
     unique_count = len(summary.drop_duplicates(["asset_label", "symbol"]))
     tested_levels = int(summary["tested_level_count"].sum())
@@ -236,11 +310,16 @@ def send_guarded_summary(
                 else f"{title} — Sayfa {index}/{len(images)}"
             )
             ok = send_photo(token, chat_id, image, caption=caption) and ok
+        if behavior_dir is not None:
+            ok = send_behavior_tables(token, chat_id, behavior_dir, top_n=top_n) and ok
         return ok
     lines = [title, "```", " | ".join(headers), "-" * 60]
     lines.extend(" | ".join(row) for row in rows)
     lines.append("```")
-    return send_telegram(token, chat_id, "\n".join(lines), parse_mode="Markdown") and ok
+    ok = send_telegram(token, chat_id, "\n".join(lines), parse_mode="Markdown") and ok
+    if behavior_dir is not None:
+        ok = send_behavior_tables(token, chat_id, behavior_dir, top_n=top_n) and ok
+    return ok
 
 
 def main() -> int:
@@ -248,6 +327,11 @@ def main() -> int:
     parser.add_argument("--summary", required=True, help="instrument_summary.csv path")
     parser.add_argument("--label", default="Guarded MA Research")
     parser.add_argument("--top", type=int, default=20, help="0 shows every ranked instrument")
+    parser.add_argument(
+        "--behavior-dir",
+        default=None,
+        help="Directory containing ma_behavior_*.csv files; defaults to summary directory",
+    )
     args = parser.parse_args()
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -262,13 +346,19 @@ def main() -> int:
         print(f"summary not found: {args.summary}", file=sys.stderr)
         return 2
     summary = pd.read_csv(args.summary)
+    behavior_dir = args.behavior_dir or str(Path(args.summary).parent)
     if summary.empty:
         send_telegram(token, chat_id, f"⚠️ {args.label}: özet boş", parse_mode=None)
         return 1
     return (
         0
         if send_guarded_summary(
-            token, chat_id, summary, label=args.label, top_n=args.top
+            token,
+            chat_id,
+            summary,
+            label=args.label,
+            top_n=args.top,
+            behavior_dir=behavior_dir,
         )
         else 1
     )

@@ -59,6 +59,7 @@ jobs:
           scanner/paper_tracker.py scanner/asset_reporting.py scanner/guarded_notifier.py
           tests/test_ma_core.py tests/test_ma_research_cli.py
           tests/test_ma_validation.py tests/test_paper_tracker.py
+          tests/test_asset_reporting.py tests/test_guarded_notifier.py
       - name: Mypy
         run: >-
           python -m mypy --config-file pyproject.toml

@@ -14,7 +14,12 @@ import sys
 import pandas as pd
 
 try:
-    from .asset_reporting import build_instrument_summary, format_instrument_summary
+    from .asset_reporting import (
+        build_behavior_profiles,
+        build_instrument_summary,
+        format_behavior_profiles,
+        format_instrument_summary,
+    )
     from .asset_universe import (
         ASSET_CLASSES,
         build_custom_instruments,
@@ -24,7 +29,12 @@ try:
     from .bist_classification import list_sector_choices
     from .stock_metadata import enrich_stock_instruments, format_index_memberships
 except ImportError:  # direct script execution
-    from asset_reporting import build_instrument_summary, format_instrument_summary
+    from asset_reporting import (
+        build_behavior_profiles,
+        build_instrument_summary,
+        format_behavior_profiles,
+        format_instrument_summary,
+    )
     from asset_universe import (
         ASSET_CLASSES,
         build_custom_instruments,
@@ -160,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--top", type=int, default=5, help="Candidates shown per side/timeframe"
+    )
+    parser.add_argument(
+        "--behavior-top",
+        type=int,
+        default=5,
+        help="Rows per instrument for MA behavior profile tables",
     )
     parser.add_argument("--periods", default=",".join(map(str, DEFAULT_SCAN_PERIODS)))
     parser.add_argument("--ma-types", default=",".join(MA_TYPES))
@@ -385,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         pd.concat(panel_results, ignore_index=True) if panel_results else pd.DataFrame()
     )
     summary = build_instrument_summary(candidates)
+    behavior_profiles = build_behavior_profiles(candidates, top_n=args.behavior_top)
     confluence = build_confluence(panel)
     if not candidates.empty:
         candidates.to_csv(output_dir / "all_candidates.csv", index=False)
@@ -395,6 +412,11 @@ def main(argv: list[str] | None = None) -> int:
         panel.to_csv(output_dir / "panel_detail.csv", index=False)
     if not confluence.empty:
         confluence.to_csv(output_dir / "confluence.csv", index=False)
+    for behavior_name, behavior_table in behavior_profiles.items():
+        if not behavior_table.empty:
+            behavior_table.to_csv(
+                output_dir / f"ma_behavior_{behavior_name}.csv", index=False
+            )
     summary_text = format_instrument_summary(summary)
     summary_text_with_warning = summary_text + f"\n\n{SURVIVORSHIP_WARNING}"
     (output_dir / "instrument_summary.txt").write_text(
@@ -402,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     (output_dir / "panel.txt").write_text(summary_text_with_warning, encoding="utf-8")
     (output_dir / "panel_detail.txt").write_text(format_panel(panel), encoding="utf-8")
+    behavior_text = format_behavior_profiles(behavior_profiles)
+    (output_dir / "ma_behavior_profile.txt").write_text(behavior_text, encoding="utf-8")
     try:
         summary_markdown = "# Tekilleştirilmiş Varlık Özeti\n\n" + summary.to_markdown(
             index=False
@@ -413,6 +437,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         (output_dir / "panel.md").write_text(summary_markdown, encoding="utf-8")
         _write_markdown(panel, confluence, output_dir / "panel_detail.md")
+        behavior_markdown = "# MA Davranis Profili\n\n"
+        for behavior_name, behavior_table in behavior_profiles.items():
+            behavior_markdown += f"## {behavior_name}\n\n"
+            behavior_markdown += (
+                "No rows.\n\n"
+                if behavior_table.empty
+                else behavior_table.to_markdown(index=False) + "\n\n"
+            )
+        (output_dir / "ma_behavior_profile.md").write_text(
+            behavior_markdown, encoding="utf-8"
+        )
     except ImportError:
         LOG.warning("tabulate is unavailable; Markdown table skipped")
     metadata = {
@@ -429,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
             "candidate_only": "Location information only; not validated evidence.",
             "confluence": "Context cluster; timeframes are correlated, not independent votes.",
             "instrument_summary": "Exactly one row per typed instrument; MA details are separate.",
+            "behavior_profile": "Explains most visited MAs, strongest reactions, and near-price support/resistance candidates without requiring certification.",
             "survivorship_warning": SURVIVORSHIP_WARNING,
         },
     }
@@ -436,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(summary_text)
+    print("\n" + behavior_text)
     if args.show_detail:
         print("\nMA DETAIL\n" + format_panel(panel))
     print(f"\nOutputs: {output_dir.resolve()}")
