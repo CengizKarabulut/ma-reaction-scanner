@@ -1,0 +1,200 @@
+name: Betimsel MA Saygı Taraması
+
+on:
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: 'Evren: custom tek/liste, bist100_stocks, bist_all_stocks, crypto_majors vb.'
+        required: true
+        default: 'custom'
+        type: choice
+        options:
+          - custom
+          - bist30_stocks
+          - bist50_stocks
+          - bist100_stocks
+          - bist_all_stocks
+          - bist_bank_stocks
+          - bist_technology_stocks
+          - bist_food_stocks
+          - bist_chemistry_stocks
+          - bist_sector_stocks
+          - bist_main_indices
+          - bist_sector_indices
+          - bist_all_indices
+          - crypto_majors
+          - commodities_majors
+      ticker:
+        description: 'Tek sembol: ASELS, THYAO, XU100, BTC-USD vb. custom için kullanılır.'
+        required: true
+        default: 'ASELS'
+      tickers:
+        description: 'Custom çoklu sembol listesi; boşsa ticker kullanılır'
+        required: false
+        default: ''
+      asset_class:
+        description: 'Custom varlık sınıfı'
+        required: true
+        default: 'stock'
+        type: choice
+        options: [stock, index, sector_index, crypto, commodity]
+      market:
+        description: 'Custom piyasa'
+        required: true
+        default: 'BIST'
+        type: choice
+        options: [BIST, GLOBAL]
+      sector:
+        description: 'Sadece bist_sector_stocks için Türkçe sektör adı'
+        required: false
+        default: 'Tümü / uygulanmaz'
+      timeframe:
+        description: 'Zaman dilimi'
+        required: true
+        default: '1d'
+        type: choice
+        options: [1h, 4h, 1d, 1wk, 1mo]
+      periods:
+        description: 'Aday MA periyot havuzu; ekleyip çıkarabilirsin'
+        required: true
+        default: '5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377'
+      ma_types:
+        description: 'MA türleri; ekleyip çıkarabilirsin'
+        required: true
+        default: 'SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA'
+      side:
+        description: 'Ana okuma tarafı'
+        required: true
+        default: 'support'
+        type: choice
+        options: [support, resistance]
+      lookback:
+        description: 'Son N bar; 0 tüm veri'
+        required: true
+        default: '750'
+      source:
+        description: 'Veri kaynağı'
+        required: true
+        default: 'auto'
+        type: choice
+        options: [auto, borsapy, yfinance]
+      top:
+        description: 'Telegram/konsol genel top satırı'
+        required: true
+        default: '20'
+      detail_top:
+        description: 'Tek sembolde olay dökümü için en iyi MA sayısı'
+        required: true
+        default: '5'
+      per_symbol_top:
+        description: 'Çoklu taramada varlık başına gösterilecek MA sayısı'
+        required: true
+        default: '3'
+      min_visits:
+        description: 'Telegramda gösterilecek minimum ham ziyaret sayısı'
+        required: true
+        default: '5'
+      sort_by:
+        description: 'Ana sıralama'
+        required: true
+        default: 'visits'
+        type: choice
+        options: [visits, score]
+      max_symbols:
+        description: 'Test için ilk N varlık; 0 sınır yok'
+        required: true
+        default: '0'
+      zone_atr:
+        description: 'Dokunuş toleransı ATR; boş bırakılırsa timeframe varsayılanı'
+        required: false
+        default: ''
+      separation_atr:
+        description: 'Ziyaret öncesi uzaklaşma ATR; boş bırakılırsa varsayılan'
+        required: false
+        default: ''
+      horizon:
+        description: 'Tepki ölçüm bar ufku; boş bırakılırsa varsayılan'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  descriptive-ma:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      INPUT_UNIVERSE: ${{ inputs.universe }}
+      INPUT_TICKER: ${{ inputs.ticker }}
+      INPUT_TICKERS: ${{ inputs.tickers }}
+      INPUT_ASSET_CLASS: ${{ inputs.asset_class }}
+      INPUT_MARKET: ${{ inputs.market }}
+      INPUT_SECTOR: ${{ inputs.sector }}
+      INPUT_TIMEFRAME: ${{ inputs.timeframe }}
+      INPUT_PERIODS: ${{ inputs.periods }}
+      INPUT_MA_TYPES: ${{ inputs.ma_types }}
+      INPUT_SIDE: ${{ inputs.side }}
+      INPUT_LOOKBACK: ${{ inputs.lookback }}
+      INPUT_SOURCE: ${{ inputs.source }}
+      INPUT_TOP: ${{ inputs.top }}
+      INPUT_DETAIL_TOP: ${{ inputs.detail_top }}
+      INPUT_PER_SYMBOL_TOP: ${{ inputs.per_symbol_top }}
+      INPUT_MIN_VISITS: ${{ inputs.min_visits }}
+      INPUT_SORT_BY: ${{ inputs.sort_by }}
+      INPUT_MAX_SYMBOLS: ${{ inputs.max_symbols }}
+      INPUT_ZONE_ATR: ${{ inputs.zone_atr }}
+      INPUT_SEPARATION_ATR: ${{ inputs.separation_atr }}
+      INPUT_HORIZON: ${{ inputs.horizon }}
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v4
+      - name: Python setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Bağımlılıklar
+        run: python -m pip install -r requirements.txt
+      - name: Betimsel MA saygı taraması
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          ARGS=(
+            --universe "$INPUT_UNIVERSE"
+            --ticker "$INPUT_TICKER"
+            --tickers "$INPUT_TICKERS"
+            --asset-class "$INPUT_ASSET_CLASS"
+            --market "$INPUT_MARKET"
+            --sector "$INPUT_SECTOR"
+            --timeframe "$INPUT_TIMEFRAME"
+            --periods "$INPUT_PERIODS"
+            --ma-types "$INPUT_MA_TYPES"
+            --side "$INPUT_SIDE"
+            --lookback "$INPUT_LOOKBACK"
+            --source "$INPUT_SOURCE"
+            --top "$INPUT_TOP"
+            --detail-top "$INPUT_DETAIL_TOP"
+            --per-symbol-top "$INPUT_PER_SYMBOL_TOP"
+            --min-visits "$INPUT_MIN_VISITS"
+            --sort-by "$INPUT_SORT_BY"
+            --max-symbols "$INPUT_MAX_SYMBOLS"
+            --output-dir reports/descriptive
+            --telegram
+          )
+          if [ -n "$INPUT_ZONE_ATR" ]; then ARGS+=(--zone-atr "$INPUT_ZONE_ATR"); fi
+          if [ -n "$INPUT_SEPARATION_ATR" ]; then ARGS+=(--separation-atr "$INPUT_SEPARATION_ATR"); fi
+          if [ -n "$INPUT_HORIZON" ]; then ARGS+=(--horizon "$INPUT_HORIZON"); fi
+          python -m scanner.ma_descriptive_cli "${ARGS[@]}"
+      - name: Denetlenebilir çıktıları yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: descriptive-ma-respect-${{ inputs.universe }}-${{ inputs.ticker }}-${{ github.run_id }}
+          path: |
+            reports/descriptive/
+            data_cache/
+          retention-days: 90
+          if-no-files-found: warn

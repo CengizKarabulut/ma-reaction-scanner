@@ -321,9 +321,9 @@ def send_behavior_tables(
         ok = send_telegram(
             token,
             chat_id,
-            f"Davran?? tablosu g?nderilmedi: minimum {min_touches} ham temas e?i?ini "
-            "ge?en MA bulunamad?. Workflow'da behavior_min_touches de?erini "
-            "d???r?rsen Telegram da ayn? e?i?i kullan?r.",
+            f"Davranış tablosu gönderilmedi: minimum {min_touches} ham temas eşiğini "
+            "geçen MA bulunamadı. Workflow'da behavior_min_touches değerini "
+            "düşürürsen Telegram da aynı eşiği kullanır.",
             parse_mode=None,
         ) and ok
     return ok

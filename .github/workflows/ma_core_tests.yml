@@ -55,9 +55,9 @@ jobs:
       - name: Ruff
         run: >-
           python -m ruff check
-          scanner/ma_core.py scanner/ma_research_cli.py scanner/ma_validation.py
+          scanner/ma_core.py scanner/ma_research_cli.py scanner/ma_descriptive_cli.py scanner/ma_validation.py
           scanner/paper_tracker.py scanner/asset_reporting.py scanner/guarded_notifier.py
-          tests/test_ma_core.py tests/test_ma_research_cli.py
+          tests/test_ma_core.py tests/test_ma_research_cli.py tests/test_ma_descriptive_cli.py
           tests/test_ma_validation.py tests/test_paper_tracker.py
           tests/test_asset_reporting.py tests/test_guarded_notifier.py
       - name: Mypy
