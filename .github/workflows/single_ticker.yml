@@ -100,7 +100,8 @@ jobs:
           python -m scanner.guarded_notifier \
             --summary reports/single/instrument_summary.csv \
             --label "Guarded Tek Varlık: ${{ inputs.symbol }}" \
-            --top 1
+            --top 1 \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES"
         continue-on-error: true
       - name: Denetlenebilir çıktıları yükle
         if: always()

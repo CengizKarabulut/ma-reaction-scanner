@@ -156,7 +156,8 @@ jobs:
           python -m scanner.guarded_notifier \
             --summary reports/multi_tf/instrument_summary.csv \
             --label "Guarded Multi-TF (${{ inputs.cascade_type }})" \
-            --top 20
+            --top 20 \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES"
         continue-on-error: true
       - name: Denetlenebilir çıktıları yükle
         if: always()

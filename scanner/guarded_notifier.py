@@ -56,12 +56,15 @@ _SIDE_LABELS = {"support": "Destek", "resistance": "Direnç"}
 _MIN_DISPLAY_TOUCHES = 10
 
 
-def select_top_instruments(summary: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
+def select_top_instruments(
+    summary: pd.DataFrame, top_n: int = 20, min_touches: int = _MIN_DISPLAY_TOUCHES
+) -> pd.DataFrame:
     """Rank unique instruments; uncertified fallback is ordered by proximity."""
 
     missing = sorted(_REQUIRED_COLUMNS - set(summary.columns))
     if missing:
         raise ValueError(f"guarded summary columns missing: {missing}")
+    min_touches = max(1, int(min_touches))
     ranked = summary.copy()
     ranked["symbol"] = ranked["symbol"].astype(str).str.upper()
     descending = [
@@ -86,7 +89,7 @@ def select_top_instruments(summary: pd.DataFrame, top_n: int = 20) -> pd.DataFra
         )
     else:
         chosen = ranked[
-            (ranked["nearest_total_touch_events"].fillna(0) >= _MIN_DISPLAY_TOUCHES)
+            (ranked["nearest_total_touch_events"].fillna(0) >= min_touches)
             & (ranked["nearest_status"].astype(str) != "none")
         ].sort_values(
             ["nearest_abs_distance_atr", "nearest_total_touch_events", "max_sr_strength_score", "symbol"],
@@ -143,11 +146,11 @@ def _candidate_rows(top: pd.DataFrame) -> list[list[str]]:
 
 
 def build_guarded_table(
-    summary: pd.DataFrame, top_n: int = 20
+    summary: pd.DataFrame, top_n: int = 20, min_touches: int = _MIN_DISPLAY_TOUCHES
 ) -> tuple[list[str], list[list[str]], dict[int, list[str | None]], str]:
     """Build a compact certified table or a useful nearest-candidate fallback."""
 
-    top = select_top_instruments(summary, top_n=top_n)
+    top = select_top_instruments(summary, top_n=top_n, min_touches=min_touches)
     has_certified = bool((summary["certified_level_count"] > 0).any())
     colors: dict[int, list[str | None]] = {0: []}
     if not has_certified:
@@ -205,7 +208,9 @@ def build_guarded_table(
     return headers, rows, colors, title
 
 
-def _behavior_rows(table: pd.DataFrame, max_rows: int) -> list[list[str]]:
+def _behavior_rows(
+    table: pd.DataFrame, max_rows: int, score_column: str = "reaction_quality_score"
+) -> list[list[str]]:
     rows: list[list[str]] = []
     for _, row in table.head(max_rows).iterrows():
         distance_pct = pd.to_numeric(
@@ -226,7 +231,7 @@ def _behavior_rows(table: pd.DataFrame, max_rows: int) -> list[list[str]]:
                 str(int(touch_events)),
                 _number(row.get("reaction_hit_rate_pct"), 1, "%"),
                 _number(row.get("reaction_median_fixed_atr"), 2),
-                _number(row.get("reaction_quality_score"), 1),
+                _number(row.get(score_column), 1),
             ]
         )
     return rows
@@ -238,8 +243,10 @@ def send_behavior_tables(
     behavior_dir: str | Path,
     *,
     top_n: int = 20,
+    min_touches: int = _MIN_DISPLAY_TOUCHES,
     notify_empty: bool = False,
 ) -> bool:
+    min_touches = max(1, int(min_touches))
     folder = Path(behavior_dir)
     if not folder.exists():
         if notify_empty:
@@ -251,9 +258,21 @@ def send_behavior_tables(
             )
         return True
     specs = [
-        ("ma_behavior_most_visited.csv", "En Cok Temas Alan Ortalamalar"),
-        ("ma_behavior_best_reactions.csv", "En Iyi Tepki Veren Ortalamalar"),
-        ("ma_behavior_near_price.csv", "Fiyata Yakin Temasli Destek/Direnc"),
+        (
+            "ma_behavior_most_visited.csv",
+            "En Cok Temas Alan Ortalamalar",
+            "reaction_quality_score",
+        ),
+        (
+            "ma_behavior_best_reactions.csv",
+            "En Iyi Tepki Veren Ortalamalar",
+            "reaction_quality_score",
+        ),
+        (
+            "ma_behavior_near_price.csv",
+            "Fiyata Yakin Guclu Temasli Destek/Direnc",
+            "near_action_score",
+        ),
     ]
     headers = [
         "Varlik",
@@ -271,7 +290,7 @@ def send_behavior_tables(
     ok = True
     sent_any = False
     max_rows = max(int(top_n), 10)
-    for filename, title in specs:
+    for filename, title, score_column in specs:
         path = folder / filename
         if not path.exists():
             continue
@@ -281,10 +300,10 @@ def send_behavior_tables(
         touch_events = pd.to_numeric(
             table.get("total_touch_events", pd.Series(dtype=float)), errors="coerce"
         ).fillna(0)
-        table = table[touch_events >= _MIN_DISPLAY_TOUCHES].copy()
+        table = table[touch_events >= min_touches].copy()
         if table.empty:
             continue
-        rows = _behavior_rows(table, max_rows=max_rows)
+        rows = _behavior_rows(table, max_rows=max_rows, score_column=score_column)
         if not rows:
             continue
         sent_any = True
@@ -302,8 +321,9 @@ def send_behavior_tables(
         ok = send_telegram(
             token,
             chat_id,
-            "Davranış tablosu gönderilmedi: minimum 10 ham temas eşiğini geçen MA bulunamadı. "
-            "Daha gevşek keşif için workflow'da behavior_min_touches değerini düşürebilirsin.",
+            f"Davran?? tablosu g?nderilmedi: minimum {min_touches} ham temas e?i?ini "
+            "ge?en MA bulunamad?. Workflow'da behavior_min_touches de?erini "
+            "d???r?rsen Telegram da ayn? e?i?i kullan?r.",
             parse_mode=None,
         ) and ok
     return ok
@@ -317,7 +337,9 @@ def send_guarded_summary(
     label: str,
     top_n: int = 20,
     behavior_dir: str | Path | None = None,
+    behavior_min_touches: int = _MIN_DISPLAY_TOUCHES,
 ) -> bool:
+    behavior_min_touches = max(1, int(behavior_min_touches))
     unique_count = len(summary.drop_duplicates(["asset_label", "symbol"]))
     tested_levels = int(summary["tested_level_count"].sum())
     discovery_levels = int(summary.get("discovery_pass_count", pd.Series(dtype=float)).sum())
@@ -342,11 +364,18 @@ def send_guarded_summary(
         f"_{explanation}_"
     )
     ok = send_telegram(token, chat_id, header, parse_mode="Markdown")
-    headers, rows, colors, title = build_guarded_table(summary, top_n=top_n)
+    headers, rows, colors, title = build_guarded_table(
+        summary, top_n=top_n, min_touches=behavior_min_touches
+    )
     if not rows:
         if behavior_dir is not None:
             ok = send_behavior_tables(
-                token, chat_id, behavior_dir, top_n=top_n, notify_empty=True
+                token,
+                chat_id,
+                behavior_dir,
+                top_n=top_n,
+                min_touches=behavior_min_touches,
+                notify_empty=True,
             ) and ok
         return ok
     images = render_table_image(headers, rows, title=title, col_colors=colors)
@@ -359,14 +388,26 @@ def send_guarded_summary(
             )
             ok = send_photo(token, chat_id, image, caption=caption) and ok
         if behavior_dir is not None:
-            ok = send_behavior_tables(token, chat_id, behavior_dir, top_n=top_n) and ok
+            ok = send_behavior_tables(
+                token,
+                chat_id,
+                behavior_dir,
+                top_n=top_n,
+                min_touches=behavior_min_touches,
+            ) and ok
         return ok
     lines = [title, "```", " | ".join(headers), "-" * 60]
     lines.extend(" | ".join(row) for row in rows)
     lines.append("```")
     ok = send_telegram(token, chat_id, "\n".join(lines), parse_mode="Markdown") and ok
     if behavior_dir is not None:
-        ok = send_behavior_tables(token, chat_id, behavior_dir, top_n=top_n) and ok
+        ok = send_behavior_tables(
+            token,
+            chat_id,
+            behavior_dir,
+            top_n=top_n,
+            min_touches=behavior_min_touches,
+        ) and ok
     return ok
 
 
@@ -379,6 +420,12 @@ def main() -> int:
         "--behavior-dir",
         default=None,
         help="Directory containing ma_behavior_*.csv files; defaults to summary directory",
+    )
+    parser.add_argument(
+        "--behavior-min-touches",
+        type=int,
+        default=_MIN_DISPLAY_TOUCHES,
+        help="Minimum raw MA touches required for Telegram behavior tables",
     )
     args = parser.parse_args()
 
@@ -407,6 +454,7 @@ def main() -> int:
             label=args.label,
             top_n=args.top,
             behavior_dir=behavior_dir,
+            behavior_min_touches=args.behavior_min_touches,
         )
         else 1
     )

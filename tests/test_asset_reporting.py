@@ -274,8 +274,56 @@ class AssetReportingTests(unittest.TestCase):
 
         self.assertNotIn("AAA", set(profiles["most_visited"]["symbol"]))
         self.assertEqual(profiles["most_visited"]["symbol"].tolist(), ["BBB", "CCC"])
-        self.assertEqual(profiles["near_price"]["symbol"].tolist(), ["DDD", "CCC"])
+        self.assertEqual(profiles["near_price"]["symbol"].tolist(), ["CCC", "DDD"])
         self.assertTrue((profiles["near_price"]["total_touch_events"] > 0).all())
+
+    def test_near_price_balances_proximity_with_touch_strength(self):
+        rows = []
+        for symbol, events, distance, hit_rate, median_atr, strength in (
+            ("VERY_NEAR", 12, 0.01, 0.50, 0.10, 10.0),
+            ("HEAVY_TOUCH", 100, 0.15, 0.65, 0.50, 40.0),
+        ):
+            rows.append(
+                {
+                    "ticker": symbol,
+                    "asset_class": "stock",
+                    "asset_label": "Hisse",
+                    "universe": "bist_all_stocks",
+                    "display_name": symbol,
+                    "timeframe": "1d",
+                    "current_price": 100.0,
+                    "current_ma": 100.0 + distance,
+                    "ma_type": "EMA",
+                    "period": 55,
+                    "side": "resistance",
+                    "active_side": True,
+                    "distance_pct": distance,
+                    "distance_atr": distance,
+                    "discovery_events": events,
+                    "validation_events": 0,
+                    "holdout_events": 0,
+                    "discovery_hit_rate": hit_rate,
+                    "validation_hit_rate": 0.0,
+                    "holdout_hit_rate": 0.0,
+                    "discovery_median_fixed_atr": median_atr,
+                    "validation_median_fixed_atr": 0.0,
+                    "holdout_median_fixed_atr": 0.0,
+                    "sr_strength_score": strength,
+                    "discovery_pass": False,
+                    "certified": False,
+                    "low_confidence": False,
+                    "status": "unverified_candidate",
+                }
+            )
+
+        profiles = build_behavior_profiles(pd.DataFrame(rows), top_n=2, min_touches=1)
+        near = profiles["near_price"]
+
+        self.assertIn("near_action_score", near.columns)
+        self.assertEqual(near["symbol"].tolist(), ["HEAVY_TOUCH", "VERY_NEAR"])
+        self.assertGreater(
+            near.iloc[0]["near_action_score"], near.iloc[1]["near_action_score"]
+        )
 
     def test_behavior_profiles_use_raw_behavior_touches_over_certification_events(self):
         row = {

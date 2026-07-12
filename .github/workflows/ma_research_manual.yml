@@ -144,7 +144,8 @@ jobs:
           python -m scanner.guarded_notifier \
             --summary reports/guarded/instrument_summary.csv \
             --label "Guarded MA Research: ${{ inputs.universe }}" \
-            --top 20
+            --top 20 \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES"
         continue-on-error: true
       - name: Upload auditable outputs
         if: always()
