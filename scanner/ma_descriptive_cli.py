@@ -10,6 +10,7 @@ alındığını sade bir karneyle göstermektir.
 from __future__ import annotations
 
 import argparse
+import io
 from dataclasses import dataclass, replace
 import os
 from pathlib import Path
@@ -37,7 +38,7 @@ try:
         precompute_forward_outcomes,
     )
     from .ma_data import MarketDataProvider
-    from .notifier import send_telegram
+    from .notifier import send_photo, send_telegram
     from .stock_metadata import enrich_stock_instruments
 except ImportError:  # pragma: no cover - direct script execution
     from asset_universe import (  # type: ignore
@@ -57,7 +58,7 @@ except ImportError:  # pragma: no cover - direct script execution
         precompute_forward_outcomes,
     )
     from ma_data import MarketDataProvider  # type: ignore
-    from notifier import send_telegram  # type: ignore
+    from notifier import send_photo, send_telegram  # type: ignore
     from stock_metadata import enrich_stock_instruments  # type: ignore
 
 
@@ -350,7 +351,7 @@ def scan_ma_respect(
                         "timeframe": timeframe,
                         "taraf": _SIDE_LABEL[side],
                         "MA": label,
-                        "tarih": f"{pd.Timestamp(episode.start).date()}→{pd.Timestamp(episode.end).date()}",
+                        "tarih": _format_episode_range(episode.start, episode.end, timeframe),
                         "tarih_sort": pd.Timestamp(episode.start),
                         "ma_değeri": np.nan,
                         "olay": _episode_event_name(side, episode.recovered),
@@ -427,16 +428,15 @@ def _row_identity(row: pd.Series, include_symbol: bool = False) -> str:
 
 def _ma_card_lines(row: pd.Series, rank: int, include_symbol: bool = False) -> list[str]:
     return [
-        f"{rank}) {_row_identity(row, include_symbol)} — {int(row['ziyaret'])} temas",
+        f"{rank}. {_row_identity(row, include_symbol)} | {int(row['ziyaret'])} temas",
         (
             f"   Tepki %{format_tr(row['tepki_oranı_%'], 0)} | "
-            f"Geri dönüş %{format_tr(row['geri_dönüş_%'], 0)} | "
+            f"Geri alma %{format_tr(row['geri_dönüş_%'], 0)} | "
             f"Ort tepki %{format_tr(row['ort_tepki_%'], 1)}"
         ),
         (
-            f"   Şu an: {row['şu_an']} | "
-            f"Uzaklık %{format_tr(row['uzaklık_%'], 1)} | "
-            f"Skor {format_tr(row['saygı_skoru'], 1)}"
+            f"   Şu an {row['şu_an']} | "
+            f"Uzaklık %{format_tr(row['uzaklık_%'], 1)}"
         ),
     ]
 
@@ -475,63 +475,39 @@ def format_report(
         if not sorted_scorecard.empty
         else list(MA_TYPES)
     )
-    heading = "En çok temas alanlar" if sort_by == "visits" else "En yüksek saygı skoru"
+    heading = "En çok temas alan ortalamalar" if sort_by == "visits" else "En yüksek saygı skoru"
     lines = [
-        f"📊 {symbol.upper()} — MA Saygı Karnesi ({timeframe})",
-        f"Fiyat: {format_tr(current_price, 2)} | Son bar: {last_date} | Veri: {len(prepared)} bar",
-        f"Taranan: {len(ma_type_values)} MA türü × {len(period_values)} periyot",
-        f"Gösterim: {min_visits}+ temas | Tam liste: ma_respect_scorecard.csv",
+        f"MA Saygı Özeti - {symbol.upper()} ({timeframe})",
+        f"Fiyat {format_tr(current_price, 2)} | Son bar {last_date} | Veri {len(prepared)} bar",
+        f"Taranan {len(ma_type_values)} MA türü x {len(period_values)} periyot | Eşik {min_visits}+ temas",
+        "Tam liste: ma_respect_scorecard.csv | Olaylar: ma_respect_events.csv",
         "",
-        f"🏆 {heading}",
+        heading,
     ]
     if visible.empty:
-        lines.append(
-            f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}."
-        )
-        lines.append("Bu sembolde veri az olabilir veya tolerans sıkı kalmış olabilir.")
+        lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
+        lines.append("Eşiği düşürmek mümkün; ama 1-2 temas iyi ortalama sayılmaz.")
     else:
         for rank, (_, row) in enumerate(visible.head(max(1, int(top))).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank))
-            lines.append("")
-        if lines[-1] == "":
-            lines.pop()
-    lines.extend(
-        [
-            "",
-            "📌 Nasıl oku? Önce temas sayısına, sonra tepki% ve geri dönüş% değerine bak.",
-            "1-2 temaslı satırlar iyi ortalama sayılmaz; tam ham tablo CSV'dedir.",
-            "",
-            f"🧾 Olay dökümü — ilk {max(1, int(detail_top))} MA",
-        ]
-    )
-    top_labels = set(visible.head(max(1, int(detail_top)))["MA"].tolist()) if not visible.empty else set()
-    detail = events[events["MA"].isin(top_labels)] if not events.empty else pd.DataFrame()
-    if detail.empty:
-        lines.append("Bu eşikte olay dökümü yok.")
-    else:
-        for ma_label in visible.head(max(1, int(detail_top)))["MA"]:
-            ma_events = detail[detail["MA"] == ma_label].head(_DETAIL_EVENTS_PER_MA)
-            if ma_events.empty:
-                continue
-            lines.append(f"• {ma_label}")
-            for _, event in ma_events.iterrows():
-                move = "" if pd.isna(event.get("sonraki_%")) else f" | +%{format_tr(event['sonraki_%'], 1)}"
-                bars = "" if event.get("bar") == "-" else f" | {event['bar']} bar"
-                reaction = "" if not event.get("tepki") else f" | {event['tepki']}"
-                lines.append(f"  {event['tarih']} — {event['olay']}{bars}{reaction}{move}")
-    lines.extend(["", "🎯 Fiyata yakın güçlü MA'lar"])
+    lines.extend(["", "Fiyata yakın güçlüler"])
     current_visible = _filtered_scorecard(current, min_visits)
     if current_visible.empty:
-        lines.append("Bu eşikte fiyata yakın iyi ortalama gösterilmedi.")
+        lines.append("Bu eşikte fiyata yakın güçlü MA yok.")
     else:
         near = current_visible.copy()
         near = near.reindex(near["uzaklık_%"].abs().sort_values().index).head(max(1, int(detail_top)))
         for rank, (_, row) in enumerate(near.iterrows(), 1):
-            side_text = "fiyat altında" if float(row["uzaklık_%"]) > 0 else "fiyat üstünde"
+            side_text = "fiyatın üstünde" if float(row["uzaklık_%"]) > 0 else "fiyatın altında"
             lines.append(
-                f"{rank}) {row['MA']} — {side_text}, uzaklık %{format_tr(row['uzaklık_%'], 1)}, "
-                f"{int(row['ziyaret'])} temas, skor {format_tr(row['saygı_skoru'], 1)}"
+                f"{rank}. {row['MA']} | {side_text} | uzaklık %{format_tr(row['uzaklık_%'], 1)} | "
+                f"{int(row['ziyaret'])} temas"
             )
+    lines.extend([
+        "",
+        "Kısa okuma: önce temas sayısı, sonra tepki% ve geri alma% değerine bak.",
+        "Telegram sade özet gönderir; tam ham karne CSV artifact içindedir.",
+    ])
     return "\n".join(lines)
 
 
@@ -548,14 +524,14 @@ def format_universe_report(
 ) -> str:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
     visible = _filtered_scorecard(sorted_scorecard, min_visits)
-    heading = "Genel top — en çok temas" if sort_by == "visits" else "Genel top — en yüksek skor"
+    heading = "Genel ilk liste - temas sayısına göre" if sort_by == "visits" else "Genel ilk liste - saygı skoruna göre"
     unique_symbols = sorted_scorecard["symbol"].nunique() if not sorted_scorecard.empty else 0
     lines = [
-        f"📊 MA Saygı Taraması — {universe} / {timeframe}",
-        f"Taranan varlık: {unique_symbols} | Gösterim: {min_visits}+ temas",
-        "Tam liste: ma_respect_scorecard.csv | Varlık başı özet: ma_respect_top_per_symbol.csv",
+        f"MA Saygı Özeti - {universe} / {timeframe}",
+        f"Taranan varlık {unique_symbols} | Eşik {min_visits}+ temas",
+        "Tam liste: ma_respect_scorecard.csv | Varlık özeti: ma_respect_top_per_symbol.csv",
         "",
-        f"🏆 {heading}",
+        heading,
     ]
     if visible.empty:
         max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
@@ -563,11 +539,8 @@ def format_universe_report(
     else:
         for rank, (_, row) in enumerate(visible.head(max(1, int(top))).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank, include_symbol=True))
-            lines.append("")
-        if lines[-1] == "":
-            lines.pop()
     if not visible.empty and per_symbol_top > 0:
-        lines.extend(["", f"📌 Varlık başına ilk {per_symbol_top}"])
+        lines.extend(["", f"Varlık başına kısa liste ({per_symbol_top} MA)"])
         symbol_order = (
             visible.groupby("symbol", sort=False)[["ziyaret", "saygı_skoru"]]
             .max()
@@ -582,14 +555,268 @@ def format_universe_report(
                 f"{row['MA']} ({int(row['ziyaret'])} temas, %{format_tr(row['tepki_oranı_%'], 0)} tepki)"
                 for _, row in group.iterrows()
             )
-            lines.append(f"• {symbol}: {compact}")
+            lines.append(f"- {symbol}: {compact}")
     if errors:
-        lines.extend(["", "⚠️ Atlanan / hata alan varlıklar"])
-        lines.extend(errors[:20])
-        if len(errors) > 20:
-            lines.append(f"... {len(errors) - 20} hata daha var; tam log Actions çıktısında.")
+        lines.extend(["", "Atlanan / hata alan varlıklar"])
+        lines.extend(errors[:10])
+        if len(errors) > 10:
+            lines.append(f"... {len(errors) - 10} hata daha var; tam log Actions çıktısında.")
+    lines.extend(["", "Telegram sade özet gönderir; tam ham karne CSV artifact içindedir."])
     return "\n".join(lines)
 
+
+def _image_cell(value: object, max_chars: int = 24) -> str:
+    text = str(value) if value is not None else "-"
+    text = text.replace("\n", " ").strip()
+    if len(text) > max_chars:
+        return text[: max_chars - 1] + "…"
+    return text or "-"
+
+
+def _respect_image_rows(frame: pd.DataFrame, *, include_symbol: bool) -> tuple[list[str], list[list[str]]]:
+    if include_symbol:
+        headers = ["Varlık", "MA", "Seviye", "Taraf", "Temas", "Tepki", "Geri", "Uzak"]
+    else:
+        headers = ["MA", "Seviye", "Taraf", "Temas", "Tepki", "Geri", "Uzak", "Durum"]
+    rows: list[list[str]] = []
+    for _, row in frame.iterrows():
+        common = [
+            _image_cell(row.get("MA"), 14),
+            format_tr(row.get("ma_de\u011feri"), 2),
+            _image_cell(row.get("taraf"), 10),
+            str(int(row.get("ziyaret", 0))),
+            "%" + format_tr(row.get("tepki_oran\u0131_%"), 0),
+            "%" + format_tr(row.get("geri_d\u00f6n\u00fc\u015f_%"), 0),
+            "%" + format_tr(row.get("uzakl\u0131k_%"), 1),
+        ]
+        if include_symbol:
+            rows.append([_image_cell(row.get("symbol"), 12), *common])
+        else:
+            rows.append([*common, _image_cell(row.get("\u015fu_an"), 18)])
+    return headers, rows
+
+
+def _parse_percent_text(value: str) -> float | None:
+    try:
+        return float(value.replace("%", "").replace("+", "").replace(",", "."))
+    except Exception:
+        return None
+
+
+def _cell_text_color(header: str, value: str) -> str:
+    if header in {"Tepki", "Geri"}:
+        number = _parse_percent_text(value)
+        if number is None:
+            return "#111827"
+        if number >= 70:
+            return "#0f7a3a"
+        if number < 40:
+            return "#b42318"
+    if header == "Taraf":
+        if "Destek" in value:
+            return "#0f7a3a"
+        if "Diren" in value:
+            return "#b42318"
+    return "#111827"
+
+
+def render_respect_table_image(
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    title: str,
+    subtitle: str,
+    badge: str = "",
+    footer: str = "",
+    max_rows_per_image: int = 14,
+) -> list[bytes]:
+    if not rows:
+        return []
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from matplotlib import patches
+    except ImportError:
+        return []
+
+    chunks: list[bytes] = []
+    chunk_size = max(1, int(max_rows_per_image))
+    for chunk_start in range(0, len(rows), chunk_size):
+        chunk = rows[chunk_start : chunk_start + chunk_size]
+        page_no = chunk_start // chunk_size + 1
+        page_count = (len(rows) + chunk_size - 1) // chunk_size
+        fig_h = max(5.2, 2.2 + 0.43 * (len(chunk) + 1))
+        fig_w = 14.0
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis("off")
+        fig.patch.set_facecolor("#eef3fb")
+        card = patches.FancyBboxPatch(
+            (0.02, 0.03),
+            0.96,
+            0.94,
+            boxstyle="round,pad=0.012,rounding_size=0.03",
+            linewidth=0,
+            facecolor="#ffffff",
+        )
+        ax.add_patch(card)
+        ax.text(0.05, 0.92, title, fontsize=22, fontweight="bold", color="#102a43", va="center")
+        if subtitle:
+            ax.text(0.05, 0.865, subtitle, fontsize=12.5, color="#667085", va="center")
+        badge_text = badge
+        if page_count > 1:
+            badge_text = f"{badge} | Liste {page_no}/{page_count}" if badge else f"Liste {page_no}/{page_count}"
+        if badge_text:
+            badge_box = patches.FancyBboxPatch(
+                (0.75, 0.89),
+                0.18,
+                0.045,
+                boxstyle="round,pad=0.008,rounding_size=0.02",
+                linewidth=0,
+                facecolor="#e8f1ff",
+            )
+            ax.add_patch(badge_box)
+            ax.text(0.84, 0.912, badge_text, fontsize=11, fontweight="bold", color="#1d4ed8", ha="center", va="center")
+
+        left, right = 0.05, 0.95
+        table_top = 0.79
+        row_h = min(0.058, 0.62 / max(2, len(chunk) + 1))
+        table_w = right - left
+        if len(headers) == 8:
+            weights = [1.35, 1.0, 0.95, 0.75, 0.85, 0.85, 0.9, 1.25]
+        else:
+            weights = [1.0] * len(headers)
+        total_w = sum(weights)
+        col_w = [w / total_w * table_w for w in weights]
+        x_positions = [left]
+        for width in col_w[:-1]:
+            x_positions.append(x_positions[-1] + width)
+
+        header_rect = patches.FancyBboxPatch(
+            (left, table_top - row_h),
+            table_w,
+            row_h,
+            boxstyle="round,pad=0.003,rounding_size=0.01",
+            linewidth=0,
+            facecolor="#e8f1ff",
+        )
+        ax.add_patch(header_rect)
+        for col, header in enumerate(headers):
+            ax.text(
+                x_positions[col] + col_w[col] * 0.04,
+                table_top - row_h / 2,
+                header,
+                fontsize=11,
+                fontweight="bold",
+                color="#102a43",
+                va="center",
+                ha="left",
+            )
+
+        y = table_top - row_h
+        for row_index, row in enumerate(chunk, 1):
+            y -= row_h
+            bg = "#ffffff" if row_index % 2 else "#f6f8fb"
+            ax.add_patch(patches.Rectangle((left, y), table_w, row_h, linewidth=0, facecolor=bg))
+            ax.plot([left, right], [y, y], color="#d9e2ec", linewidth=0.65)
+            for col, value in enumerate(row):
+                header = headers[col]
+                color = _cell_text_color(header, value)
+                weight = "bold" if col == 0 or header in {"MA", "Varlık"} else "normal"
+                ax.text(
+                    x_positions[col] + col_w[col] * 0.04,
+                    y + row_h / 2,
+                    value,
+                    fontsize=10.6,
+                    fontweight=weight,
+                    color=color,
+                    va="center",
+                    ha="left",
+                )
+        if footer:
+            ax.text(0.05, 0.085, footer, fontsize=11.5, color="#667085", va="center")
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", facecolor=fig.get_facecolor(), bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        chunks.append(buf.read())
+    return chunks
+
+
+def render_respect_images(
+    scorecard: pd.DataFrame,
+    current: pd.DataFrame,
+    *,
+    label: str,
+    timeframe: str,
+    top: int,
+    detail_top: int,
+    min_visits: int,
+    sort_by: str,
+    include_symbol: bool,
+) -> list[bytes]:
+    sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
+    visible = _filtered_scorecard(sorted_scorecard, min_visits).head(max(1, int(top)))
+    if visible.empty:
+        return []
+    symbol_count = sorted_scorecard["symbol"].nunique() if "symbol" in sorted_scorecard else 1
+    max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
+    if include_symbol:
+        subtitle = f"{timeframe} | {symbol_count} varl\u0131k | e\u015fik {min_visits}+ temas"
+    else:
+        price = format_tr(visible["fiyat"].iloc[0], 2) if "fiyat" in visible else "-"
+        subtitle = f"{timeframe} | fiyat {price} | e\u015fik {min_visits}+ temas"
+    badge = f"{len(visible)} sat\u0131r | max {max_visits} temas"
+    headers, rows = _respect_image_rows(visible, include_symbol=include_symbol)
+    images = render_respect_table_image(
+        headers,
+        rows,
+        title=f"MA Sayg\u0131 \u00d6zeti - {label}",
+        subtitle=subtitle,
+        badge=badge,
+        footer="Tam liste CSV artifact i\u00e7inde: ma_respect_scorecard.csv",
+    )
+    current_visible = _filtered_scorecard(current, min_visits)
+    if detail_top > 0 and not current_visible.empty:
+        near = current_visible.copy()
+        near = near.reindex(near["uzakl\u0131k_%"].abs().sort_values().index).head(max(1, int(detail_top)))
+        if not near.empty:
+            near_headers, near_rows = _respect_image_rows(near, include_symbol=include_symbol)
+            images.extend(
+                render_respect_table_image(
+                    near_headers,
+                    near_rows,
+                    title=f"Fiyata Yak\u0131n G\u00fc\u00e7l\u00fc MA - {label}",
+                    subtitle=subtitle,
+                    badge=f"{len(near)} sat\u0131r",
+                    footer="Yak\u0131nl\u0131k tek ba\u015f\u0131na sinyal de\u011fildir; temas ve tepkiyle birlikte okunmal\u0131.",
+                )
+            )
+    return images
+
+
+def _telegram_image_caption(report: str, *, image_index: int, image_count: int) -> str:
+    first_lines = [line for line in report.splitlines()[:4] if line.strip()]
+    caption = "\n".join(first_lines)
+    if image_count > 1:
+        caption = f"{caption}\nG\u00f6rsel {image_index}/{image_count}"
+    return caption[:1000]
+
+
+def send_respect_telegram(token: str, chat_id: str, report: str, images: Sequence[bytes]) -> bool:
+    if not images:
+        return send_telegram(token, chat_id, report, parse_mode=None)
+    ok = True
+    for index, image in enumerate(images, 1):
+        ok = send_photo(
+            token,
+            chat_id,
+            image,
+            caption=_telegram_image_caption(report, image_index=index, image_count=len(images)),
+        ) and ok
+    return ok
 
 def _configure_console_encoding() -> None:
     for stream in (sys.stdout, sys.stderr):
@@ -647,12 +874,15 @@ def _write_outputs(
     scorecard: pd.DataFrame,
     events: pd.DataFrame,
     current: pd.DataFrame,
+    images: Sequence[bytes] | None = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "ma_respect_report.txt").write_text(report, encoding="utf-8")
     scorecard.to_csv(output_dir / "ma_respect_scorecard.csv", index=False, encoding="utf-8-sig")
     events.to_csv(output_dir / "ma_respect_events.csv", index=False, encoding="utf-8-sig")
     current.to_csv(output_dir / "ma_respect_current.csv", index=False, encoding="utf-8-sig")
+    for index, image in enumerate(images or [], 1):
+        (output_dir / f"ma_respect_visual_{index}.png").write_bytes(image)
     if not scorecard.empty:
         top_per_symbol = (
             _sort_scorecard(scorecard, sort_by="visits")
@@ -785,17 +1015,35 @@ def main(argv: list[str] | None = None) -> int:
             sort_by=args.sort_by,
         )
     output_dir = Path(args.output_dir)
-    _write_outputs(output_dir, report, scorecard_all, events_all, current_all)
+    image_label = (
+        str(getattr(instruments[0], "symbol", args.ticker)).upper()
+        if len(instruments) == 1 and instruments
+        else args.universe
+    )
+    images = render_respect_images(
+        scorecard_all,
+        current_all,
+        label=image_label,
+        timeframe=args.timeframe,
+        top=args.top,
+        detail_top=args.detail_top,
+        min_visits=max(1, int(args.min_visits)),
+        sort_by=args.sort_by,
+        include_symbol=len(instruments) != 1,
+    )
+    _write_outputs(output_dir, report, scorecard_all, events_all, current_all, images)
     print(report)
-    print(f"\nÇıktılar: {output_dir.resolve()}")
+    if images:
+        print(f"\nVisual output: {len(images)} PNG")
+    print(f"\nOutputs: {output_dir.resolve()}")
     if args.telegram:
         token = os.environ.get("TELEGRAM_BOT_TOKEN")
         chat_id = os.environ.get("TELEGRAM_CHAT_ID")
         if token and chat_id:
-            ok = send_telegram(token, chat_id, report, parse_mode=None)
-            print("Telegram: " + ("gönderildi" if ok else "başarısız"))
+            ok = send_respect_telegram(token, chat_id, report, images)
+            print("Telegram: " + ("sent" if ok else "failed"))
         else:
-            print("Telegram: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID yok, atlandı")
+            print("Telegram: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID missing, skipped")
     return 0 if not scorecard_all.empty else 1
 
 

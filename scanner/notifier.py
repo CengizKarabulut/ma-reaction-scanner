@@ -155,14 +155,16 @@ def render_table_image(headers: list, rows: list, title: str = "",
             for k, v in col_colors.items():
                 chunk_colors[k] = v[chunk_start:chunk_end] if isinstance(v, list) else v
 
-        # Dinamik figür boyutu
-        fig_w = max(8, n_cols * 1.4)
-        fig_h = max(2, 0.32 * (n_rows + 2))   # Daha sıkı satır yüksekliği
+        # Dinamik fig?r boyutu - a??k renkli kart g?r?n?m?
+        fig_w = max(9, n_cols * 1.45)
+        fig_h = max(2.8, 0.36 * (n_rows + 3))
 
-        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=100)  # 150 → 100 dpi (boyut azalt)
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=110)
         ax.axis('off')
+        fig.patch.set_facecolor('#eef3fb')
+        ax.set_facecolor('#ffffff')
 
-        # Chunk başlığı (birden fazla chunk varsa numara ekle)
+        # Chunk ba?l??? (birden fazla chunk varsa numara ekle)
         if title_clean:
             if n_total > chunk_size:
                 chunk_no = chunk_start // chunk_size + 1
@@ -170,47 +172,49 @@ def render_table_image(headers: list, rows: list, title: str = "",
                 full_title = f"{title_clean}  (Sayfa {chunk_no}/{total_chunks})"
             else:
                 full_title = title_clean
-            plt.title(full_title, fontsize=12, fontweight='bold', loc='left',
-                      color='#5fb3ff', pad=10)
+            plt.title(full_title, fontsize=15, fontweight='bold', loc='left',
+                      color='#102a43', pad=12)
 
         table = ax.table(cellText=clean_rows, colLabels=clean_headers,
                           cellLoc='center', loc='center',
-                          colColours=['#2a2f39'] * n_cols)
+                          colColours=['#e8f1ff'] * n_cols)
         table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        table.scale(1, 1.5)
+        table.set_fontsize(9.5)
+        table.scale(1, 1.55)
 
         # Header
         for i in range(n_cols):
             cell = table[0, i]
-            cell.set_text_props(color='#5fb3ff', fontweight='bold')
-            cell.set_facecolor('#1a1f29')
+            cell.set_text_props(color='#102a43', fontweight='bold')
+            cell.set_facecolor('#e8f1ff')
+            cell.set_edgecolor('#d9e2ec')
 
-        # Veri satırları
+        # Veri sat?rlar?
         for i in range(1, n_rows + 1):
             for j in range(n_cols):
                 cell = table[i, j]
-                bg = '#0f1419' if i % 2 == 0 else '#1a1f29'
+                bg = '#ffffff' if i % 2 else '#f6f8fb'
+                text_color = '#111827'
+                fontweight = 'normal'
                 if j == 0 and chunk_colors and 0 in chunk_colors and i - 1 < len(chunk_colors[0]):
                     tag_color = chunk_colors[0][i - 1]
                     if tag_color == '#7fc97f':
-                        bg = '#1a2f1f'
-                        cell.set_text_props(color='#7fc97f', fontweight='bold')
+                        bg = '#e8f7ee'
+                        text_color = '#0f7a3a'
+                        fontweight = 'bold'
                     elif tag_color == '#ff8c69':
-                        bg = '#2f1a1a'
-                        cell.set_text_props(color='#ff8c69', fontweight='bold')
-                    else:
-                        cell.set_text_props(color='#e6e6e6')
-                else:
-                    cell.set_text_props(color='#e6e6e6')
+                        bg = '#fff1ed'
+                        text_color = '#b42318'
+                        fontweight = 'bold'
+                cell.set_text_props(color=text_color, fontweight=fontweight)
                 cell.set_facecolor(bg)
+                cell.set_edgecolor('#d9e2ec')
 
-        fig.patch.set_facecolor('#0a0e14')
-        plt.tight_layout()
+        plt.tight_layout(pad=1.2)
 
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', facecolor='#0a0e14',
-                    bbox_inches='tight', dpi=100)
+        plt.savefig(buf, format='png', facecolor='#eef3fb',
+                    bbox_inches='tight', dpi=110)
         plt.close(fig)
         buf.seek(0)
         png_bytes = buf.read()
@@ -272,6 +276,21 @@ def _detect_instrument_label(df) -> tuple:
     return ('Hisse', 'Hisse')
 
 
+def _bool_mask(df: pd.DataFrame, column: str) -> pd.Series:
+    return df.get(column, pd.Series(False, index=df.index)).fillna(False).astype(bool)
+
+
+def _format_scaled_price(value, reference=None) -> str:
+    if value is None or pd.isna(value):
+        return '?'
+    scale = value if reference is None or pd.isna(reference) else reference
+    if scale < 10:
+        return f"{value:.4f}"
+    if scale < 100:
+        return f"{value:.3f}"
+    return f"{value:.2f}"
+
+
 def _format_cross_stock_top(df: pd.DataFrame, n: int = 20, singular: str = 'Hisse') -> list:
     """Cross-stock top N (robust öncelikli) — fiyat + MA değer + 🟢🔴 etiket dahil.
 
@@ -280,7 +299,7 @@ def _format_cross_stock_top(df: pd.DataFrame, n: int = 20, singular: str = 'Hiss
     """
     lines = []
     if 'wf_robust' in df.columns and df['wf_robust'].sum() > 0:
-        robust_df = df[df['wf_robust'] == True]
+        robust_df = df[_bool_mask(df, 'wf_robust')]
         if n == 0 or n >= len(robust_df):
             top = robust_df.sort_values('composite_score', ascending=False)
             lines.append(f"🏆 *Robust TÜM ({len(top)} kayıt, cross-{singular.lower()})*")
@@ -329,7 +348,7 @@ def _format_cross_stock_top(df: pd.DataFrame, n: int = 20, singular: str = 'Hiss
 def _format_ma_family_stats(df: pd.DataFrame, n: int = 12) -> list:
     """En yaygın MA aileleri (kaç hissede top 5'e girmiş)"""
     lines = []
-    lines.append(f"🎯 *En Yaygın MA Aileleri (hisse başı top 5'te görünme)*")
+    lines.append("🎯 *En Yaygın MA Aileleri (hisse başı top 5'te görünme)*")
     top_per_stock = (
         df.groupby('ticker', group_keys=False)
         .apply(lambda g: g.nlargest(5, 'composite_score'), include_groups=False)
@@ -393,33 +412,29 @@ def format_daily(df: pd.DataFrame) -> str:
         # Robust olan hisselerin sayısı
         if 'wf_robust' in df.columns:
             robust_per_stock = (
-                df[df['wf_robust'] == True]
+                df[_bool_mask(df, 'wf_robust')]
                 .groupby('ticker').size()
                 .sort_values(ascending=False)
                 .head(15)
             )
             if len(robust_per_stock) > 0:
-                lines.append(f"💎 *En Çok Robust MA'ya Sahip 12 Hisse — Her Birinin Top 5'i*")
+                lines.append("💎 *En Çok Robust MA'ya Sahip 12 Hisse — Her Birinin Top 5'i*")
                 lines.append("```")
-                for tk, cnt in robust_per_stock.head(top_n_stocks).items():
+                for tk, cnt in robust_per_stock.head(12).items():
                     sub = (
-                        df[(df['ticker'] == tk) & (df['wf_robust'] == True)]
+                        df[(df['ticker'] == tk) & _bool_mask(df, 'wf_robust')]
                         .nlargest(5, 'composite_score')
                     )
                     curr_price = sub.iloc[0].get('current_close', None)
                     if curr_price and not pd.isna(curr_price):
-                        if curr_price < 10: pf = f"{curr_price:.4f}"
-                        elif curr_price < 100: pf = f"{curr_price:.3f}"
-                        else: pf = f"{curr_price:.2f}"
+                        pf = _format_scaled_price(curr_price)
                         lines.append(f"{tk} ({pf}) - {cnt} robust MA")
                     else:
                         lines.append(f"{tk} ({cnt} robust MA)")
                     for _, r in sub.iterrows():
                         ma_val = r.get('current_ma_value', None)
                         if ma_val and not pd.isna(ma_val) and curr_price:
-                            if curr_price < 10: vf = f"{ma_val:.4f}"
-                            elif curr_price < 100: vf = f"{ma_val:.3f}"
-                            else: vf = f"{ma_val:.2f}"
+                            vf = _format_scaled_price(ma_val, curr_price)
                             etiket = '🟢' if ma_val < curr_price else '🔴'
                             lines.append(f"  {etiket} {r['ma_type']:<5} {r['period']:<4} "
                                          f"@{vf} "
@@ -448,9 +463,7 @@ def format_daily(df: pd.DataFrame) -> str:
             top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
             curr_price = top5.iloc[0].get('current_close', None)
             if curr_price and not pd.isna(curr_price):
-                if curr_price < 10: pf = f"{curr_price:.4f}"
-                elif curr_price < 100: pf = f"{curr_price:.3f}"
-                else: pf = f"{curr_price:.2f}"
+                pf = _format_scaled_price(curr_price)
                 lines.append(f"{tk} ({pf}):")
             else:
                 lines.append(f"{tk}:")
@@ -458,9 +471,7 @@ def format_daily(df: pd.DataFrame) -> str:
                 robust_mark = "✓" if r.get('wf_robust', False) else " "
                 ma_val = r.get('current_ma_value', None)
                 if ma_val and not pd.isna(ma_val) and curr_price:
-                    if curr_price < 10: vf = f"{ma_val:.4f}"
-                    elif curr_price < 100: vf = f"{ma_val:.3f}"
-                    else: vf = f"{ma_val:.2f}"
+                    vf = _format_scaled_price(ma_val, curr_price)
                     # [D]/[R] yerine emoji - Markdown link sozdizimi sorunu olmaz
                     etiket = '🟢' if ma_val < curr_price else '🔴'
                     lines.append(f"  {etiket} {r['ma_type']:<5} {r['period']:<4} "
@@ -486,7 +497,7 @@ def format_weekly(df: pd.DataFrame) -> str:
     lines.append(f"*Toplam MA adayı:* {len(df):,}")
 
     if 'wf_robust' in df.columns:
-        robust = df[df['wf_robust'] == True]
+        robust = df[_bool_mask(df, 'wf_robust')]
         lines.append(f"*Walk-forward robust:* {len(robust):,} ({100*len(robust)/max(len(df),1):.1f}%)")
     lines.append("")
 
@@ -495,7 +506,7 @@ def format_weekly(df: pd.DataFrame) -> str:
 
     if 'wf_test_exp' in df.columns and 'wf_robust' in df.columns:
         lines.append("💎 *Walk-Forward ROBUST — Top 15 (test set expectancy)*")
-        robust_df = df[df['wf_robust'] == True].nlargest(15, 'wf_test_exp')
+        robust_df = df[_bool_mask(df, 'wf_robust')].nlargest(15, 'wf_test_exp')
         lines.append("```")
         lines.append(f"{'Hisse':<7} {'MA':<6} {'Per':<4} {'Train':<6} {'Test':<6}")
         lines.append("-" * 35)
@@ -542,7 +553,7 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
 
     # 2. CROSS-STOCK TOP — IMAGE TABLO (top_n_setups=0 → TÜMÜ göster)
     if 'wf_robust' in df.columns and df['wf_robust'].sum() > 0:
-        robust_df = df[df['wf_robust'] == True]
+        robust_df = df[_bool_mask(df, 'wf_robust')]
         if top_n_setups == 0 or top_n_setups >= len(robust_df):
             top20 = robust_df.sort_values('composite_score', ascending=False)
             title = f"🏆 Robust TÜM ({len(top20)})"
@@ -614,7 +625,7 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
     if 'wf_robust' in df.columns and n_robust > 0:
         # Hisse başı robust MA sayısına göre sırala (top_n_stocks=0 → tümü)
         robust_per_stock_full = (
-            df[df['wf_robust'] == True]
+            df[_bool_mask(df, 'wf_robust')]
             .groupby('ticker', group_keys=False)
             .size().sort_values(ascending=False)
         )
@@ -644,7 +655,10 @@ def send_rich_daily(token: str, chat_id: str, df, label: str = 'Tarama',
                     etiket = '🟢' if ma_val < curr_price else '🔴'
                     tcolor = '#7fc97f' if ma_val < curr_price else '#ff8c69'
                 else:
-                    vf = '—'; pf = '—'; etiket = ' '; tcolor = None
+                    vf = '?'
+                    pf = '?'
+                    etiket = ' '
+                    tcolor = None
 
                 # İlk satırda hisse adı + fiyat, diğer satırlar boş
                 tk_label = f"{tk} ({pf})" if idx == 0 else ""
@@ -684,18 +698,14 @@ def _build_large_mode_text(df, robust_per_stock, singular: str = 'Hisse'):
         top5 = df[df['ticker'] == tk].nlargest(5, 'composite_score')
         curr_price = top5.iloc[0].get('current_close', None)
         if curr_price and not pd.isna(curr_price):
-            if curr_price < 10: pf = f"{curr_price:.4f}"
-            elif curr_price < 100: pf = f"{curr_price:.3f}"
-            else: pf = f"{curr_price:.2f}"
+            pf = _format_scaled_price(curr_price)
             lines.append(f"{tk} ({pf}):")
         else:
             lines.append(f"{tk}:")
         for _, r in top5.iterrows():
             ma_val = r.get('current_ma_value', None)
             if ma_val and not pd.isna(ma_val) and curr_price:
-                if curr_price < 10: vf = f"{ma_val:.4f}"
-                elif curr_price < 100: vf = f"{ma_val:.3f}"
-                else: vf = f"{ma_val:.2f}"
+                vf = _format_scaled_price(ma_val, curr_price)
                 etiket = '🟢' if ma_val < curr_price else '🔴'
                 lines.append(f"  {etiket} {r['ma_type']:<5} {int(r['period']):<4} @{vf} WR={r['wr_pct']:.0f}%")
             else:
@@ -763,7 +773,7 @@ def main():
         if success:
             print(f"✓ Telegram BAŞARILI (text-only, {args.mode})")
         else:
-            print(f"✗ Telegram BAŞARISIZ", file=sys.stderr)
+            print("✗ Telegram BAŞARISIZ", file=sys.stderr)
             sys.exit(1)
     else:
         # YENI YONTEM: image-rich daily ozet

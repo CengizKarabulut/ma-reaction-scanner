@@ -12,6 +12,7 @@ from scanner.ma_descriptive_cli import (
     build_parser,
     crossing_episodes,
     format_report,
+    render_respect_images,
     scan_ma_respect,
 )
 
@@ -79,6 +80,64 @@ class DescriptiveMaCliTests(unittest.TestCase):
             _format_episode_range(ts, pd.Timestamp("2026-07-10 18:30"), "1h"),
             "2026-07-10 14:30→2026-07-10 18:30",
         )
+
+
+    def test_intraday_scan_episode_rows_keep_hour_and_minute(self):
+        idx = pd.date_range("2026-07-10 09:00", periods=48, freq="h")
+        close = np.full(48, 100.0)
+        close[10:12] = 90.0
+        close[13:15] = 112.0
+        close[25:27] = 88.0
+        frame = pd.DataFrame(
+            {
+                "Open": close,
+                "High": close + 2.0,
+                "Low": close - 2.0,
+                "Close": close,
+                "Volume": np.full(48, 1_000_000.0),
+            },
+            index=idx,
+        )
+
+        _, _, events, _ = scan_ma_respect(
+            frame,
+            symbol="ASELS",
+            timeframe="1h",
+            ma_types=("SMA",),
+            periods=(5,),
+            side=1,
+            config=AnalysisConfig(horizon=3, zone_atr=0.8, separation_atr=0.1),
+        )
+
+        ranges = events[events["tarih"].astype(str).str.contains("\u2192", regex=False)]["tarih"].astype(str)
+        self.assertTrue(any(":" in value and " " in value for value in ranges), ranges.tolist())
+
+    def test_respect_visual_renderer_returns_png_when_available(self):
+        cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
+        _, scorecard, _, current = scan_ma_respect(
+            _synthetic_frame(),
+            symbol="ASELS",
+            timeframe="1d",
+            ma_types=("SMA", "EMA", "HMA"),
+            periods=(5, 8, 13),
+            side=1,
+            config=cfg,
+        )
+
+        images = render_respect_images(
+            scorecard,
+            current,
+            label="ASELS",
+            timeframe="1d",
+            top=3,
+            detail_top=2,
+            min_visits=1,
+            sort_by="visits",
+            include_symbol=False,
+        )
+        if not images:
+            self.skipTest("matplotlib unavailable")
+        self.assertTrue(images[0].startswith(b"\x89PNG"))
 
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
