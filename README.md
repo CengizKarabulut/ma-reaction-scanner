@@ -16,7 +16,7 @@ Ayrıntılar:
 
 ## GitHub Actions
 
-Actions ekranı bilinçli olarak altı workflow ile sınırlandırılmıştır:
+Actions ekranı bilinçli olarak yedi workflow ile sınırlandırılmıştır:
 
 | Workflow | Kullanım |
 |---|---|
@@ -24,6 +24,7 @@ Actions ekranı bilinçli olarak altı workflow ile sınırlandırılmıştır:
 | `Daily Guarded MA Scan` | Açılır menüden seçilen evrende tek zaman dilimi taraması |
 | `Guarded Multi-Timeframe Scan` | Daily: 1d+1wk+1mo veya intraday: 1h+4h+1d |
 | `Guarded Single Instrument Analysis` | Açık varlık sınıfıyla tek hisse/endeks/kripto/emtia |
+| `Betimsel MA Saygı Taraması` | Tek/çoklu varlıkta ham MA temas ve tepki karnesi |
 | `BIST Veri Güncelleyici (Endeks Listeleri)` | BIST endeks bileşenlerini haftalık yeniler |
 | `Guarded MA Core Tests` | PR ve main değişikliklerinde otomatik test |
 
@@ -31,12 +32,29 @@ Eski Endeks Tarama, Weekly, Sektör Cache ve Keepalive workflow'ları kaldırıl
 Daily, Multi-Timeframe ve Tek Varlık artık eski v6 tarayıcısını değil guarded
 çekirdeği çağırır.
 
-Daily, Multi-Timeframe, Manual ve Tek Varlik ayni kanit profiliyle calisir:
-varsayilan 499 null iterasyonu, shift/horizontal kontroller ve tam operasyonel
-periyot listesi kullanilir. `--fast` geriye uyumluluk icin kabul edilir ama artik
-iterasyon, kontrol veya periyot kisitlamaz. Uzak MA seviyeleri de kanit testinden
-kacirilmaz; uzaklik yalniz `actionable=False` / `certified_but_far` gibi cikti
+Daily, Multi-Timeframe, Manual ve Tek Varlık aynı kanıt profiliyle çalışır:
+varsayılan 499 null iterasyonu, shift/horizontal kontroller ve tam operasyonel
+periyot listesi kullanılır. `--fast` geriye uyumluluk için kabul edilir ama artık
+iterasyon, kontrol veya periyot kısıtlamaz. Uzak MA seviyeleri de kanıt testinden
+kaçırılmaz; uzaklık yalnız `actionable=False` / `certified_but_far` gibi çıktı
 yorumunu etkiler.
+
+## Betimsel MA saygı taraması
+
+Asıl “bu hisse hangi ortalamalara saygı gösteriyor?” sorusu için **Betimsel MA
+Saygı Taraması** workflow'unu kullanın. Bu yol guarded araştırma hattından ayrıdır:
+null/FDR/holdout kapılarıyla seviye elemez; 7 MA türünü varsayılan 16 periyotla
+karşılaştırıp ham ziyaret, tepki, sarkma ve geri dönüş karnesi üretir.
+
+Varsayılan havuz: `5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377` ve
+`SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA`. Bu alanlar workflow'da serbestçe değiştirilebilir;
+istersen 50/200 çıkarabilir, başka periyot ekleyebilirsin. Ana sıralama varsayılan
+olarak en çok temas/ziyaret alan MA'lardan başlar (`sort_by=visits`). Telegram
+çıktısı 1-2 temaslı satırları “iyi” gibi göstermemek için varsayılan `min_visits=5`
+kullanır; tam ham liste CSV artifact içinde `ma_respect_scorecard.csv`, varlık başı
+özet de `ma_respect_top_per_symbol.csv` olarak saklanır. `universe=bist_all_stocks`
+gibi evrenlerle çoklu tarama yapılabilir; hızlı tek sembol için `universe=custom` ve
+`ticker=ASELS` yeterlidir.
 
 ## Kod yazmadan evren seçimi
 
@@ -63,16 +81,16 @@ seçin ve Türkçe sektör adını menüden belirleyin. Endeks kodu yazmak gerek
 ```text
 universe: bist30_stocks veya bist_sector_stocks
 timeframes/interval: 1d
-periods: 5,8,13,20,21,22,34,55,89,100,144,200,233,377
+periods: 5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377
 source: auto
 top: 5
 null_iterations: 499
 ```
 
-Tum BIST ve uc zaman dilimi birlikte hala maliyetlidir; ancak null sonucu
-onhesaplama sayesinde 499 iterasyon genis evrenlerde de ana profil haline
-gelmistir. Sure yine uzarsa evreni kucultmek veya GitHub Actions matrix ile
-parcalamak tercih edilmelidir; istatistiksel kanit kapilari gevsetilmez.
+Tüm BIST ve üç zaman dilimi birlikte hâlâ maliyetlidir; ancak null sonucu
+önhesaplama sayesinde 499 iterasyon geniş evrenlerde de ana profil haline
+gelmiştir. Süre yine uzarsa evreni küçültmek veya GitHub Actions matrix ile
+parçalamak tercih edilmelidir; istatistiksel kanıt kapıları gevşetilmez.
 
 ## Tek varlık analizi
 
@@ -83,7 +101,7 @@ workflow'unu kullanın:
 2. `market`: `BIST`
 3. `symbol`: yalnızca hisse kodu, örneğin `THYAO`
 4. `timeframes`: ilk denemede `1d`
-5. `periods`: `5,8,13,20,21,22,34,55,89,100,144,200,233,377`
+5. `periods`: `5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377`
 6. `source`: `auto`
 7. `top`: `5`
 8. `null_iterations`: gerçek taramada `499`
@@ -191,7 +209,7 @@ BIST 30 günlük tarama:
 python -m scanner.ma_research_cli \
   --universe bist30_stocks \
   --timeframes 1d \
-  --periods 5,8,13,20,21,22,34,55,89,100,144,200,233,377 \
+  --periods 5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377 \
   --source auto \
   --null-iterations 499
 ```
