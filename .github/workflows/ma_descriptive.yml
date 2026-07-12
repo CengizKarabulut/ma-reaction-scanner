@@ -63,11 +63,11 @@ on:
         required: true
         default: 'SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA'
       side:
-        description: 'Ana okuma tarafı'
+        description: 'auto=fiyat ustu destek, fiyat alti direnc; support/resistance zorlanabilir'
         required: true
-        default: 'support'
+        default: 'auto'
         type: choice
-        options: [support, resistance]
+        options: [auto, support, resistance]
       lookback:
         description: 'Son N bar; 0 tüm veri'
         required: true
@@ -79,21 +79,21 @@ on:
         type: choice
         options: [auto, borsapy, yfinance]
       top:
-        description: 'Telegram/konsol genel top satırı'
+        description: 'Telegram/gorsel satiri; 0 tum temasli ortalamalari gosterir'
         required: true
-        default: '8'
+        default: '0'
       detail_top:
-        description: 'Tek sembolde olay dökümü için en iyi MA sayısı'
+        description: 'Fiyata yakin tablo satiri; 0 tum satirlar'
         required: true
-        default: '2'
+        default: '10'
       per_symbol_top:
         description: 'Çoklu taramada varlık başına gösterilecek MA sayısı'
         required: true
         default: '2'
       min_visits:
-        description: 'Telegramda gösterilecek minimum ham ziyaret sayısı'
+        description: 'Gorselde minimum ham ziyaret; 0 temas olmayanlari da gosterir'
         required: true
-        default: '5'
+        default: '1'
       sort_by:
         description: 'Ana sıralama'
         required: true
