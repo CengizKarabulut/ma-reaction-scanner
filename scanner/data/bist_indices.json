@@ -4,7 +4,7 @@
     "XBANK": {
       "count": 12,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:48.066559",
+      "fetched_at": "2026-07-12T23:56:54.293702",
       "index": "XBANK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -26,7 +26,7 @@
     "XELKT": {
       "count": 39,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:51.586554",
+      "fetched_at": "2026-07-12T23:56:57.813722",
       "index": "XELKT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -73,9 +73,9 @@
       "verified": true
     },
     "XGIDA": {
-      "count": 47,
+      "count": 48,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:49.072335",
+      "fetched_at": "2026-07-12T23:56:55.299485",
       "index": "XGIDA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -101,6 +101,7 @@
         "FADE",
         "FRIGO",
         "GOKNR",
+        "GOLDA",
         "GUNDG",
         "KAYSE",
         "KRSTL",
@@ -132,7 +133,7 @@
     "XHOLD": {
       "count": 49,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:50.078146",
+      "fetched_at": "2026-07-12T23:56:56.305326",
       "index": "XHOLD",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -191,7 +192,7 @@
     "XILTM": {
       "count": 2,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:52.089187",
+      "fetched_at": "2026-07-12T23:56:58.316426",
       "index": "XILTM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -203,7 +204,7 @@
     "XINSA": {
       "count": 14,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:52.591961",
+      "fetched_at": "2026-07-12T23:56:58.819264",
       "index": "XINSA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -227,7 +228,7 @@
     "XKMYA": {
       "count": 47,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:49.575307",
+      "fetched_at": "2026-07-12T23:56:55.802435",
       "index": "XKMYA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -284,7 +285,7 @@
     "XMADN": {
       "count": 7,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:53.094692",
+      "fetched_at": "2026-07-12T23:56:59.321884",
       "index": "XMADN",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -301,7 +302,7 @@
     "XMANA": {
       "count": 31,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:53.597524",
+      "fetched_at": "2026-07-12T23:56:59.824754",
       "index": "XMANA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -342,7 +343,7 @@
     "XSGRT": {
       "count": 6,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:50.580889",
+      "fetched_at": "2026-07-12T23:56:56.808111",
       "index": "XSGRT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -358,7 +359,7 @@
     "XSPOR": {
       "count": 4,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:54.100169",
+      "fetched_at": "2026-07-12T23:57:00.327578",
       "index": "XSPOR",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -372,7 +373,7 @@
     "XTEKS": {
       "count": 20,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:54.603011",
+      "fetched_at": "2026-07-12T23:57:00.830363",
       "index": "XTEKS",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -402,7 +403,7 @@
     "XTRZM": {
       "count": 14,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:51.083686",
+      "fetched_at": "2026-07-12T23:56:57.310950",
       "index": "XTRZM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -426,7 +427,7 @@
     "XU030": {
       "count": 30,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:46.041287",
+      "fetched_at": "2026-07-12T23:56:52.280530",
       "index": "XU030",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -466,7 +467,7 @@
     "XU050": {
       "count": 50,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:46.544404",
+      "fetched_at": "2026-07-12T23:56:52.783781",
       "index": "XU050",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -526,7 +527,7 @@
     "XU100": {
       "count": 100,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:47.047575",
+      "fetched_at": "2026-07-12T23:56:53.286922",
       "index": "XU100",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -636,7 +637,7 @@
     "XULAS": {
       "count": 12,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:55.105732",
+      "fetched_at": "2026-07-12T23:57:01.333133",
       "index": "XULAS",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -658,7 +659,7 @@
     "XUMAL": {
       "count": 150,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:56.112833",
+      "fetched_at": "2026-07-12T23:57:02.340331",
       "index": "XUMAL",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -816,9 +817,9 @@
       "verified": true
     },
     "XUSIN": {
-      "count": 244,
+      "count": 246,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:55.609861",
+      "fetched_at": "2026-07-12T23:57:01.837312",
       "index": "XUSIN",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -928,6 +929,7 @@
         "GEREL",
         "GIPTA",
         "GOKNR",
+        "GOLDA",
         "GOLTS",
         "GOODY",
         "GUBRF",
@@ -941,6 +943,7 @@
         "ISDMR",
         "ISKPL",
         "ISSEN",
+        "ISVEA",
         "IZFAS",
         "IZINV",
         "IZMDC",
@@ -1072,7 +1075,7 @@
     "XUTEK": {
       "count": 42,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:48.569447",
+      "fetched_at": "2026-07-12T23:56:54.796589",
       "index": "XUTEK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1122,9 +1125,9 @@
       "verified": true
     },
     "XUTUM": {
-      "count": 569,
+      "count": 572,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:47.551453",
+      "fetched_at": "2026-07-12T23:56:53.790905",
       "index": "XUTUM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1311,6 +1314,7 @@
         "EGSER",
         "EKDMR",
         "EKGYO",
+        "EKIM",
         "EKOS",
         "EKSUN",
         "ELITE",
@@ -1362,6 +1366,7 @@
         "GLYHO",
         "GMTAS",
         "GOKNR",
+        "GOLDA",
         "GOLTS",
         "GOODY",
         "GOZDE",
@@ -1415,6 +1420,7 @@
         "ISKPL",
         "ISMEN",
         "ISSEN",
+        "ISVEA",
         "IZENR",
         "IZFAS",
         "IZINV",
@@ -1703,7 +1709,7 @@
     "XYORT": {
       "count": 9,
       "failures": [],
-      "fetched_at": "2026-07-07T07:45:56.615544",
+      "fetched_at": "2026-07-12T23:57:02.843050",
       "index": "XYORT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1720,5 +1726,5 @@
       "verified": true
     }
   },
-  "updated_at": "2026-07-07T07:45:56.615838"
+  "updated_at": "2026-07-12T23:57:02.843352"
 }
