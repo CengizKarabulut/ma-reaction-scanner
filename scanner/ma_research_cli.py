@@ -406,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
     panel = (
         pd.concat(panel_results, ignore_index=True) if panel_results else pd.DataFrame()
     )
-    summary = build_instrument_summary(candidates)
+    summary = build_instrument_summary(candidates, min_touches=args.behavior_min_touches)
     behavior_profiles = build_behavior_profiles(
         candidates,
         top_n=args.behavior_top,

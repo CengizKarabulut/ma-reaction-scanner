@@ -361,6 +361,47 @@ class AssetReportingTests(unittest.TestCase):
         self.assertAlmostEqual(result["reaction_hit_rate_pct"], 61.0)
         self.assertAlmostEqual(result["reaction_median_fixed_atr"], 0.42)
 
+    def test_summary_uses_configured_min_touches_for_uncertified_nearest_candidate(self):
+        row = {
+            "ticker": "NETCD",
+            "asset_class": "stock",
+            "asset_label": "Hisse",
+            "universe": "custom",
+            "display_name": "NETCD",
+            "timeframe": "1d",
+            "current_price": 146.90,
+            "current_ma": 147.69,
+            "ma_type": "HMA",
+            "period": 13,
+            "side": "resistance",
+            "active_side": True,
+            "distance_pct": 0.54,
+            "distance_atr": 0.08,
+            "discovery_events": 0,
+            "validation_events": 0,
+            "holdout_events": 0,
+            "behavior_events": 5,
+            "behavior_hit_rate": 0.60,
+            "behavior_median_fixed_atr": 0.30,
+            "sr_strength_score": 20.0,
+            "discovery_pass": False,
+            "validation_pass": False,
+            "holdout_pass": False,
+            "certified": False,
+            "actionable": False,
+            "low_confidence": False,
+            "rank_score": 1.0,
+            "q_value": 1.0,
+            "status": "unverified_candidate",
+        }
+
+        default_summary = build_instrument_summary(pd.DataFrame([row]))
+        configured_summary = build_instrument_summary(pd.DataFrame([row]), min_touches=5)
+
+        self.assertEqual(default_summary.iloc[0]["nearest_status"], "none")
+        self.assertEqual(configured_summary.iloc[0]["nearest_ma"], "HMA")
+        self.assertEqual(int(configured_summary.iloc[0]["nearest_total_touch_events"]), 5)
+
     def test_nearest_summary_uses_raw_behavior_touches_for_fallback_threshold(self):
         row = {
             "ticker": "NETCD",
