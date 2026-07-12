@@ -361,6 +361,7 @@ _BEHAVIOR_OUTPUT_COLUMNS = [
     "reaction_hit_rate_pct",
     "reaction_median_fixed_atr",
     "reaction_quality_score",
+    "near_action_score",
     "sr_strength_score",
     "discovery_pass",
     "certified",
@@ -455,6 +456,12 @@ def _prepare_behavior_rows(candidates: pd.DataFrame, min_touches: int = DEFAULT_
         + 0.20 * effect_component
         + 0.15 * sr_component
     )
+    proximity_component = 1.0 / (1.0 + rows["abs_distance_atr"].fillna(np.inf).clip(lower=0.0))
+    rows["near_action_score"] = 100.0 * (
+        0.45 * proximity_component
+        + 0.35 * touch_component
+        + 0.20 * (rows["reaction_quality_score"].fillna(0.0).clip(0.0, 100.0) / 100.0)
+    )
     rows["symbol"] = rows["ticker"].astype(str).str.upper()
     rows["ma_label"] = (
         rows["timeframe"].astype(str)
@@ -538,12 +545,13 @@ def build_behavior_profiles(
     )
 
     near_sort_columns = [
+        "near_action_score",
         "abs_distance_atr",
         "total_touch_events",
         "reaction_quality_score",
         "sr_strength_score",
     ]
-    near_ascending = [True, False, False, False]
+    near_ascending = [False, True, False, False, False]
     if one_row_per_instrument:
         near_price = _rank_behavior_rows(
             rows,
@@ -608,7 +616,7 @@ def format_behavior_profiles(profiles: dict[str, pd.DataFrame], max_rows: int = 
     lines = ["MA DAVRANIS PROFILI"]
     lines.extend(_format_behavior_table("En sik ugradigi ortalamalar", profiles.get("most_visited"), max_rows))
     lines.extend(_format_behavior_table("En cok tepki aldigi ortalamalar", profiles.get("best_reactions"), max_rows))
-    lines.extend(_format_behavior_table("Fiyata yakin destek/direnc adaylari", profiles.get("near_price"), max_rows))
+    lines.extend(_format_behavior_table("Fiyata yakin guclu temasli destek/direnc", profiles.get("near_price"), max_rows))
     lines.append("\nNot: Bu tablolar kesif ve davranis okumasidir; CERTIFIED etiketi ayrica belirtilir.")
     return "\n".join(lines)
 
