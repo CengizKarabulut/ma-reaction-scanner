@@ -35,7 +35,9 @@ def _true_mask(frame: pd.DataFrame, column: str) -> pd.Series:
     return frame[column].eq(True).fillna(False).astype(bool)
 
 
-def _best_level(group: pd.DataFrame, side: str) -> pd.Series | None:
+def _best_level(
+    group: pd.DataFrame, side: str, min_touches: int = DEFAULT_BEHAVIOR_MIN_TOUCHES
+) -> pd.Series | None:
     rows = group[_true_mask(group, "active_side") & (group["side"] == side)].copy()
     if rows.empty:
         return None
@@ -49,7 +51,7 @@ def _best_level(group: pd.DataFrame, side: str) -> pd.Series | None:
             ascending=[False, False, False, True],
             na_position="last",
         ).iloc[0]
-    rows = rows[_total_touch_events(rows) >= DEFAULT_BEHAVIOR_MIN_TOUCHES].copy()
+    rows = rows[_total_touch_events(rows) >= max(1, int(min_touches))].copy()
     if rows.empty:
         return None
     return rows.sort_values(
@@ -253,9 +255,12 @@ def _max_metric(group: pd.DataFrame, column: str) -> float:
     return float(values.max()) if not values.empty else np.nan
 
 
-def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
+def build_instrument_summary(
+    candidates: pd.DataFrame, min_touches: int = DEFAULT_BEHAVIOR_MIN_TOUCHES
+) -> pd.DataFrame:
     """Return exactly one row per typed instrument across all MAs/timeframes."""
 
+    min_touches = max(1, int(min_touches))
     if candidates is None or candidates.empty:
         return pd.DataFrame()
     required = {"ticker", "asset_class", "asset_label", "universe", "display_name"}
@@ -267,8 +272,8 @@ def build_instrument_summary(candidates: pd.DataFrame) -> pd.DataFrame:
     keys = ["asset_class", "ticker"]
     for (asset_class, ticker), group in candidates.groupby(keys, sort=False):
         price = _price_row(group)
-        support = _best_level(group, "support")
-        resistance = _best_level(group, "resistance")
+        support = _best_level(group, "support", min_touches=min_touches)
+        resistance = _best_level(group, "resistance", min_touches=min_touches)
         active = group[_true_mask(group, "active_side")].copy()
         discovery = active[_true_mask(active, "discovery_pass")]
         certified = active[_true_mask(active, "certified")]
