@@ -81,6 +81,8 @@ DEFAULT_DESC_PERIODS: tuple[int, ...] = (
 )
 DEFAULT_REPORT_MIN_VISITS = 5
 _SCORE_FULL_ACTIVITY_VISITS = 10
+_DETAIL_EVENTS_PER_MA = 5
+_INTRADAY_TIMEFRAMES = {"5m", "15m", "30m", "1h", "4h"}
 _SIDE_LABEL = {1: "Destek", -1: "Direnç"}
 _TOUCH_LABEL = {1: "Dokunuş-tepki", -1: "Direnç reddi"}
 _BAD_SIDE_LABEL = {1: "altında", -1: "üstünde"}
@@ -198,6 +200,17 @@ def _episode_event_name(side: int, recovered: bool) -> str:
     return "Üstüne taşma→geri inme" if recovered else "Üstünde kalıyor"
 
 
+def _format_event_timestamp(value: object, timeframe: str) -> str:
+    timestamp = pd.Timestamp(value)
+    if timeframe in _INTRADAY_TIMEFRAMES:
+        return timestamp.strftime("%Y-%m-%d %H:%M")
+    return str(timestamp.date())
+
+
+def _format_episode_range(start: object, end: object, timeframe: str) -> str:
+    return f"{_format_event_timestamp(start, timeframe)}→{_format_event_timestamp(end, timeframe)}"
+
+
 def _validate_ma_types(ma_types: Sequence[str]) -> tuple[str, ...]:
     values = tuple(item.upper() for item in ma_types)
     unknown = sorted(set(values) - set(MA_TYPES))
@@ -302,7 +315,7 @@ def scan_ma_respect(
                         "timeframe": timeframe,
                         "taraf": _SIDE_LABEL[side],
                         "MA": label,
-                        "tarih": str(pd.Timestamp(touch.timestamp).date()),
+                        "tarih": _format_event_timestamp(touch.timestamp, timeframe),
                         "tarih_sort": pd.Timestamp(touch.timestamp),
                         "ma_değeri": float(touch.ma_value),
                         "olay": _TOUCH_LABEL[side],
@@ -404,16 +417,28 @@ def scan_ma_respect(
     return df, scorecard, events_df, current
 
 
-def _score_row_text(row: pd.Series, include_symbol: bool = False) -> str:
-    prefix = f"{row['symbol']} | " if include_symbol and "symbol" in row else ""
-    asset = f"{row.get('varlık_türü', '')} | " if include_symbol and row.get("varlık_türü", "") else ""
-    return (
-        f"{prefix}{asset}{row['MA']:>7} | {int(row['ziyaret']):>2} temas | "
-        f"tepki {format_tr(row['tepki_oranı_%'], 0):>3}% | "
-        f"geri {format_tr(row['geri_dönüş_%'], 0):>3}% | "
-        f"{format_tr(row['ort_tepki_%'], 1)}% | {row['şu_an']} | "
-        f"uzak {format_tr(row['uzaklık_%'], 1)}% | skor {format_tr(row['saygı_skoru'], 1)}"
-    )
+def _row_identity(row: pd.Series, include_symbol: bool = False) -> str:
+    if include_symbol and "symbol" in row:
+        asset = str(row.get("varlık_türü", ""))
+        suffix = f" ({asset})" if asset else ""
+        return f"{row['symbol']}{suffix} — {row['MA']}"
+    return str(row["MA"])
+
+
+def _ma_card_lines(row: pd.Series, rank: int, include_symbol: bool = False) -> list[str]:
+    return [
+        f"{rank}) {_row_identity(row, include_symbol)} — {int(row['ziyaret'])} temas",
+        (
+            f"   Tepki %{format_tr(row['tepki_oranı_%'], 0)} | "
+            f"Geri dönüş %{format_tr(row['geri_dönüş_%'], 0)} | "
+            f"Ort tepki %{format_tr(row['ort_tepki_%'], 1)}"
+        ),
+        (
+            f"   Şu an: {row['şu_an']} | "
+            f"Uzaklık %{format_tr(row['uzaklık_%'], 1)} | "
+            f"Skor {format_tr(row['saygı_skoru'], 1)}"
+        ),
+    ]
 
 
 def _filtered_scorecard(scorecard: pd.DataFrame, min_visits: int) -> pd.DataFrame:
@@ -436,7 +461,7 @@ def format_report(
     sort_by: str = "visits",
 ) -> str:
     current_price = float(prepared["Close"].iloc[-1]) if not prepared.empty else np.nan
-    last_date = pd.Timestamp(prepared.index[-1]).date() if not prepared.empty else "-"
+    last_date = _format_event_timestamp(prepared.index[-1], timeframe) if not prepared.empty else "-"
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
     visible = _filtered_scorecard(sorted_scorecard, min_visits)
     max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
@@ -450,35 +475,33 @@ def format_report(
         if not sorted_scorecard.empty
         else list(MA_TYPES)
     )
-    heading = "ziyaret/temas sayısına göre" if sort_by == "visits" else "saygı skoruna göre"
+    heading = "En çok temas alanlar" if sort_by == "visits" else "En yüksek saygı skoru"
     lines = [
-        f"📊 {symbol.upper()} — {timeframe} betimsel MA saygı taraması",
-        f"Son bar: {last_date} | Fiyat: {format_tr(current_price, 2)} | Bar: {len(prepared)}",
-        f"Taranan periyotlar: {','.join(map(str, period_values))}",
-        "MA türleri: " + ",".join(ma_type_values),
+        f"📊 {symbol.upper()} — MA Saygı Karnesi ({timeframe})",
+        f"Fiyat: {format_tr(current_price, 2)} | Son bar: {last_date} | Veri: {len(prepared)} bar",
+        f"Taranan: {len(ma_type_values)} MA türü × {len(period_values)} periyot",
+        f"Gösterim: {min_visits}+ temas | Tam liste: ma_respect_scorecard.csv",
         "",
-        "Bu rapor garanti değildir; ham geçmiş davranışı gösterir.",
-        "Amaç: hissenin hangi ortalamalara tekrar tekrar temas edip tepki verdiğini görmek.",
-        f"Telegram eşiği: en az {min_visits} ziyaret. Tam ham karne CSV çıktısındadır.",
-        "",
-        f"=== KARNE — {heading} ===",
-        "MA | ziyaret | tepki% | geri dönüş% | ort tepki | şu an | uzaklık | skor",
+        f"🏆 {heading}",
     ]
     if visible.empty:
         lines.append(
-            f"{min_visits}+ ziyaretli MA bulunamadı. En yüksek ham ziyaret sayısı: {max_visits}."
+            f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}."
         )
-        lines.append("Bu sembolde ya veri az, ya da mevcut toleransla sık temas eden MA yok.")
+        lines.append("Bu sembolde veri az olabilir veya tolerans sıkı kalmış olabilir.")
     else:
-        for _, row in visible.head(max(1, int(top))).iterrows():
-            lines.append(_score_row_text(row))
+        for rank, (_, row) in enumerate(visible.head(max(1, int(top))).iterrows(), 1):
+            lines.extend(_ma_card_lines(row, rank))
+            lines.append("")
+        if lines[-1] == "":
+            lines.pop()
     lines.extend(
         [
             "",
-            "Not: Ziyaret sayısı düşükse satır 'iyi ortalama' diye okunmamalı.",
-            "Saygı skoru; ziyaret, tepki, geri dönüş, üst/alt zaman ve tepki büyüklüğünü birlikte tartar.",
+            "📌 Nasıl oku? Önce temas sayısına, sonra tepki% ve geri dönüş% değerine bak.",
+            "1-2 temaslı satırlar iyi ortalama sayılmaz; tam ham tablo CSV'dedir.",
             "",
-            f"=== OLAY DÖKÜMÜ — en iyi {max(1, int(detail_top))} MA ===",
+            f"🧾 Olay dökümü — ilk {max(1, int(detail_top))} MA",
         ]
     )
     top_labels = set(visible.head(max(1, int(detail_top)))["MA"].tolist()) if not visible.empty else set()
@@ -487,27 +510,27 @@ def format_report(
         lines.append("Bu eşikte olay dökümü yok.")
     else:
         for ma_label in visible.head(max(1, int(detail_top)))["MA"]:
-            ma_events = detail[detail["MA"] == ma_label].head(30)
+            ma_events = detail[detail["MA"] == ma_label].head(_DETAIL_EVENTS_PER_MA)
             if ma_events.empty:
                 continue
             lines.append(f"• {ma_label}")
             for _, event in ma_events.iterrows():
-                move = "" if pd.isna(event.get("sonraki_%")) else f" | sonraki {format_tr(event['sonraki_%'], 1)}%"
+                move = "" if pd.isna(event.get("sonraki_%")) else f" | +%{format_tr(event['sonraki_%'], 1)}"
                 bars = "" if event.get("bar") == "-" else f" | {event['bar']} bar"
-                reaction = "" if not event.get("tepki") else f" | tepki: {event['tepki']}"
-                lines.append(f"  {event['tarih']} | {event['olay']}{bars}{reaction}{move}")
-    lines.extend(["", "=== MEVCUT DURUM — fiyata yakın iyi ortalamalar ==="])
+                reaction = "" if not event.get("tepki") else f" | {event['tepki']}"
+                lines.append(f"  {event['tarih']} — {event['olay']}{bars}{reaction}{move}")
+    lines.extend(["", "🎯 Fiyata yakın güçlü MA'lar"])
     current_visible = _filtered_scorecard(current, min_visits)
     if current_visible.empty:
         lines.append("Bu eşikte fiyata yakın iyi ortalama gösterilmedi.")
     else:
         near = current_visible.copy()
         near = near.reindex(near["uzaklık_%"].abs().sort_values().index).head(max(1, int(detail_top)))
-        for _, row in near.iterrows():
-            side_text = "fiyat MA'nın altında" if float(row["uzaklık_%"]) > 0 else "fiyat MA'nın üstünde"
+        for rank, (_, row) in enumerate(near.iterrows(), 1):
+            side_text = "fiyat altında" if float(row["uzaklık_%"]) > 0 else "fiyat üstünde"
             lines.append(
-                f"{row['MA']}: {side_text}; uzaklık {format_tr(row['uzaklık_%'], 1)}%, "
-                f"{row['şu_an']}, ziyaret {int(row['ziyaret'])}, skor {format_tr(row['saygı_skoru'], 1)}"
+                f"{rank}) {row['MA']} — {side_text}, uzaklık %{format_tr(row['uzaklık_%'], 1)}, "
+                f"{int(row['ziyaret'])} temas, skor {format_tr(row['saygı_skoru'], 1)}"
             )
     return "\n".join(lines)
 
@@ -525,24 +548,26 @@ def format_universe_report(
 ) -> str:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
     visible = _filtered_scorecard(sorted_scorecard, min_visits)
-    heading = "temas sayısına göre" if sort_by == "visits" else "saygı skoruna göre"
+    heading = "Genel top — en çok temas" if sort_by == "visits" else "Genel top — en yüksek skor"
     unique_symbols = sorted_scorecard["symbol"].nunique() if not sorted_scorecard.empty else 0
     lines = [
-        f"📊 Betimsel MA saygı taraması — {universe} / {timeframe}",
-        f"Taranan varlık: {unique_symbols} | Gösterim eşiği: {min_visits}+ ziyaret",
-        f"Sıralama: {heading}. Tam liste CSV artifact içindedir.",
+        f"📊 MA Saygı Taraması — {universe} / {timeframe}",
+        f"Taranan varlık: {unique_symbols} | Gösterim: {min_visits}+ temas",
+        "Tam liste: ma_respect_scorecard.csv | Varlık başı özet: ma_respect_top_per_symbol.csv",
         "",
-        "=== GENEL TOP ===",
-        "Varlık | Tür | MA | ziyaret | tepki% | geri% | ort tepki | şu an | uzaklık | skor",
+        f"🏆 {heading}",
     ]
     if visible.empty:
         max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
-        lines.append(f"{min_visits}+ ziyaretli MA bulunamadı. En yüksek ham ziyaret: {max_visits}.")
+        lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
     else:
-        for _, row in visible.head(max(1, int(top))).iterrows():
-            lines.append(_score_row_text(row, include_symbol=True))
+        for rank, (_, row) in enumerate(visible.head(max(1, int(top))).iterrows(), 1):
+            lines.extend(_ma_card_lines(row, rank, include_symbol=True))
+            lines.append("")
+        if lines[-1] == "":
+            lines.pop()
     if not visible.empty and per_symbol_top > 0:
-        lines.extend(["", f"=== VARLIK BAŞINA EN İYİ {per_symbol_top} ==="])
+        lines.extend(["", f"📌 Varlık başına ilk {per_symbol_top}"])
         symbol_order = (
             visible.groupby("symbol", sort=False)[["ziyaret", "saygı_skoru"]]
             .max()
@@ -553,11 +578,13 @@ def format_universe_report(
             group = visible[visible["symbol"] == symbol].head(per_symbol_top)
             if group.empty:
                 continue
-            lines.append(f"• {symbol}")
-            for _, row in group.iterrows():
-                lines.append("  " + _score_row_text(row))
+            compact = "; ".join(
+                f"{row['MA']} ({int(row['ziyaret'])} temas, %{format_tr(row['tepki_oranı_%'], 0)} tepki)"
+                for _, row in group.iterrows()
+            )
+            lines.append(f"• {symbol}: {compact}")
     if errors:
-        lines.extend(["", "=== ATLANAN / HATA ALAN VARLIKLAR ==="])
+        lines.extend(["", "⚠️ Atlanan / hata alan varlıklar"])
         lines.extend(errors[:20])
         if len(errors) > 20:
             lines.append(f"... {len(errors) - 20} hata daha var; tam log Actions çıktısında.")
@@ -661,9 +688,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--separation-atr", type=float, default=None)
     parser.add_argument("--horizon", type=int, default=None)
     parser.add_argument("--adx-threshold", type=float, default=None)
-    parser.add_argument("--top", type=int, default=20)
-    parser.add_argument("--detail-top", type=int, default=5)
-    parser.add_argument("--per-symbol-top", type=int, default=3)
+    parser.add_argument("--top", type=int, default=8)
+    parser.add_argument("--detail-top", type=int, default=2)
+    parser.add_argument("--per-symbol-top", type=int, default=2)
     parser.add_argument("--min-visits", type=int, default=DEFAULT_REPORT_MIN_VISITS)
     parser.add_argument("--sort-by", default="visits", choices=["visits", "score"])
     parser.add_argument("--max-symbols", type=int, default=0, help="Test için ilk N varlık; 0 sınır yok")

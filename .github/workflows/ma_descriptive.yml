@@ -81,15 +81,15 @@ on:
       top:
         description: 'Telegram/konsol genel top satırı'
         required: true
-        default: '20'
+        default: '8'
       detail_top:
         description: 'Tek sembolde olay dökümü için en iyi MA sayısı'
         required: true
-        default: '5'
+        default: '2'
       per_symbol_top:
         description: 'Çoklu taramada varlık başına gösterilecek MA sayısı'
         required: true
-        default: '3'
+        default: '2'
       min_visits:
         description: 'Telegramda gösterilecek minimum ham ziyaret sayısı'
         required: true
