@@ -6,6 +6,8 @@ import pandas as pd
 from scanner.ma_core import AnalysisConfig
 from scanner.ma_descriptive_cli import (
     DEFAULT_DESC_PERIODS,
+    _format_episode_range,
+    _format_event_timestamp,
     _resolve_instruments,
     build_parser,
     crossing_episodes,
@@ -67,6 +69,17 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertTrue(episodes[0].recovered)
         self.assertFalse(episodes[1].recovered)
 
+    def test_intraday_event_timestamps_keep_hour_and_minute(self):
+        ts = pd.Timestamp("2026-07-10 14:30")
+
+        self.assertEqual(_format_event_timestamp(ts, "1h"), "2026-07-10 14:30")
+        self.assertEqual(_format_event_timestamp(ts, "4h"), "2026-07-10 14:30")
+        self.assertEqual(_format_event_timestamp(ts, "1d"), "2026-07-10")
+        self.assertEqual(
+            _format_episode_range(ts, pd.Timestamp("2026-07-10 18:30"), "1h"),
+            "2026-07-10 14:30→2026-07-10 18:30",
+        )
+
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
         prepared, scorecard, events, current = scan_ma_respect(
@@ -125,8 +138,8 @@ class DescriptiveMaCliTests(unittest.TestCase):
             min_visits=999,
         )
 
-        self.assertIn("999+ ziyaretli MA bulunamadı", report)
-        self.assertIn("Tam ham karne CSV", report)
+        self.assertIn("999+ temaslı MA bulunamadı", report)
+        self.assertIn("Tam liste: ma_respect_scorecard.csv", report)
 
 
 if __name__ == "__main__":
