@@ -80,7 +80,7 @@ DEFAULT_DESC_PERIODS: tuple[int, ...] = (
     233,
     377,
 )
-DEFAULT_REPORT_MIN_VISITS = 5
+DEFAULT_REPORT_MIN_VISITS = 1
 _SCORE_FULL_ACTIVITY_VISITS = 10
 _DETAIL_EVENTS_PER_MA = 5
 _INTRADAY_TIMEFRAMES = {"5m", "15m", "30m", "1h", "4h"}
@@ -260,8 +260,8 @@ def scan_ma_respect(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Build descriptive MA respect scorecard, event detail, and current-state tables."""
 
-    if side not in {1, -1}:
-        raise ValueError("side must be +1 for support or -1 for resistance")
+    if side not in {1, -1, 0}:
+        raise ValueError("side must be +1 for support, -1 for resistance, or 0 for auto")
     selected_ma_types = _validate_ma_types(ma_types)
     cfg = config or TIMEFRAME_CONFIGS.get(timeframe, AnalysisConfig())
     df = prepare_frame(normalize_ohlcv(frame), cfg)
@@ -288,14 +288,18 @@ def scan_ma_respect(
 
             label = f"{ma_type}{period}"
             valid = np.isfinite(ma) & np.isfinite(close)
-            visits = detect_behavior_touches(df, ma_series, cfg, side=side)
+            current_ma = float(ma[-1])
+            scan_side = side
+            if scan_side == 0:
+                scan_side = 1 if current_price >= current_ma else -1
+            visits = detect_behavior_touches(df, ma_series, cfg, side=scan_side)
             measured = 0
             reaction_count = 0
             pct_moves: list[float] = []
             atr_moves: list[float] = []
 
             for touch in visits:
-                measurement = forward.measurement(touch.position, side)
+                measurement = forward.measurement(touch.position, scan_side)
                 if measurement is None:
                     continue
                 measured += 1
@@ -314,12 +318,12 @@ def scan_ma_respect(
                     {
                         "symbol": symbol.upper(),
                         "timeframe": timeframe,
-                        "taraf": _SIDE_LABEL[side],
+                        "taraf": _SIDE_LABEL[scan_side],
                         "MA": label,
                         "tarih": _format_event_timestamp(touch.timestamp, timeframe),
                         "tarih_sort": pd.Timestamp(touch.timestamp),
                         "ma_değeri": float(touch.ma_value),
-                        "olay": _TOUCH_LABEL[side],
+                        "olay": _TOUCH_LABEL[scan_side],
                         "bar": "-",
                         "tepki": "Evet" if is_reaction else "Hayır",
                         "sonraki_%": pct_move,
@@ -332,7 +336,7 @@ def scan_ma_respect(
             avg_pct_move = float(np.mean(pct_moves)) if pct_moves else np.nan
             avg_atr_move = float(np.mean(atr_moves)) if atr_moves else np.nan
 
-            if side == 1:
+            if scan_side == 1:
                 episode_state = valid & (close < ma)
                 favorable_side = close > ma
             else:
@@ -349,12 +353,12 @@ def scan_ma_respect(
                     {
                         "symbol": symbol.upper(),
                         "timeframe": timeframe,
-                        "taraf": _SIDE_LABEL[side],
+                        "taraf": _SIDE_LABEL[scan_side],
                         "MA": label,
                         "tarih": _format_episode_range(episode.start, episode.end, timeframe),
                         "tarih_sort": pd.Timestamp(episode.start),
                         "ma_değeri": np.nan,
-                        "olay": _episode_event_name(side, episode.recovered),
+                        "olay": _episode_event_name(scan_side, episode.recovered),
                         "bar": int(episode.bars),
                         "tepki": "Evet" if episode.recovered else "Hayır",
                         "sonraki_%": np.nan,
@@ -365,8 +369,7 @@ def scan_ma_respect(
 
             valid_count = int(valid.sum())
             favorable_bar_pct = float(np.mean(favorable_side[valid]) * 100.0) if valid_count else np.nan
-            status, streak = _latest_side_state(side, close, ma, valid)
-            current_ma = float(ma[-1])
+            status, streak = _latest_side_state(scan_side, close, ma, valid)
             distance_pct = (current_ma - current_price) / current_price * 100.0
             distance_atr = (
                 (current_ma - current_price) / current_atr
@@ -384,7 +387,7 @@ def scan_ma_respect(
             row = {
                 "symbol": symbol.upper(),
                 "timeframe": timeframe,
-                "taraf": _SIDE_LABEL[side],
+                "taraf": _SIDE_LABEL[scan_side],
                 "MA": label,
                 "tür": ma_type,
                 "periyot": period,
@@ -488,7 +491,7 @@ def format_report(
         lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
         lines.append("Eşiği düşürmek mümkün; ama 1-2 temas iyi ortalama sayılmaz.")
     else:
-        for rank, (_, row) in enumerate(visible.head(max(1, int(top))).iterrows(), 1):
+        for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank))
     lines.extend(["", "Fiyata yakın güçlüler"])
     current_visible = _filtered_scorecard(current, min_visits)
@@ -496,7 +499,7 @@ def format_report(
         lines.append("Bu eşikte fiyata yakın güçlü MA yok.")
     else:
         near = current_visible.copy()
-        near = near.reindex(near["uzaklık_%"].abs().sort_values().index).head(max(1, int(detail_top)))
+        near = _limit_frame(near.reindex(near["uzaklık_%"].abs().sort_values().index), detail_top)
         for rank, (_, row) in enumerate(near.iterrows(), 1):
             side_text = "fiyatın üstünde" if float(row["uzaklık_%"]) > 0 else "fiyatın altında"
             lines.append(
@@ -537,7 +540,7 @@ def format_universe_report(
         max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
         lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
     else:
-        for rank, (_, row) in enumerate(visible.head(max(1, int(top))).iterrows(), 1):
+        for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank, include_symbol=True))
     if not visible.empty and per_symbol_top > 0:
         lines.extend(["", f"Varlık başına kısa liste ({per_symbol_top} MA)"])
@@ -547,7 +550,8 @@ def format_universe_report(
             .sort_values(["ziyaret", "saygı_skoru"], ascending=False)
             .index
         )
-        for symbol in symbol_order[: max(1, int(top))]:
+        symbol_limit = len(symbol_order) if int(top) <= 0 else max(1, int(top))
+        for symbol in symbol_order[:symbol_limit]:
             group = visible[visible["symbol"] == symbol].head(per_symbol_top)
             if group.empty:
                 continue
@@ -569,31 +573,80 @@ def _image_cell(value: object, max_chars: int = 24) -> str:
     text = str(value) if value is not None else "-"
     text = text.replace("\n", " ").strip()
     if len(text) > max_chars:
-        return text[: max_chars - 1] + "…"
+        return text[: max_chars - 1] + "\u2026"
     return text or "-"
 
 
-def _respect_image_rows(frame: pd.DataFrame, *, include_symbol: bool) -> tuple[list[str], list[list[str]]]:
+def _limit_frame(frame: pd.DataFrame, top: int) -> pd.DataFrame:
+    top = int(top)
+    if top <= 0:
+        return frame
+    return frame.head(max(1, top))
+
+
+def _current_side_label(row: pd.Series) -> str:
+    price = pd.to_numeric(pd.Series([row.get("fiyat")]), errors="coerce").iloc[0]
+    level = pd.to_numeric(pd.Series([row.get("ma_de\u011feri")]), errors="coerce").iloc[0]
+    if pd.isna(price) or pd.isna(level):
+        return str(row.get("taraf", "-"))
+    if float(price) >= float(level):
+        return "Destek"
+    return "Diren\u00e7"
+
+
+def _numeric_column(frame: pd.DataFrame, column: str, *, absolute: bool = False) -> pd.Series:
+    if column not in frame:
+        return pd.Series(dtype=float)
+    values = pd.to_numeric(frame[column], errors="coerce").dropna().astype(float)
+    if absolute:
+        values = values.abs()
+    return values
+
+
+def _metric_heatmap(frame: pd.DataFrame) -> dict[str, dict[str, float | bool]]:
+    specs = {
+        "Temas": ("ziyaret", False, False),
+        "Tepki": ("tepki_oran\u0131_%", False, False),
+        "Geri": ("geri_d\u00f6n\u00fc\u015f_%", False, False),
+        "Uzak": ("uzakl\u0131k_%", True, True),
+    }
+    result: dict[str, dict[str, float | bool]] = {}
+    for header, (column, absolute, lower_is_better) in specs.items():
+        values = _numeric_column(frame, column, absolute=absolute)
+        if values.empty:
+            continue
+        result[header] = {
+            "min": float(values.min()),
+            "mean": float(values.mean()),
+            "max": float(values.max()),
+            "lower_is_better": bool(lower_is_better),
+        }
+    return result
+
+
+def _respect_image_rows(frame: pd.DataFrame, *, include_symbol: bool) -> tuple[list[str], list[list[str]], dict[str, dict[str, float | bool]]]:
     if include_symbol:
-        headers = ["Varlık", "MA", "Seviye", "Taraf", "Temas", "Tepki", "Geri", "Uzak"]
+        headers = ["Varl\u0131k", "MA", "Seviye", "Taraf", "Temas", "Tepki", "Geri", "Uzak"]
     else:
         headers = ["MA", "Seviye", "Taraf", "Temas", "Tepki", "Geri", "Uzak", "Durum"]
     rows: list[list[str]] = []
     for _, row in frame.iterrows():
+        distance = pd.to_numeric(pd.Series([row.get("uzakl\u0131k_%")]), errors="coerce").iloc[0]
+        distance_text = "-" if pd.isna(distance) else format_tr(abs(float(distance)), 1) + "%"
         common = [
             _image_cell(row.get("MA"), 14),
             format_tr(row.get("ma_de\u011feri"), 2),
-            _image_cell(row.get("taraf"), 10),
+            _current_side_label(row),
             str(int(row.get("ziyaret", 0))),
             "%" + format_tr(row.get("tepki_oran\u0131_%"), 0),
             "%" + format_tr(row.get("geri_d\u00f6n\u00fc\u015f_%"), 0),
-            "%" + format_tr(row.get("uzakl\u0131k_%"), 1),
+            distance_text,
         ]
         if include_symbol:
             rows.append([_image_cell(row.get("symbol"), 12), *common])
         else:
             rows.append([*common, _image_cell(row.get("\u015fu_an"), 18)])
-    return headers, rows
+    return headers, rows, _metric_heatmap(frame)
 
 
 def _parse_percent_text(value: str) -> float | None:
@@ -603,21 +656,51 @@ def _parse_percent_text(value: str) -> float | None:
         return None
 
 
-def _cell_text_color(header: str, value: str) -> str:
+def _metric_value(header: str, value: str) -> float | None:
+    parsed = _parse_percent_text(value)
+    if parsed is None:
+        return None
+    if header == "Uzak":
+        return abs(parsed)
+    return parsed
+
+
+def _cell_style(
+    header: str,
+    value: str,
+    heatmap: dict[str, dict[str, float | bool]] | None = None,
+) -> tuple[str, str | None, bool]:
+    if header == "Taraf":
+        if "Destek" in value:
+            return "#0f7a3a", None, True
+        if "Diren" in value:
+            return "#b42318", None, True
+    stats = (heatmap or {}).get(header)
+    metric = _metric_value(header, value)
+    if stats and metric is not None:
+        low = float(stats["min"])
+        avg = float(stats["mean"])
+        high = float(stats["max"])
+        lower_is_better = bool(stats["lower_is_better"])
+        if high <= low:
+            return "#1d4ed8", "#e8f1ff", True
+        ratio = (high - metric) / (high - low) if lower_is_better else (metric - low) / (high - low)
+        if ratio >= 0.67:
+            return "#0f7a3a", "#e8f7ee", True
+        if (metric <= avg if lower_is_better else metric >= avg):
+            return "#1d4ed8", "#e8f1ff", True
+        if ratio >= 0.33:
+            return "#9a6700", "#fff7df", True
+        return "#b42318", "#fff1ed", True
     if header in {"Tepki", "Geri"}:
         number = _parse_percent_text(value)
         if number is None:
-            return "#111827"
+            return "#111827", None, False
         if number >= 70:
-            return "#0f7a3a"
+            return "#0f7a3a", None, True
         if number < 40:
-            return "#b42318"
-    if header == "Taraf":
-        if "Destek" in value:
-            return "#0f7a3a"
-        if "Diren" in value:
-            return "#b42318"
-    return "#111827"
+            return "#b42318", None, True
+    return "#111827", None, False
 
 
 def render_respect_table_image(
@@ -628,7 +711,8 @@ def render_respect_table_image(
     subtitle: str,
     badge: str = "",
     footer: str = "",
-    max_rows_per_image: int = 14,
+    max_rows_per_image: int = 22,
+    heatmap: dict[str, dict[str, float | bool]] | None = None,
 ) -> list[bytes]:
     if not rows:
         return []
@@ -646,7 +730,7 @@ def render_respect_table_image(
         chunk = rows[chunk_start : chunk_start + chunk_size]
         page_no = chunk_start // chunk_size + 1
         page_count = (len(rows) + chunk_size - 1) // chunk_size
-        fig_h = max(5.2, 2.2 + 0.43 * (len(chunk) + 1))
+        fig_h = max(5.2, 2.0 + 0.34 * (len(chunk) + 1))
         fig_w = 14.0
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=120)
         ax.set_xlim(0, 1)
@@ -682,7 +766,7 @@ def render_respect_table_image(
 
         left, right = 0.05, 0.95
         table_top = 0.79
-        row_h = min(0.058, 0.62 / max(2, len(chunk) + 1))
+        row_h = min(0.052, 0.62 / max(2, len(chunk) + 1))
         table_w = right - left
         if len(headers) == 8:
             weights = [1.35, 1.0, 0.95, 0.75, 0.85, 0.85, 0.9, 1.25]
@@ -723,13 +807,23 @@ def render_respect_table_image(
             ax.plot([left, right], [y, y], color="#d9e2ec", linewidth=0.65)
             for col, value in enumerate(row):
                 header = headers[col]
-                color = _cell_text_color(header, value)
-                weight = "bold" if col == 0 or header in {"MA", "Varlık"} else "normal"
+                color, cell_bg, strong = _cell_style(header, value, heatmap)
+                if cell_bg:
+                    ax.add_patch(
+                        patches.Rectangle(
+                            (x_positions[col], y),
+                            col_w[col],
+                            row_h,
+                            linewidth=0,
+                            facecolor=cell_bg,
+                        )
+                    )
+                weight = "bold" if strong or col == 0 or header in {"MA", "Varlık"} else "normal"
                 ax.text(
                     x_positions[col] + col_w[col] * 0.04,
                     y + row_h / 2,
                     value,
-                    fontsize=10.6,
+                    fontsize=10.2,
                     fontweight=weight,
                     color=color,
                     va="center",
@@ -758,7 +852,7 @@ def render_respect_images(
     include_symbol: bool,
 ) -> list[bytes]:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
-    visible = _filtered_scorecard(sorted_scorecard, min_visits).head(max(1, int(top)))
+    visible = _limit_frame(_filtered_scorecard(sorted_scorecard, min_visits), top)
     if visible.empty:
         return []
     symbol_count = sorted_scorecard["symbol"].nunique() if "symbol" in sorted_scorecard else 1
@@ -768,22 +862,24 @@ def render_respect_images(
     else:
         price = format_tr(visible["fiyat"].iloc[0], 2) if "fiyat" in visible else "-"
         subtitle = f"{timeframe} | fiyat {price} | e\u015fik {min_visits}+ temas"
-    badge = f"{len(visible)} sat\u0131r | max {max_visits} temas"
-    headers, rows = _respect_image_rows(visible, include_symbol=include_symbol)
+    avg_visits = float(visible["ziyaret"].mean()) if not visible.empty else 0.0
+    badge = f"{len(visible)} sat\u0131r | max {max_visits} | ort {format_tr(avg_visits, 1)} temas"
+    headers, rows, heatmap = _respect_image_rows(visible, include_symbol=include_symbol)
     images = render_respect_table_image(
         headers,
         rows,
         title=f"MA Sayg\u0131 \u00d6zeti - {label}",
         subtitle=subtitle,
         badge=badge,
-        footer="Tam liste CSV artifact i\u00e7inde: ma_respect_scorecard.csv",
+        footer="Renkler: yeşil güçlü, mavi ortalama üstü, sarı orta, kırmızı zayıf. Tam liste CSV artifact içinde.",
+        heatmap=heatmap,
     )
     current_visible = _filtered_scorecard(current, min_visits)
-    if detail_top > 0 and not current_visible.empty:
+    if detail_top >= 0 and not current_visible.empty:
         near = current_visible.copy()
-        near = near.reindex(near["uzakl\u0131k_%"].abs().sort_values().index).head(max(1, int(detail_top)))
+        near = _limit_frame(near.reindex(near["uzakl\u0131k_%"].abs().sort_values().index), detail_top)
         if not near.empty:
-            near_headers, near_rows = _respect_image_rows(near, include_symbol=include_symbol)
+            near_headers, near_rows, near_heatmap = _respect_image_rows(near, include_symbol=include_symbol)
             images.extend(
                 render_respect_table_image(
                     near_headers,
@@ -791,7 +887,8 @@ def render_respect_images(
                     title=f"Fiyata Yak\u0131n G\u00fc\u00e7l\u00fc MA - {label}",
                     subtitle=subtitle,
                     badge=f"{len(near)} sat\u0131r",
-                    footer="Yak\u0131nl\u0131k tek ba\u015f\u0131na sinyal de\u011fildir; temas ve tepkiyle birlikte okunmal\u0131.",
+                    footer="Yakınlık tek başına sinyal değildir; temas ve tepkiyle birlikte okunmalı.",
+                    heatmap=near_heatmap,
                 )
             )
     return images
@@ -912,14 +1009,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--csv", default=None, help="OHLCV CSV ile tek sembolde çevrimdışı çalıştır")
     parser.add_argument("--periods", default=",".join(map(str, DEFAULT_DESC_PERIODS)))
     parser.add_argument("--ma-types", default=",".join(MA_TYPES))
-    parser.add_argument("--side", default="support", choices=["support", "resistance"])
+    parser.add_argument("--side", default="auto", choices=["auto", "support", "resistance"])
     parser.add_argument("--lookback", type=int, default=750, help="Son N bar; 0 tüm veri")
     parser.add_argument("--zone-atr", type=float, default=None)
     parser.add_argument("--separation-atr", type=float, default=None)
     parser.add_argument("--horizon", type=int, default=None)
     parser.add_argument("--adx-threshold", type=float, default=None)
-    parser.add_argument("--top", type=int, default=8)
-    parser.add_argument("--detail-top", type=int, default=2)
+    parser.add_argument("--top", type=int, default=0, help="Telegram/image rows; 0 shows all rows")
+    parser.add_argument("--detail-top", type=int, default=10, help="Near-price image rows; 0 shows all rows")
     parser.add_argument("--per-symbol-top", type=int, default=2)
     parser.add_argument("--min-visits", type=int, default=DEFAULT_REPORT_MIN_VISITS)
     parser.add_argument("--sort-by", default="visits", choices=["visits", "score"])
@@ -940,7 +1037,7 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("--csv yalnız tek sembollü custom taramada kullanılabilir")
     periods = parse_int_list(args.periods)
     ma_types = parse_str_list(args.ma_types)
-    side = 1 if args.side == "support" else -1
+    side = 0 if args.side == "auto" else (1 if args.side == "support" else -1)
     config = _config_for_timeframe(
         args.timeframe,
         zone_atr=args.zone_atr,
@@ -987,7 +1084,7 @@ def main(argv: list[str] | None = None) -> int:
                         current,
                         top=args.top,
                         detail_top=args.detail_top,
-                        min_visits=max(1, int(args.min_visits)),
+                        min_visits=max(0, int(args.min_visits)),
                         sort_by=args.sort_by,
                     )
                 )
@@ -1011,7 +1108,7 @@ def main(argv: list[str] | None = None) -> int:
             timeframe=args.timeframe,
             top=args.top,
             per_symbol_top=args.per_symbol_top,
-            min_visits=max(1, int(args.min_visits)),
+            min_visits=max(0, int(args.min_visits)),
             sort_by=args.sort_by,
         )
     output_dir = Path(args.output_dir)
@@ -1027,7 +1124,7 @@ def main(argv: list[str] | None = None) -> int:
         timeframe=args.timeframe,
         top=args.top,
         detail_top=args.detail_top,
-        min_visits=max(1, int(args.min_visits)),
+        min_visits=max(0, int(args.min_visits)),
         sort_by=args.sort_by,
         include_symbol=len(instruments) != 1,
     )

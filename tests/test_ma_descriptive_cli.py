@@ -44,7 +44,10 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertIn(200, parsed_periods)
         self.assertEqual(len(parsed_periods), 16)
         self.assertEqual(args.ma_types, "SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA")
-        self.assertEqual(args.min_visits, 5)
+        self.assertEqual(args.min_visits, 1)
+        self.assertEqual(args.side, "auto")
+        self.assertEqual(args.top, 0)
+        self.assertEqual(args.detail_top, 10)
         custom = build_parser().parse_args(["--ticker", "ASELS", "--periods", "5,34,233"])
         self.assertEqual(custom.periods, "5,34,233")
 
@@ -138,6 +141,34 @@ class DescriptiveMaCliTests(unittest.TestCase):
         if not images:
             self.skipTest("matplotlib unavailable")
         self.assertTrue(images[0].startswith(b"\x89PNG"))
+
+
+    def test_auto_side_uses_current_price_position(self):
+        idx = pd.date_range("2025-01-01", periods=80, freq="D")
+        close = np.linspace(100.0, 150.0, 80)
+        close[-1] = 80.0
+        frame = pd.DataFrame(
+            {
+                "Open": close,
+                "High": close + 2.0,
+                "Low": close - 2.0,
+                "Close": close,
+                "Volume": np.full(80, 1_000_000.0),
+            },
+            index=idx,
+        )
+
+        _, scorecard, _, _ = scan_ma_respect(
+            frame,
+            symbol="ASELS",
+            timeframe="1d",
+            ma_types=("SMA",),
+            periods=(5,),
+            side=0,
+            config=AnalysisConfig(horizon=3, zone_atr=0.8, separation_atr=0.1),
+        )
+
+        self.assertEqual(scorecard.iloc[0]["taraf"], "Direnç")
 
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
