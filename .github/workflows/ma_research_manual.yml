@@ -147,6 +147,28 @@ jobs:
             --top 20 \
             --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES"
         continue-on-error: true
+      - name: Betimsel MA saygi ek listesi
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          DESC_TIMEFRAME="${INPUT_TIMEFRAMES%%,*}"
+          python -m scanner.guarded_descriptive_bridge \
+            --summary reports/guarded/instrument_summary.csv \
+            --behavior-dir reports/guarded \
+            --output-dir reports/guarded/descriptive_highlights \
+            --label "Guarded Ek Liste MA Saygi: ${{ inputs.universe }}" \
+            --timeframe "$DESC_TIMEFRAME" \
+            --periods "$INPUT_PERIODS" \
+            --source "$INPUT_SOURCE" \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES" \
+            --max-symbols 20 \
+            --top 20 \
+            --detail-top 20 \
+            --telegram
+        continue-on-error: true
       - name: Upload auditable outputs
         if: always()
         uses: actions/upload-artifact@v4

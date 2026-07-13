@@ -999,6 +999,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ticker", default="ASELS", help="Tek sembol veya custom için ilk sembol")
     parser.add_argument("--tickers", default="", help="Custom sembol listesi: ASELS,THYAO,BTC-USD")
     parser.add_argument("--universe", default="custom", help="Friendly universe key; ör. bist_all_stocks")
+    parser.add_argument("--label", default="", help="Custom report/image title")
     parser.add_argument("--sector", default="Tümü / uygulanmaz")
     parser.add_argument("--list-universes", action="store_true")
     parser.add_argument("--asset-class", default="stock", choices=list(ASSET_CLASSES))
@@ -1104,7 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
         report = format_universe_report(
             scorecard_all,
             errors,
-            universe=args.universe,
+            universe=args.label or args.universe,
             timeframe=args.timeframe,
             top=args.top,
             per_symbol_top=args.per_symbol_top,
@@ -1115,7 +1116,7 @@ def main(argv: list[str] | None = None) -> int:
     image_label = (
         str(getattr(instruments[0], "symbol", args.ticker)).upper()
         if len(instruments) == 1 and instruments
-        else args.universe
+        else (args.label or args.universe)
     )
     images = render_respect_images(
         scorecard_all,

@@ -48,6 +48,8 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertEqual(args.side, "auto")
         self.assertEqual(args.top, 0)
         self.assertEqual(args.detail_top, 10)
+        labeled = build_parser().parse_args(["--ticker", "ASELS", "--label", "Ek Liste"])
+        self.assertEqual(labeled.label, "Ek Liste")
         custom = build_parser().parse_args(["--ticker", "ASELS", "--periods", "5,34,233"])
         self.assertEqual(custom.periods, "5,34,233")
 

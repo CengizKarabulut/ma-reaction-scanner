@@ -103,6 +103,28 @@ jobs:
             --top 1 \
             --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES"
         continue-on-error: true
+      - name: Betimsel MA saygi ek listesi
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          DESC_TIMEFRAME="${INPUT_TIMEFRAMES%%,*}"
+          python -m scanner.guarded_descriptive_bridge \
+            --summary reports/single/instrument_summary.csv \
+            --behavior-dir reports/single \
+            --output-dir reports/single/descriptive_highlights \
+            --label "Tek Varlik MA Saygi: ${{ inputs.symbol }}" \
+            --timeframe "$DESC_TIMEFRAME" \
+            --periods "$INPUT_PERIODS" \
+            --source "$INPUT_SOURCE" \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES" \
+            --max-symbols 20 \
+            --top 20 \
+            --detail-top 20 \
+            --telegram
+        continue-on-error: true
       - name: Denetlenebilir çıktıları yükle
         if: always()
         uses: actions/upload-artifact@v4

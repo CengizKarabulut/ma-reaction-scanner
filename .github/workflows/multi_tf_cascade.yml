@@ -159,6 +159,29 @@ jobs:
             --top 20 \
             --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES"
         continue-on-error: true
+      - name: Betimsel MA saygi ek listesi
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          DESC_TIMEFRAMES="${{ steps.cascade.outputs.timeframes }}"
+          DESC_TIMEFRAME="${DESC_TIMEFRAMES%%,*}"
+          python -m scanner.guarded_descriptive_bridge \
+            --summary reports/multi_tf/instrument_summary.csv \
+            --behavior-dir reports/multi_tf \
+            --output-dir reports/multi_tf/descriptive_highlights \
+            --label "Multi-TF Ek Liste MA Saygi (${{ inputs.cascade_type }})" \
+            --timeframe "$DESC_TIMEFRAME" \
+            --periods "$INPUT_PERIODS" \
+            --source "$INPUT_SOURCE" \
+            --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES" \
+            --max-symbols 20 \
+            --top 20 \
+            --detail-top 20 \
+            --telegram
+        continue-on-error: true
       - name: Denetlenebilir çıktıları yükle
         if: always()
         uses: actions/upload-artifact@v4
