@@ -3,6 +3,8 @@ import unittest
 import numpy as np
 import pandas as pd
 
+import scanner.ma_descriptive_cli as desc_cli
+
 from scanner.ma_core import AnalysisConfig
 from scanner.ma_descriptive_cli import (
     DEFAULT_DESC_PERIODS,
@@ -208,6 +210,78 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertIn("MA DNA okumasi", report)
         self.assertIn("DNA skoru gecmis karakteri", report)
 
+    def test_universe_dna_block_ranks_globally_before_truncating(self):
+        dna = pd.DataFrame(
+            [
+                {
+                    "symbol": "AAA",
+                    "MA": "SMA5",
+                    "guncel_taraf": "Destek",
+                    "temas": 20,
+                    "tepki_%": 55.0,
+                    "uzak_%": 1.0,
+                    "dna_skoru": 40.0,
+                    "guncel_aksiyon_skoru": 35.0,
+                    "dna_sinifi": "Izleme",
+                    "yorum": "dusuk skor",
+                },
+                {
+                    "symbol": "ZZZ",
+                    "MA": "HMA34",
+                    "guncel_taraf": "Destek",
+                    "temas": 25,
+                    "tepki_%": 70.0,
+                    "uzak_%": 3.0,
+                    "dna_skoru": 88.0,
+                    "guncel_aksiyon_skoru": 60.0,
+                    "dna_sinifi": "Ana DNA",
+                    "yorum": "guclu skor",
+                },
+            ]
+        )
+
+        block = "\n".join(desc_cli._format_dna_block(dna, top=1, include_symbol=True))
+
+        self.assertIn("ZZZ | HMA34", block)
+        self.assertNotIn("AAA | SMA5", block)
+
+    def test_universe_dna_image_honors_top_zero(self):
+        dna = pd.DataFrame(
+            [
+                {
+                    "symbol": f"SYM{i:02d}",
+                    "MA": "SMA5",
+                    "guncel_taraf": "Destek",
+                    "temas": i + 1,
+                    "tepki_%": 50.0,
+                    "dna_skoru": float(i),
+                    "guncel_aksiyon_skoru": float(i) / 2.0,
+                    "dna_sinifi": "Izleme",
+                }
+                for i in range(45)
+            ]
+        )
+        captured: dict[str, int] = {}
+        original = desc_cli.render_respect_table_image
+
+        def fake_renderer(headers, rows, **kwargs):
+            captured["row_count"] = len(rows)
+            return [b"png"]
+
+        try:
+            desc_cli.render_respect_table_image = fake_renderer
+            images = desc_cli.render_dna_profile_images(
+                dna,
+                label="BIST",
+                timeframe="1d",
+                top=0,
+                include_symbol=True,
+            )
+        finally:
+            desc_cli.render_respect_table_image = original
+
+        self.assertEqual(images, [b"png"])
+        self.assertEqual(captured["row_count"], 45)
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
         prepared, scorecard, events, current = scan_ma_respect(

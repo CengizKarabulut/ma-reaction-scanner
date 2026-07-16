@@ -652,7 +652,14 @@ def _format_dna_block(
 ) -> list[str]:
     if dna_profile is None or dna_profile.empty:
         return ["", "MA DNA okumasi", "DNA profili uretilemedi."]
-    shown = _limit_frame(dna_profile, top if top > 0 else 8)
+    block = dna_profile
+    if include_symbol:
+        block = block.sort_values(
+            ["dna_skoru", "temas", "guncel_aksiyon_skoru"],
+            ascending=[False, False, False],
+            na_position="last",
+        )
+    shown = _limit_frame(block, top)
     lines = ["", "MA DNA okumasi"]
     for rank, (_, row) in enumerate(shown.iterrows(), 1):
         lines.append(
@@ -772,7 +779,7 @@ def format_universe_report(
     else:
         for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank, include_symbol=True))
-    lines.extend(_format_dna_block(dna_profile, top=8, include_symbol=True))
+    lines.extend(_format_dna_block(dna_profile, top=top, include_symbol=True))
     if not visible.empty and per_symbol_top > 0:
         lines.extend(["", f"Varlık başına kısa liste ({per_symbol_top} MA)"])
         symbol_order = (
@@ -1198,10 +1205,7 @@ def render_dna_profile_images(
         ascending=[False, False, False],
         na_position="last",
     ).reset_index(drop=True)
-    visual_top = int(top)
-    if include_symbol and visual_top <= 0:
-        visual_top = 40
-    visible = _limit_frame(profile, visual_top)
+    visible = _limit_frame(profile, int(top))
     if visible.empty:
         return []
     max_dna = float(pd.to_numeric(visible["dna_skoru"], errors="coerce").max())
