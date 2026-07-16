@@ -8,6 +8,7 @@ from scanner.ma_descriptive_cli import (
     DEFAULT_DESC_PERIODS,
     _format_episode_range,
     _format_event_timestamp,
+    build_ma_dna_profile,
     _resolve_instruments,
     build_parser,
     crossing_episodes,
@@ -171,6 +172,41 @@ class DescriptiveMaCliTests(unittest.TestCase):
         )
 
         self.assertEqual(scorecard.iloc[0]["taraf"], "Direnç")
+
+    def test_dna_profile_scores_and_report_block_are_created(self):
+        cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
+        prepared, scorecard, events, current = scan_ma_respect(
+            _synthetic_frame(),
+            symbol="ASELS",
+            timeframe="1d",
+            ma_types=("SMA", "EMA", "HMA"),
+            periods=(5, 8, 13),
+            side=0,
+            config=cfg,
+        )
+
+        dna = build_ma_dna_profile(scorecard, min_visits=1)
+
+        self.assertFalse(dna.empty)
+        self.assertIn("dna_skoru", dna.columns)
+        self.assertIn("guncel_aksiyon_skoru", dna.columns)
+        self.assertIn("dna_sinifi", dna.columns)
+        self.assertTrue(dna["dna_skoru"].between(0, 100).all())
+        self.assertTrue(dna["guncel_aksiyon_skoru"].between(0, 100).all())
+        self.assertTrue(set(dna["dna_sinifi"]).issubset({"Ana DNA", "Guclu", "Izleme", "Zayif"}))
+
+        report = format_report(
+            "ASELS",
+            "1d",
+            prepared,
+            scorecard,
+            events,
+            current,
+            dna,
+            min_visits=1,
+        )
+        self.assertIn("MA DNA okumasi", report)
+        self.assertIn("DNA skoru gecmis karakteri", report)
 
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)

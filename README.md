@@ -49,11 +49,18 @@ karşılaştırıp ham ziyaret, tepki, sarkma ve geri dönüş karnesi üretir.
 Varsayılan havuz: `5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377` ve
 `SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA`. Bu alanlar workflow'da serbestçe değiştirilebilir;
 istersen 50/200 çıkarabilir, başka periyot ekleyebilirsin. Ana sıralama varsayılan
-olarak en çok temas/ziyaret alan MA'lardan başlar (`sort_by=visits`). Telegram
-çıktısı 1-2 temaslı satırları “iyi” gibi göstermemek için varsayılan `min_visits=5`
-kullanır; tam ham liste CSV artifact içinde `ma_respect_scorecard.csv`, varlık başı
-özet de `ma_respect_top_per_symbol.csv` olarak saklanır. `universe=bist_all_stocks`
-gibi evrenlerle çoklu tarama yapılabilir; hızlı tek sembol için `universe=custom` ve
+olarak en çok temas/ziyaret alan MA'lardan başlar (`sort_by=visits`). `top=0` tüm
+temaslı ortalamaları görsele ve Telegram'a taşır; `min_visits` ise istersen görseli
+sadeleştirmek için 5/10 gibi yükseltebileceğin eşiktir. Varsayılan `min_visits=1`
+kalır, çünkü ham DNA okumasında düşük temaslı zayıf adayları da görmek bazen faydalıdır;
+ama bu satırlar `Ana DNA` diye parlatılmaz.
+
+CSV artifact ayrımı bilinçlidir: `ma_respect_scorecard.csv` ham ziyaret/tepki karnesi,
+`ma_respect_current.csv` bugünkü yakın MA listesi, `ma_dna_profile.csv` ise hissenin
+asıl “MA DNA” profilidir. `dna_skoru` geçmiş karakteri ölçer; `guncel_aksiyon_skoru`
+bu karaktere bugünkü fiyat yakınlığını ekler. Çoklu evrenlerde varlık başına kısa DNA
+listesi `ma_dna_top_per_symbol.csv` olarak saklanır. `universe=bist_all_stocks` gibi
+evrenlerle çoklu tarama yapılabilir; hızlı tek sembol için `universe=custom` ve
 `ticker=ASELS` yeterlidir.
 
 ## Kod yazmadan evren seçimi
