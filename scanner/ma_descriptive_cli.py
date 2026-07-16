@@ -93,6 +93,31 @@ _SORT_COLUMNS = {
     "score": ["saygı_skoru", "ziyaret", "tepki_oranı_%", "uzaklık_ATR"],
 }
 
+_DNA_CLASS_ORDER = {"Ana DNA": 0, "Guclu": 1, "Izleme": 2, "Zayif": 3}
+_DNA_OUTPUT_COLUMNS = [
+    "symbol",
+    "varlik_turu",
+    "sektor",
+    "timeframe",
+    "MA",
+    "tur",
+    "periyot",
+    "fiyat",
+    "seviye",
+    "guncel_taraf",
+    "temas",
+    "temas_gucu_%",
+    "tepki_%",
+    "geri_%",
+    "ort_tepki_ATR",
+    "uzak_%",
+    "uzak_ATR",
+    "dna_skoru",
+    "guncel_aksiyon_skoru",
+    "dna_sinifi",
+    "yorum",
+]
+
 
 @dataclass(frozen=True)
 class CrossingEpisode:
@@ -234,6 +259,173 @@ def _score_row(
     stability = favorable_bar_pct / 100.0 if np.isfinite(favorable_bar_pct) else 0.0
     move = float(np.clip((avg_atr_move if np.isfinite(avg_atr_move) else 0.0) / 2.0, 0.0, 1.0))
     return 100.0 * activity * (0.35 * reaction + 0.30 * recovery + 0.20 * stability + 0.15 * move)
+
+
+
+def _num_value(value: object, default: float = np.nan) -> float:
+    number = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    return float(default) if pd.isna(number) else float(number)
+
+
+def _clip01(value: float) -> float:
+    if not np.isfinite(value):
+        return 0.0
+    return float(np.clip(value, 0.0, 1.0))
+
+
+def _dna_side(price: float, level: float) -> str:
+    if np.isfinite(price) and np.isfinite(level) and price >= level:
+        return "Destek"
+    if np.isfinite(price) and np.isfinite(level):
+        return "Direnc"
+    return "-"
+
+
+def _dna_class(score: float, visits: int, max_visits: int, reaction: float, recovery: float) -> str:
+    core_visit_floor = max(10, int(np.ceil(max_visits * 0.50)))
+    strong_visit_floor = max(5, int(np.ceil(max_visits * 0.35)))
+    reaction_ok = np.isfinite(reaction) and reaction >= 50.0
+    recovery_ok = np.isfinite(recovery) and recovery >= 65.0
+    quality_ok = bool(reaction_ok or recovery_ok)
+    if visits >= core_visit_floor and score >= 70.0 and quality_ok:
+        return "Ana DNA"
+    if visits >= strong_visit_floor and score >= 55.0 and quality_ok:
+        return "Guclu"
+    if visits > 0 and score >= 40.0:
+        return "Izleme"
+    return "Zayif"
+
+
+def _dna_comment(
+    dna_class: str,
+    visits: int,
+    reaction: float,
+    recovery: float,
+    move_atr: float,
+    action_score: float,
+) -> str:
+    parts: list[str] = []
+    if dna_class == "Ana DNA":
+        parts.append("karakteristik ortalama")
+    elif dna_class == "Guclu":
+        parts.append("guclu aday")
+    elif dna_class == "Izleme":
+        parts.append("izlenebilir")
+    else:
+        parts.append("zayif kanit")
+    if visits >= 20:
+        parts.append("cok temas")
+    elif visits >= 10:
+        parts.append("yeterli temas")
+    else:
+        parts.append("az temas")
+    if np.isfinite(reaction) and reaction >= 65:
+        parts.append("tepki guclu")
+    elif np.isfinite(reaction) and reaction < 45:
+        parts.append("tepki zayif")
+    if np.isfinite(recovery) and recovery >= 70:
+        parts.append("geri alma guclu")
+    if np.isfinite(move_atr) and move_atr > 0.75:
+        parts.append("hareket buyuk")
+    if action_score >= 70:
+        parts.append("su an yakin/onemli")
+    return "; ".join(parts)
+
+
+def build_ma_dna_profile(scorecard: pd.DataFrame, min_visits: int = DEFAULT_REPORT_MIN_VISITS) -> pd.DataFrame:
+    """Build a per-symbol MA DNA profile from the descriptive scorecard.
+
+    DNA score is historical character: repeated visits, reaction reliability,
+    recovery behaviour and ATR-sized reaction. Current action score adds the
+    present distance to that historical character, so a far-but-important MA is
+    not confused with a level that is relevant right now.
+    """
+
+    if scorecard is None or scorecard.empty:
+        return pd.DataFrame(columns=_DNA_OUTPUT_COLUMNS)
+    work = scorecard.copy()
+    visits = pd.to_numeric(work.get("ziyaret", pd.Series(dtype=float)), errors="coerce").fillna(0)
+    min_visits = max(0, int(min_visits))
+    work = work[visits >= min_visits].copy()
+    if work.empty:
+        return pd.DataFrame(columns=_DNA_OUTPUT_COLUMNS)
+
+    records: list[dict[str, object]] = []
+    group_cols = [col for col in ["symbol", "timeframe"] if col in work.columns]
+    grouped = work.groupby(group_cols, sort=False, dropna=False) if group_cols else [((), work)]
+    for _, group in grouped:
+        group_visits = pd.to_numeric(group.get("ziyaret", pd.Series(dtype=float)), errors="coerce").fillna(0)
+        max_visits = max(1, int(group_visits.max()))
+        total_visits = max(1.0, float(group_visits.sum()))
+        move_values = pd.to_numeric(group.get("ort_tepki_ATR", pd.Series(dtype=float)), errors="coerce")
+        positive_moves = move_values[np.isfinite(move_values) & (move_values > 0)]
+        max_move = float(positive_moves.quantile(0.90)) if not positive_moves.empty else 1.0
+        max_move = max(max_move, 0.25)
+        for _, row in group.iterrows():
+            visit_count = int(max(0, _num_value(row.get("ziyaret"), 0.0)))
+            reaction = _num_value(row.get("tepki_oran\u0131_%"), np.nan)
+            recovery = _num_value(row.get("geri_d\u00f6n\u00fc\u015f_%"), np.nan)
+            move_atr = _num_value(row.get("ort_tepki_ATR"), np.nan)
+            price = _num_value(row.get("fiyat"), np.nan)
+            level = _num_value(row.get("ma_de\u011feri"), np.nan)
+            distance_pct = _num_value(row.get("uzakl\u0131k_%"), np.nan)
+            distance_atr = _num_value(row.get("uzakl\u0131k_ATR"), np.nan)
+            visit_power = _clip01(visit_count / max_visits)
+            reaction_power = _clip01(reaction / 100.0)
+            recovery_power = _clip01(recovery / 100.0)
+            move_power = _clip01(max(0.0, move_atr if np.isfinite(move_atr) else 0.0) / max_move)
+            dna_score = 100.0 * (
+                0.45 * visit_power
+                + 0.25 * reaction_power
+                + 0.15 * recovery_power
+                + 0.15 * move_power
+            )
+            abs_atr = abs(distance_atr) if np.isfinite(distance_atr) else np.nan
+            abs_pct = abs(distance_pct) if np.isfinite(distance_pct) else np.nan
+            if np.isfinite(abs_atr):
+                proximity = 1.0 / (1.0 + abs_atr)
+            elif np.isfinite(abs_pct):
+                proximity = 1.0 / (1.0 + abs_pct / 2.0)
+            else:
+                proximity = 0.0
+            action_score = float(dna_score * (0.25 + 0.75 * proximity))
+            dna_class = _dna_class(dna_score, visit_count, max_visits, reaction, recovery)
+            records.append(
+                {
+                    "symbol": str(row.get("symbol", "")).upper(),
+                    "varlik_turu": row.get("varl\u0131k_t\u00fcr\u00fc", ""),
+                    "sektor": row.get("sekt\u00f6r", ""),
+                    "timeframe": row.get("timeframe", ""),
+                    "MA": row.get("MA", ""),
+                    "tur": row.get("t\u00fcr", ""),
+                    "periyot": int(_num_value(row.get("periyot"), 0.0)),
+                    "fiyat": price,
+                    "seviye": level,
+                    "guncel_taraf": _dna_side(price, level),
+                    "temas": visit_count,
+                    "temas_gucu_%": 100.0 * visit_count / max_visits,
+                    "tepki_%": reaction,
+                    "geri_%": recovery,
+                    "ort_tepki_ATR": move_atr,
+                    "uzak_%": distance_pct,
+                    "uzak_ATR": distance_atr,
+                    "dna_skoru": round(float(dna_score), 1),
+                    "guncel_aksiyon_skoru": round(action_score, 1),
+                    "dna_sinifi": dna_class,
+                    "yorum": _dna_comment(dna_class, visit_count, reaction, recovery, move_atr, action_score),
+                    "_class_rank": _DNA_CLASS_ORDER.get(dna_class, 9),
+                    "_touch_share": 100.0 * visit_count / total_visits,
+                }
+            )
+    result = pd.DataFrame(records)
+    if result.empty:
+        return pd.DataFrame(columns=_DNA_OUTPUT_COLUMNS)
+    result = result.sort_values(
+        ["symbol", "timeframe", "_class_rank", "dna_skoru", "temas", "guncel_aksiyon_skoru"],
+        ascending=[True, True, True, False, False, False],
+        na_position="last",
+    ).reset_index(drop=True)
+    return result.drop(columns=["_class_rank", "_touch_share"], errors="ignore")
 
 
 def _sort_scorecard(frame: pd.DataFrame, sort_by: str = "visits") -> pd.DataFrame:
@@ -444,6 +636,41 @@ def _ma_card_lines(row: pd.Series, rank: int, include_symbol: bool = False) -> l
     ]
 
 
+def _dna_identity(row: pd.Series, include_symbol: bool = False) -> str:
+    ma = str(row.get("MA", ""))
+    if include_symbol:
+        symbol = str(row.get("symbol", ""))
+        return f"{symbol} | {ma}" if symbol else ma
+    return ma
+
+
+def _format_dna_block(
+    dna_profile: pd.DataFrame | None,
+    *,
+    top: int = 5,
+    include_symbol: bool = False,
+) -> list[str]:
+    if dna_profile is None or dna_profile.empty:
+        return ["", "MA DNA okumasi", "DNA profili uretilemedi."]
+    shown = _limit_frame(dna_profile, top if top > 0 else 8)
+    lines = ["", "MA DNA okumasi"]
+    for rank, (_, row) in enumerate(shown.iterrows(), 1):
+        lines.append(
+            f"{rank}. {_dna_identity(row, include_symbol)} | {row.get('dna_sinifi', '-')} | "
+            f"DNA {format_tr(row.get('dna_skoru'), 1)} | "
+            f"Aksiyon {format_tr(row.get('guncel_aksiyon_skoru'), 1)}"
+        )
+        lines.append(
+            f"   {row.get('guncel_taraf', '-')} | {int(row.get('temas', 0))} temas | "
+            f"tepki %{format_tr(row.get('tepki_%'), 0)} | uzak %{format_tr(row.get('uzak_%'), 1)}"
+        )
+        comment = str(row.get("yorum", "")).strip()
+        if comment:
+            lines.append(f"   Yorum: {comment}")
+    lines.append("DNA skoru gecmis karakteri, Aksiyon skoru bugunku yakinligi ekler.")
+    return lines
+
+
 def _filtered_scorecard(scorecard: pd.DataFrame, min_visits: int) -> pd.DataFrame:
     if scorecard.empty:
         return scorecard
@@ -457,6 +684,7 @@ def format_report(
     scorecard: pd.DataFrame,
     events: pd.DataFrame,
     current: pd.DataFrame,
+    dna_profile: pd.DataFrame | None = None,
     *,
     top: int = 20,
     detail_top: int = 5,
@@ -493,6 +721,7 @@ def format_report(
     else:
         for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank))
+    lines.extend(_format_dna_block(dna_profile, top=5, include_symbol=False))
     lines.extend(["", "Fiyata yakın güçlüler"])
     current_visible = _filtered_scorecard(current, min_visits)
     if current_visible.empty:
@@ -519,6 +748,7 @@ def format_universe_report(
     errors: list[str],
     *,
     universe: str,
+    dna_profile: pd.DataFrame | None = None,
     timeframe: str,
     top: int,
     per_symbol_top: int,
@@ -542,6 +772,7 @@ def format_universe_report(
     else:
         for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank, include_symbol=True))
+    lines.extend(_format_dna_block(dna_profile, top=8, include_symbol=True))
     if not visible.empty and per_symbol_top > 0:
         lines.extend(["", f"Varlık başına kısa liste ({per_symbol_top} MA)"])
         symbol_order = (
@@ -606,9 +837,11 @@ def _numeric_column(frame: pd.DataFrame, column: str, *, absolute: bool = False)
 def _metric_heatmap(frame: pd.DataFrame) -> dict[str, dict[str, float | bool]]:
     specs = {
         "Temas": ("ziyaret", False, False),
-        "Tepki": ("tepki_oran\u0131_%", False, False),
-        "Geri": ("geri_d\u00f6n\u00fc\u015f_%", False, False),
-        "Uzak": ("uzakl\u0131k_%", True, True),
+        "Tepki": ("tepki_oranı_%", False, False),
+        "Geri": ("geri_dönüş_%", False, False),
+        "Uzak": ("uzaklık_%", True, True),
+        "DNA": ("dna_skoru", False, False),
+        "Aksiyon": ("guncel_aksiyon_skoru", False, False),
     }
     result: dict[str, dict[str, float | bool]] = {}
     for header, (column, absolute, lower_is_better) in specs.items():
@@ -675,6 +908,14 @@ def _cell_style(
             return "#0f7a3a", None, True
         if "Diren" in value:
             return "#b42318", None, True
+    if header == "Sinif":
+        if "Ana" in value:
+            return "#0f7a3a", "#e8f7ee", True
+        if "Guclu" in value:
+            return "#1d4ed8", "#e8f1ff", True
+        if "Izleme" in value:
+            return "#9a6700", "#fff7df", True
+        return "#b42318", "#fff1ed", True
     stats = (heatmap or {}).get(header)
     metric = _metric_value(header, value)
     if stats and metric is not None:
@@ -894,6 +1135,91 @@ def render_respect_images(
     return images
 
 
+def _dna_metric_heatmap(frame: pd.DataFrame) -> dict[str, dict[str, float | bool]]:
+    specs = {
+        "Temas": ("temas", False, False),
+        "Tepki": ("tepki_%", False, False),
+        "DNA": ("dna_skoru", False, False),
+        "Aksiyon": ("guncel_aksiyon_skoru", False, False),
+    }
+    result: dict[str, dict[str, float | bool]] = {}
+    for header, (column, absolute, lower_is_better) in specs.items():
+        values = _numeric_column(frame, column, absolute=absolute)
+        if values.empty:
+            continue
+        result[header] = {
+            "min": float(values.min()),
+            "mean": float(values.mean()),
+            "max": float(values.max()),
+            "lower_is_better": bool(lower_is_better),
+        }
+    return result
+
+
+def _dna_image_rows(frame: pd.DataFrame, *, include_symbol: bool) -> tuple[list[str], list[list[str]], dict[str, dict[str, float | bool]]]:
+    if include_symbol:
+        headers = ["Varlik", "MA", "Taraf", "Temas", "Tepki", "DNA", "Aksiyon", "Sinif"]
+    else:
+        headers = ["MA", "Seviye", "Taraf", "Temas", "Tepki", "DNA", "Aksiyon", "Sinif"]
+    rows: list[list[str]] = []
+    for _, row in frame.iterrows():
+        common = [
+            _image_cell(row.get("MA"), 14),
+            str(row.get("guncel_taraf", "-")),
+            str(int(row.get("temas", 0))),
+            "%" + format_tr(row.get("tepki_%"), 0),
+            format_tr(row.get("dna_skoru"), 1),
+            format_tr(row.get("guncel_aksiyon_skoru"), 1),
+            str(row.get("dna_sinifi", "-")),
+        ]
+        if include_symbol:
+            rows.append([_image_cell(row.get("symbol"), 12), *common])
+        else:
+            rows.append([
+                common[0],
+                format_tr(row.get("seviye"), 2),
+                *common[1:],
+            ])
+    return headers, rows, _dna_metric_heatmap(frame)
+
+
+def render_dna_profile_images(
+    dna_profile: pd.DataFrame,
+    *,
+    label: str,
+    timeframe: str,
+    top: int,
+    include_symbol: bool,
+) -> list[bytes]:
+    if dna_profile is None or dna_profile.empty:
+        return []
+    profile = dna_profile.sort_values(
+        ["dna_skoru", "temas", "guncel_aksiyon_skoru"],
+        ascending=[False, False, False],
+        na_position="last",
+    ).reset_index(drop=True)
+    visual_top = int(top)
+    if include_symbol and visual_top <= 0:
+        visual_top = 40
+    visible = _limit_frame(profile, visual_top)
+    if visible.empty:
+        return []
+    max_dna = float(pd.to_numeric(visible["dna_skoru"], errors="coerce").max())
+    headers, rows, heatmap = _dna_image_rows(visible, include_symbol=include_symbol)
+    badge = f"{len(visible)} satir | max DNA {format_tr(max_dna, 1)}"
+    subtitle = f"{timeframe} | DNA=gecmis karakter, Aksiyon=bugunku yakinlik"
+    footer = "Ana DNA uzak olsa da karakteristiktir; Aksiyon skoru su an izlenebilirligi ekler. Tam liste CSV artifact icinde."
+    return render_respect_table_image(
+        headers,
+        rows,
+        title=f"MA DNA Profili - {label}",
+        subtitle=subtitle,
+        badge=badge,
+        footer=footer,
+        heatmap=heatmap,
+    )
+
+
 def _telegram_image_caption(report: str, *, image_index: int, image_count: int) -> str:
     first_lines = [line for line in report.splitlines()[:4] if line.strip()]
     caption = "\n".join(first_lines)
@@ -971,6 +1297,7 @@ def _write_outputs(
     scorecard: pd.DataFrame,
     events: pd.DataFrame,
     current: pd.DataFrame,
+    dna_profile: pd.DataFrame | None = None,
     images: Sequence[bytes] | None = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -978,6 +1305,16 @@ def _write_outputs(
     scorecard.to_csv(output_dir / "ma_respect_scorecard.csv", index=False, encoding="utf-8-sig")
     events.to_csv(output_dir / "ma_respect_events.csv", index=False, encoding="utf-8-sig")
     current.to_csv(output_dir / "ma_respect_current.csv", index=False, encoding="utf-8-sig")
+    dna_out = dna_profile if dna_profile is not None else pd.DataFrame(columns=_DNA_OUTPUT_COLUMNS)
+    dna_out.to_csv(output_dir / "ma_dna_profile.csv", index=False, encoding="utf-8-sig")
+    if not dna_out.empty:
+        dna_top = (
+            dna_out.sort_values(["symbol", "dna_skoru", "temas"], ascending=[True, False, False])
+            .groupby("symbol", group_keys=False)
+            .head(5)
+            .reset_index(drop=True)
+        )
+        dna_top.to_csv(output_dir / "ma_dna_top_per_symbol.csv", index=False, encoding="utf-8-sig")
     for index, image in enumerate(images or [], 1):
         (output_dir / f"ma_respect_visual_{index}.png").write_bytes(image)
     if not scorecard.empty:
@@ -1083,6 +1420,7 @@ def main(argv: list[str] | None = None) -> int:
                         scorecard,
                         events,
                         current,
+                        build_ma_dna_profile(scorecard, min_visits=max(0, int(args.min_visits))),
                         top=args.top,
                         detail_top=args.detail_top,
                         min_visits=max(0, int(args.min_visits)),
@@ -1098,6 +1436,7 @@ def main(argv: list[str] | None = None) -> int:
     current_all = pd.concat(all_current, ignore_index=True) if all_current else pd.DataFrame()
     scorecard_all = _sort_scorecard(scorecard_all, sort_by=args.sort_by)
     current_all = _sort_scorecard(current_all, sort_by=args.sort_by)
+    dna_profile_all = build_ma_dna_profile(scorecard_all, min_visits=max(0, int(args.min_visits)))
 
     if len(instruments) == 1 and single_report_parts:
         report = single_report_parts[0]
@@ -1106,6 +1445,7 @@ def main(argv: list[str] | None = None) -> int:
             scorecard_all,
             errors,
             universe=args.label or args.universe,
+            dna_profile=dna_profile_all,
             timeframe=args.timeframe,
             top=args.top,
             per_symbol_top=args.per_symbol_top,
@@ -1129,7 +1469,16 @@ def main(argv: list[str] | None = None) -> int:
         sort_by=args.sort_by,
         include_symbol=len(instruments) != 1,
     )
-    _write_outputs(output_dir, report, scorecard_all, events_all, current_all, images)
+    images.extend(
+        render_dna_profile_images(
+            dna_profile_all,
+            label=image_label,
+            timeframe=args.timeframe,
+            top=args.top,
+            include_symbol=len(instruments) != 1,
+        )
+    )
+    _write_outputs(output_dir, report, scorecard_all, events_all, current_all, dna_profile_all, images)
     print(report)
     if images:
         print(f"\nVisual output: {len(images)} PNG")
