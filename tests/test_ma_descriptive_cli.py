@@ -509,15 +509,15 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertIn("1. HMA89 | Diren\u00e7 | 30 temas", main_section)
         self.assertNotIn("HMA100", main_section)
 
-    def test_respect_image_rows_use_historical_side_column(self):
+    def test_respect_image_rows_use_current_price_side_column(self):
         frame = pd.DataFrame(
             [
                 {
                     "symbol": "ASELS",
                     "MA": "SMA50",
-                    "taraf": "Diren\u00e7",
-                    "fiyat": 110.0,
-                    "ma_de\u011feri": 100.0,
+                    "taraf": "Destek",
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 110.0,
                     "ziyaret": 12,
                     "tepki_oran\u0131_%": 58.0,
                     "geri_d\u00f6n\u00fc\u015f_%": 75.0,
