@@ -622,7 +622,10 @@ def _row_identity(row: pd.Series, include_symbol: bool = False) -> str:
 
 def _ma_card_lines(row: pd.Series, rank: int, include_symbol: bool = False) -> list[str]:
     side = str(row.get("taraf", "")).strip()
+    behavior_side = str(row.get("davranis_taraf", "")).strip()
     side_part = f" | {side}" if side else ""
+    if behavior_side and side and behavior_side != side:
+        side_part += f" | geçmiş {behavior_side}"
     return [
         f"{rank}. {_row_identity(row, include_symbol)}{side_part} | {int(row['ziyaret'])} temas",
         (
@@ -805,7 +808,11 @@ def format_universe_report(
     sort_by: str,
 ) -> str:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
-    visible = _with_current_side(_filtered_scorecard(sorted_scorecard, min_visits))
+    visible = _with_current_side(
+        _filtered_scorecard(sorted_scorecard, min_visits),
+        dedupe=False,
+        history_col="davranis_taraf",
+    )
     heading = "genel ilk liste - temas sayısına göre" if sort_by == "visits" else "genel ilk liste - saygı skoruna göre"
     unique_symbols = sorted_scorecard["symbol"].nunique() if not sorted_scorecard.empty else 0
     lines = [
@@ -963,12 +970,16 @@ def _with_current_side(
     side_col: str = "taraf",
     price_col: str = "fiyat",
     level_col: str = "ma_de\u011feri",
+    dedupe: bool = True,
+    history_col: str | None = None,
 ) -> pd.DataFrame:
     """Return a display frame where support/resistance means current price position."""
 
     if frame.empty:
         return frame
     result = frame.copy()
+    if history_col and side_col in result.columns:
+        result[history_col] = result[side_col].astype(str).str.strip()
     result[side_col] = result.apply(
         lambda row: _current_side_label(
             row,
@@ -979,7 +990,7 @@ def _with_current_side(
         axis=1,
     )
     dedupe_cols = [col for col in ("symbol", "timeframe", "MA", side_col) if col in result.columns]
-    if "MA" in dedupe_cols:
+    if dedupe and "MA" in dedupe_cols:
         result = result.drop_duplicates(subset=dedupe_cols, keep="first")
     return result.reset_index(drop=True)
 
@@ -1510,7 +1521,11 @@ def _write_outputs(
         (output_dir / f"ma_respect_visual_{index}.png").write_bytes(image)
     if not scorecard.empty:
         top_per_symbol = (
-            _with_current_side(_sort_scorecard(scorecard, sort_by="visits"))
+            _with_current_side(
+                _sort_scorecard(scorecard, sort_by="visits"),
+                dedupe=False,
+                history_col="davranis_taraf",
+            )
             .groupby("symbol", group_keys=False)
             .apply(lambda group: _balance_sides(group, 5, side_col="taraf"))
             .reset_index(drop=True)

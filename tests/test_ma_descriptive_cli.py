@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -329,6 +331,51 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertEqual(images, [b"png"])
         self.assertEqual(captured["row_count"], 45)
 
+    def test_top_per_symbol_preserves_auto_side_rows_after_current_relabel(self):
+        rows = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Destek",
+                    "MA": "SMA50",
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 110.0,
+                    "ziyaret": 15,
+                    "tepki_oran\u0131_%": 53.0,
+                    "uzakl\u0131k_ATR": 2.0,
+                    "sayg\u0131_skoru": 70.0,
+                },
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Diren\u00e7",
+                    "MA": "SMA50",
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 110.0,
+                    "ziyaret": 12,
+                    "tepki_oran\u0131_%": 58.0,
+                    "uzakl\u0131k_ATR": 2.0,
+                    "sayg\u0131_skoru": 68.0,
+                },
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            desc_cli._write_outputs(
+                output_dir,
+                "rapor",
+                rows,
+                pd.DataFrame(),
+                pd.DataFrame(),
+                None,
+            )
+            top = pd.read_csv(output_dir / "ma_respect_top_per_symbol.csv")
+
+        self.assertEqual(len(top), 2)
+        self.assertEqual(set(top["davranis_taraf"]), {"Destek", "Diren\u00e7"})
+        self.assertEqual(set(top["taraf"]), {"Diren\u00e7"})
 
     def test_universe_report_uses_current_price_side_sections(self):
         rows = pd.DataFrame(
@@ -357,6 +404,31 @@ class DescriptiveMaCliTests(unittest.TestCase):
                     "uzakl\u0131k_%": 10.0,
                     "uzakl\u0131k_ATR": 2.0,
                     "sayg\u0131_skoru": 70.0,
+                },
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Diren\u00e7",
+                    "MA": "SMA50",
+                    "t\u00fcr": "SMA",
+                    "periyot": 50,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 110.0,
+                    "\u00fcst/alt_bar_%": 45.0,
+                    "ziyaret": 12,
+                    "tepki_say\u0131s\u0131": 7,
+                    "tepki_oran\u0131_%": 58.0,
+                    "sarkma_epizodu": 4,
+                    "geri_d\u00f6nen": 3,
+                    "geri_d\u00f6n\u00fc\u015f_%": 75.0,
+                    "ort_sarkma_bar": 2.5,
+                    "en_uzun_sarkma_bar": 7,
+                    "ort_tepki_%": 0.9,
+                    "ort_tepki_ATR": 0.7,
+                    "\u015fu_an": "alt\u0131nda 3 bar",
+                    "uzakl\u0131k_%": 10.0,
+                    "uzakl\u0131k_ATR": 2.0,
+                    "sayg\u0131_skoru": 68.0,
                 },
                 {
                     "symbol": "THYAO",
@@ -391,7 +463,7 @@ class DescriptiveMaCliTests(unittest.TestCase):
             [],
             universe="BIST_TEST",
             timeframe="1d",
-            top=5,
+            top=0,
             per_symbol_top=1,
             min_visits=5,
             sort_by="visits",
@@ -400,7 +472,8 @@ class DescriptiveMaCliTests(unittest.TestCase):
         support_section = report.split("Destek", 1)[1].split("Diren\u00e7", 1)[0]
         resistance_section = report.split("Diren\u00e7", 1)[1]
         self.assertIn("THYAO \u2014 EMA20 | Destek", support_section)
-        self.assertIn("ASELS \u2014 SMA50 | Diren\u00e7", resistance_section)
+        self.assertEqual(resistance_section.count("ASELS \u2014 SMA50 | Diren\u00e7"), 2)
+        self.assertIn("ge\u00e7mi\u015f Destek", resistance_section)
         self.assertNotIn("ASELS \u2014 SMA50", support_section)
 
     def test_current_table_prefers_touch_strength_over_raw_proximity(self):
