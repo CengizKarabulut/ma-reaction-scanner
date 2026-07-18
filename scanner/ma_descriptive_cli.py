@@ -753,37 +753,40 @@ def format_report(
         if not sorted_scorecard.empty
         else list(MA_TYPES)
     )
-    heading = "En çok temas alan ortalamalar" if sort_by == "visits" else "En yüksek saygı skoru"
+    heading = "en çok temas alan ortalamalar" if sort_by == "visits" else "en yüksek saygı skorlu ortalamalar"
     lines = [
         f"MA Saygı Özeti - {symbol.upper()} ({timeframe})",
         f"Fiyat {format_tr(current_price, 2)} | Son bar {last_date} | Veri {len(prepared)} bar",
         f"Taranan {len(ma_type_values)} MA türü x {len(period_values)} periyot | Eşik {min_visits}+ temas",
         "Tam liste: ma_respect_scorecard.csv | Olaylar: ma_respect_events.csv",
-        "",
-        heading,
     ]
     if visible.empty:
+        lines.extend(["", "En çok temas alan ortalamalar"])
         lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
         lines.append("Eşiği düşürmek mümkün; ama 1-2 temas iyi ortalama sayılmaz.")
     else:
-        for rank, (_, row) in enumerate(_balance_sides(visible, top, side_col="taraf").iterrows(), 1):
-            lines.extend(_ma_card_lines(row, rank))
+        for side_title, side_rows in _side_sections(visible, top, side_col="taraf"):
+            lines.extend(["", _side_section_heading(heading, side_title)])
+            for rank, (_, row) in enumerate(side_rows.iterrows(), 1):
+                lines.extend(_ma_card_lines(row, rank))
     lines.extend(_format_dna_block(dna_profile, top=5, include_symbol=False))
     lines.extend(["", "Güçlü ve izlenebilir ortalamalar"])
     current_visible = _filtered_scorecard(current, min_visits)
     if current_visible.empty:
         lines.append("Bu eşikte fiyata yakın güçlü MA yok.")
     else:
-        near = _balance_sides(_rank_current_strength(current_visible), detail_top, side_col="taraf")
-        for rank, (_, row) in enumerate(near.iterrows(), 1):
-            side_text = "fiyatın üstünde" if float(row["uzaklık_%"]) > 0 else "fiyatın altında"
-            lines.append(
-                f"{rank}. {row['MA']} | {side_text} | {int(row['ziyaret'])} temas | "
-                f"geri %{format_tr(row['geri_dönüş_%'], 0)} | uzaklık %{format_tr(row['uzaklık_%'], 1)}"
-            )
+        ranked_current = _rank_current_strength(current_visible)
+        for side_title, near in _side_sections(ranked_current, detail_top, side_col="taraf"):
+            lines.extend(["", _side_section_heading("izlenebilir MA", side_title)])
+            for rank, (_, row) in enumerate(near.iterrows(), 1):
+                side_text = "fiyatın üstünde" if float(row["uzaklık_%"]) > 0 else "fiyatın altında"
+                lines.append(
+                    f"{rank}. {row['MA']} | {side_text} | {int(row['ziyaret'])} temas | "
+                    f"geri %{format_tr(row['geri_dönüş_%'], 0)} | uzaklık %{format_tr(row['uzaklık_%'], 1)}"
+                )
     lines.extend([
         "",
-        "Kısa okuma: önce temas sayısı, sonra geri alma/tepki; yakınlık son filtredir.",
+        "Kısa okuma: destek ve direnç ayrı davranıştır; önce temas sayısı, sonra geri alma/tepki; yakınlık son filtredir.",
         "1-2 temas ham izdir; güçlü ortalama sayılmaz. Tam ham karne CSV artifact içindedir.",
     ])
     return "\n".join(lines)
@@ -803,24 +806,25 @@ def format_universe_report(
 ) -> str:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
     visible = _filtered_scorecard(sorted_scorecard, min_visits)
-    heading = "Genel ilk liste - temas sayısına göre" if sort_by == "visits" else "Genel ilk liste - saygı skoruna göre"
+    heading = "genel ilk liste - temas sayısına göre" if sort_by == "visits" else "genel ilk liste - saygı skoruna göre"
     unique_symbols = sorted_scorecard["symbol"].nunique() if not sorted_scorecard.empty else 0
     lines = [
         f"MA Saygı Özeti - {universe} / {timeframe}",
         f"Taranan varlık {unique_symbols} | Eşik {min_visits}+ temas",
         "Tam liste: ma_respect_scorecard.csv | Varlık özeti: ma_respect_top_per_symbol.csv",
-        "",
-        heading,
     ]
     if visible.empty:
+        lines.extend(["", "Genel ilk liste"])
         max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
         lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
     else:
-        for rank, (_, row) in enumerate(_balance_sides(visible, top, side_col="taraf").iterrows(), 1):
-            lines.extend(_ma_card_lines(row, rank, include_symbol=True))
+        for side_title, side_rows in _side_sections(visible, top, side_col="taraf"):
+            lines.extend(["", _side_section_heading(heading, side_title)])
+            for rank, (_, row) in enumerate(side_rows.iterrows(), 1):
+                lines.extend(_ma_card_lines(row, rank, include_symbol=True))
     lines.extend(_format_dna_block(dna_profile, top=top, include_symbol=True))
     if not visible.empty and per_symbol_top > 0:
-        lines.extend(["", f"Varlık başına kısa liste ({per_symbol_top} MA)"])
+        lines.extend(["", f"Varlık başına kısa liste ({per_symbol_top} MA / taraf)"])
         symbol_order = (
             visible.groupby("symbol", sort=False)[["ziyaret", "saygı_skoru"]]
             .max()
@@ -829,14 +833,16 @@ def format_universe_report(
         )
         symbol_limit = len(symbol_order) if int(top) <= 0 else max(1, int(top))
         for symbol in symbol_order[:symbol_limit]:
-            group = _balance_sides(visible[visible["symbol"] == symbol], per_symbol_top, side_col="taraf")
-            if group.empty:
-                continue
-            compact = "; ".join(
-                f"{row['MA']} ({int(row['ziyaret'])} temas, %{format_tr(row['tepki_oranı_%'], 0)} tepki)"
-                for _, row in group.iterrows()
-            )
-            lines.append(f"- {symbol}: {compact}")
+            symbol_rows = visible[visible["symbol"] == symbol]
+            for side_title, group in _side_sections(symbol_rows, per_symbol_top, side_col="taraf"):
+                if group.empty:
+                    continue
+                compact = "; ".join(
+                    f"{row['MA']} ({int(row['ziyaret'])} temas, %{format_tr(row['tepki_oranı_%'], 0)} tepki)"
+                    for _, row in group.iterrows()
+                )
+                side_suffix = f" {side_title}" if side_title else ""
+                lines.append(f"- {symbol}{side_suffix}: {compact}")
     if errors:
         lines.extend(["", "Atlanan / hata alan varlıklar"])
         lines.extend(errors[:10])
@@ -859,6 +865,45 @@ def _limit_frame(frame: pd.DataFrame, top: int) -> pd.DataFrame:
     if top <= 0:
         return frame
     return frame.head(max(1, top))
+
+
+def _side_mask(frame: pd.DataFrame, side: str, *, side_col: str = "taraf") -> pd.Series:
+    if side_col not in frame:
+        return pd.Series(False, index=frame.index)
+    text = frame[side_col].astype(str)
+    if side == "support":
+        return text.str.contains("Destek|support", case=False, regex=True, na=False)
+    if side == "resistance":
+        return text.str.contains("Diren|resistance", case=False, regex=True, na=False)
+    return pd.Series(False, index=frame.index)
+
+
+def _side_sections(frame: pd.DataFrame, top: int, *, side_col: str = "taraf") -> list[tuple[str, pd.DataFrame]]:
+    """Return separately limited support/resistance frames for cleaner reports."""
+
+    if frame.empty:
+        return []
+    if side_col not in frame:
+        return [("", _limit_frame(frame, top))]
+    sections: list[tuple[str, pd.DataFrame]] = []
+    support_mask = _side_mask(frame, "support", side_col=side_col)
+    resistance_mask = _side_mask(frame, "resistance", side_col=side_col)
+    for title, mask in (("Destek", support_mask), ("Direnç", resistance_mask)):
+        part = _limit_frame(frame[mask], top)
+        if not part.empty:
+            sections.append((title, part))
+    other = _limit_frame(frame[~(support_mask | resistance_mask)], top)
+    if not other.empty:
+        sections.append(("Diğer", other))
+    return sections
+
+
+def _side_section_heading(base: str, side_title: str) -> str:
+    if side_title == "Destek":
+        return f"Destek olarak {base}"
+    if side_title == "Direnç":
+        return f"Direnç olarak {base}"
+    return base
 
 
 def _balance_sides(frame: pd.DataFrame, top: int, *, side_col: str = "taraf") -> pd.DataFrame:
@@ -1174,40 +1219,71 @@ def render_respect_images(
     include_symbol: bool,
 ) -> list[bytes]:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
-    visible = _balance_sides(_filtered_scorecard(sorted_scorecard, min_visits), top, side_col="taraf")
-    if visible.empty:
+    visible_all = _filtered_scorecard(sorted_scorecard, min_visits)
+    if visible_all.empty:
         return []
     symbol_count = sorted_scorecard["symbol"].nunique() if "symbol" in sorted_scorecard else 1
-    max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
     if include_symbol:
-        subtitle = f"{timeframe} | {symbol_count} varl\u0131k | e\u015fik {min_visits}+ temas"
+        subtitle = f"{timeframe} | {symbol_count} varlık | eşik {min_visits}+ temas"
     else:
-        price = format_tr(visible["fiyat"].iloc[0], 2) if "fiyat" in visible else "-"
-        subtitle = f"{timeframe} | fiyat {price} | e\u015fik {min_visits}+ temas"
-    avg_visits = float(visible["ziyaret"].mean()) if not visible.empty else 0.0
-    badge = f"{len(visible)} sat\u0131r | max {max_visits} | ort {format_tr(avg_visits, 1)} temas"
-    headers, rows, heatmap = _respect_image_rows(visible, include_symbol=include_symbol)
-    images = render_respect_table_image(
-        headers,
-        rows,
-        title=f"MA Sayg\u0131 \u00d6zeti - {label}",
-        subtitle=subtitle,
-        badge=badge,
-        footer="Renkler: yeşil güçlü, mavi ortalama üstü, sarı orta, kırmızı zayıf. Tam liste CSV artifact içinde.",
-        heatmap=heatmap,
-    )
+        price = format_tr(visible_all["fiyat"].iloc[0], 2) if "fiyat" in visible_all else "-"
+        subtitle = f"{timeframe} | fiyat {price} | eşik {min_visits}+ temas"
+
+    images: list[bytes] = []
+    overview_parts = [part for _, part in _side_sections(visible_all, 5, side_col="taraf") if not part.empty]
+    if overview_parts:
+        overview = pd.concat(overview_parts, ignore_index=True)
+        support_count = int(_side_mask(overview, "support", side_col="taraf").sum())
+        resistance_count = int(_side_mask(overview, "resistance", side_col="taraf").sum())
+        headers, rows, heatmap = _respect_image_rows(overview, include_symbol=include_symbol)
+        images.extend(
+            render_respect_table_image(
+                headers,
+                rows,
+                title=f"İlk 5 Destek + İlk 5 Direnç - {label}",
+                subtitle=subtitle,
+                badge=f"{support_count} destek | {resistance_count} direnç",
+                footer="İlk görsel hızlı özet; sonraki görseller destek ve direnç için ayrı tam listedir.",
+                heatmap=heatmap,
+            )
+        )
+
+    side_limit = int(top)
+    for side_title, visible in _side_sections(visible_all, side_limit, side_col="taraf"):
+        max_visits = int(pd.to_numeric(visible["ziyaret"], errors="coerce").max()) if not visible.empty else 0
+        avg_visits = float(pd.to_numeric(visible["ziyaret"], errors="coerce").mean()) if not visible.empty else 0.0
+        badge = f"{len(visible)} satır | max {max_visits} | ort {format_tr(avg_visits, 1)} temas"
+        headers, rows, heatmap = _respect_image_rows(visible, include_symbol=include_symbol)
+        if side_title:
+            side_prefix = f"Tüm {side_title} MA Saygı" if side_limit <= 0 else f"İlk {side_limit} {side_title} MA Saygı"
+        else:
+            side_prefix = "Tüm MA Saygı" if side_limit <= 0 else f"İlk {side_limit} MA Saygı"
+        images.extend(
+            render_respect_table_image(
+                headers,
+                rows,
+                title=f"{side_prefix} - {label}",
+                subtitle=subtitle,
+                badge=badge,
+                footer="Destek ve direnç ayrı okunur. Renkler: yeşil güçlü, sarı orta, kırmızı zayıf. Tam liste CSV artifact içinde.",
+                heatmap=heatmap,
+            )
+        )
     current_visible = _filtered_scorecard(current, min_visits)
     if detail_top >= 0 and not current_visible.empty:
-        near = _balance_sides(_rank_current_strength(current_visible), detail_top, side_col="taraf")
-        if not near.empty:
+        ranked_current = _rank_current_strength(current_visible)
+        for side_title, near in _side_sections(ranked_current, detail_top, side_col="taraf"):
+            if near.empty:
+                continue
             near_headers, near_rows, near_heatmap = _respect_image_rows(near, include_symbol=include_symbol)
+            side_prefix = f"İzlenebilir {side_title} MA" if side_title else "Güçlü ve İzlenebilir MA"
             images.extend(
                 render_respect_table_image(
                     near_headers,
                     near_rows,
-                    title=f"G\u00fc\u00e7l\u00fc ve \u0130zlenebilir MA - {label}",
+                    title=f"{side_prefix} - {label}",
                     subtitle=subtitle,
-                    badge=f"{len(near)} sat\u0131r",
+                    badge=f"{len(near)} satır",
                     footer="Önce temas/saygı, sonra geri alma/tepki, en son yakınlık. 1-2 temas güçlü sayılmaz.",
                     heatmap=near_heatmap,
                 )
@@ -1278,23 +1354,28 @@ def render_dna_profile_images(
         ascending=[False, False, False],
         na_position="last",
     ).reset_index(drop=True)
-    visible = _balance_sides(profile, int(top), side_col="guncel_taraf")
-    if visible.empty:
-        return []
-    max_dna = float(pd.to_numeric(visible["dna_skoru"], errors="coerce").max())
-    headers, rows, heatmap = _dna_image_rows(visible, include_symbol=include_symbol)
-    badge = f"{len(visible)} satir | max DNA {format_tr(max_dna, 1)}"
-    subtitle = f"{timeframe} | Taraf=gecmis destek/direnc, DNA=karakter, Aksiyon=bugunku yakinlik"
-    footer = "Destek ve direnc ayri davranistir; Aksiyon skoru su an izlenebilirligi ekler. Tam liste CSV artifact icinde."
-    return render_respect_table_image(
-        headers,
-        rows,
-        title=f"MA DNA Profili - {label}",
-        subtitle=subtitle,
-        badge=badge,
-        footer=footer,
-        heatmap=heatmap,
-    )
+    images: list[bytes] = []
+    for side_title, visible in _side_sections(profile, int(top), side_col="guncel_taraf"):
+        if visible.empty:
+            continue
+        max_dna = float(pd.to_numeric(visible["dna_skoru"], errors="coerce").max())
+        headers, rows, heatmap = _dna_image_rows(visible, include_symbol=include_symbol)
+        badge = f"{len(visible)} satir | max DNA {format_tr(max_dna, 1)}"
+        subtitle = f"{timeframe} | Taraf=gecmis destek/direnc, DNA=karakter, Aksiyon=bugunku yakinlik"
+        footer = "Destek ve direnc ayri davranistir; Aksiyon skoru su an izlenebilirligi ekler. Tam liste CSV artifact icinde."
+        side_suffix = f" ({side_title})" if side_title else ""
+        images.extend(
+            render_respect_table_image(
+                headers,
+                rows,
+                title=f"MA DNA Profili{side_suffix} - {label}",
+                subtitle=subtitle,
+                badge=badge,
+                footer=footer,
+                heatmap=heatmap,
+            )
+        )
+    return images
 
 
 def _telegram_image_caption(report: str, *, image_index: int, image_count: int) -> str:
