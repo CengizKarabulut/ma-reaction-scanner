@@ -405,7 +405,7 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertIn("1. HMA55", current_section)
         self.assertNotIn("1. EMA5", current_section)
 
-    def test_report_balances_support_and_resistance_in_top_rows(self):
+    def test_report_separates_support_and_resistance_sections(self):
         prepared = pd.DataFrame(
             {"Close": [100.0]},
             index=pd.date_range("2026-01-01", periods=1, freq="D"),
@@ -497,15 +497,17 @@ class DescriptiveMaCliTests(unittest.TestCase):
             rows,
             pd.DataFrame(),
             rows,
-            top=2,
+            top=1,
             detail_top=0,
             min_visits=5,
         )
         main_section = report.split("MA DNA okumasi", 1)[0]
 
+        self.assertIn("Destek olarak en çok temas alan ortalamalar", main_section)
+        self.assertIn("1. SMA200 | Destek | 9 temas", main_section)
+        self.assertIn("Direnç olarak en çok temas alan ortalamalar", main_section)
         self.assertIn("1. HMA89 | Diren\u00e7 | 30 temas", main_section)
-        self.assertIn("2. SMA200 | Destek | 9 temas", main_section)
-        self.assertNotIn("2. HMA100", main_section)
+        self.assertNotIn("HMA100", main_section)
 
     def test_respect_image_rows_use_historical_side_column(self):
         frame = pd.DataFrame(
@@ -529,6 +531,62 @@ class DescriptiveMaCliTests(unittest.TestCase):
 
         self.assertEqual(headers[2], "Taraf")
         self.assertEqual(rows[0][2], "Diren\u00e7")
+
+    def test_respect_images_start_with_overview_then_full_side_tables(self):
+        rows = []
+        for side, level_base, distance_sign in (("Destek", 90.0, -1.0), ("Diren\u00e7", 110.0, 1.0)):
+            for index in range(6):
+                rows.append(
+                    {
+                        "symbol": "ASELS",
+                        "timeframe": "1d",
+                        "taraf": side,
+                        "MA": f"SMA{index + 5}",
+                        "fiyat": 100.0,
+                        "ma_de\u011feri": level_base + index,
+                        "ziyaret": 20 - index,
+                        "tepki_oran\u0131_%": 60.0 - index,
+                        "geri_d\u00f6n\u00fc\u015f_%": 70.0 - index,
+                        "ort_tepki_%": 1.0,
+                        "uzakl\u0131k_%": distance_sign * (index + 1.0),
+                        "uzakl\u0131k_ATR": distance_sign * (index + 0.5),
+                        "sayg\u0131_skoru": 80.0 - index,
+                        "\u015fu_an": "izlemede",
+                    }
+                )
+        scorecard = pd.DataFrame(rows)
+        calls: list[dict[str, object]] = []
+        original = desc_cli.render_respect_table_image
+
+        def fake_renderer(headers, rows, **kwargs):
+            calls.append({"title": kwargs.get("title"), "badge": kwargs.get("badge"), "rows": rows})
+            return [b"png"]
+
+        try:
+            desc_cli.render_respect_table_image = fake_renderer
+            images = desc_cli.render_respect_images(
+                scorecard,
+                pd.DataFrame(),
+                label="ASELS",
+                timeframe="1d",
+                top=0,
+                detail_top=-1,
+                min_visits=5,
+                sort_by="visits",
+                include_symbol=False,
+            )
+        finally:
+            desc_cli.render_respect_table_image = original
+
+        self.assertEqual(images, [b"png", b"png", b"png"])
+        self.assertIn("\u0130lk 5 Destek + \u0130lk 5 Diren\u00e7", str(calls[0]["title"]))
+        self.assertEqual(len(calls[0]["rows"]), 10)
+        self.assertEqual(sum(1 for row in calls[0]["rows"] if row[2] == "Destek"), 5)
+        self.assertEqual(sum(1 for row in calls[0]["rows"] if row[2] == "Diren\u00e7"), 5)
+        self.assertIn("T\u00fcm Destek MA Sayg\u0131", str(calls[1]["title"]))
+        self.assertEqual(len(calls[1]["rows"]), 6)
+        self.assertIn("T\u00fcm Diren\u00e7 MA Sayg\u0131", str(calls[2]["title"]))
+        self.assertEqual(len(calls[2]["rows"]), 6)
 
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
