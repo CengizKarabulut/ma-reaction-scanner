@@ -80,7 +80,7 @@ DEFAULT_DESC_PERIODS: tuple[int, ...] = (
     233,
     377,
 )
-DEFAULT_REPORT_MIN_VISITS = 1
+DEFAULT_REPORT_MIN_VISITS = 5
 _SCORE_FULL_ACTIVITY_VISITS = 10
 _DETAIL_EVENTS_PER_MA = 5
 _INTRADAY_TIMEFRAMES = {"5m", "15m", "30m", "1h", "4h"}
@@ -684,6 +684,45 @@ def _filtered_scorecard(scorecard: pd.DataFrame, min_visits: int) -> pd.DataFram
     return scorecard[pd.to_numeric(scorecard["ziyaret"], errors="coerce").fillna(0) >= min_visits]
 
 
+def _rank_current_strength(frame: pd.DataFrame) -> pd.DataFrame:
+    """Rank current MA levels by practical respect first, proximity last."""
+
+    if frame.empty:
+        return frame
+    ranked = frame.copy()
+    ranked["_ziyaret_sort"] = pd.to_numeric(ranked.get("ziyaret"), errors="coerce").fillna(0.0)
+    ranked["_saygi_sort"] = pd.to_numeric(ranked.get("saygı_skoru"), errors="coerce").fillna(0.0)
+    ranked["_geri_sort"] = pd.to_numeric(ranked.get("geri_dönüş_%"), errors="coerce").fillna(0.0)
+    ranked["_tepki_sort"] = pd.to_numeric(ranked.get("tepki_oranı_%"), errors="coerce").fillna(0.0)
+    ranked["_ust_alt_sort"] = pd.to_numeric(ranked.get("üst/alt_bar_%"), errors="coerce").fillna(0.0)
+    ranked["_sarkma_sort"] = pd.to_numeric(ranked.get("ort_sarkma_bar"), errors="coerce").fillna(np.inf)
+    ranked["_abs_uzaklik_sort"] = pd.to_numeric(ranked.get("uzaklık_%"), errors="coerce").abs()
+    return ranked.sort_values(
+        [
+            "_ziyaret_sort",
+            "_saygi_sort",
+            "_geri_sort",
+            "_tepki_sort",
+            "_ust_alt_sort",
+            "_sarkma_sort",
+            "_abs_uzaklik_sort",
+        ],
+        ascending=[False, False, False, False, False, True, True],
+        na_position="last",
+    ).drop(
+        columns=[
+            "_ziyaret_sort",
+            "_saygi_sort",
+            "_geri_sort",
+            "_tepki_sort",
+            "_ust_alt_sort",
+            "_sarkma_sort",
+            "_abs_uzaklik_sort",
+        ],
+        errors="ignore",
+    ).reset_index(drop=True)
+
+
 def format_report(
     symbol: str,
     timeframe: str,
@@ -729,23 +768,22 @@ def format_report(
         for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank))
     lines.extend(_format_dna_block(dna_profile, top=5, include_symbol=False))
-    lines.extend(["", "Fiyata yakın güçlüler"])
+    lines.extend(["", "Güçlü ve izlenebilir ortalamalar"])
     current_visible = _filtered_scorecard(current, min_visits)
     if current_visible.empty:
         lines.append("Bu eşikte fiyata yakın güçlü MA yok.")
     else:
-        near = current_visible.copy()
-        near = _limit_frame(near.reindex(near["uzaklık_%"].abs().sort_values().index), detail_top)
+        near = _limit_frame(_rank_current_strength(current_visible), detail_top)
         for rank, (_, row) in enumerate(near.iterrows(), 1):
             side_text = "fiyatın üstünde" if float(row["uzaklık_%"]) > 0 else "fiyatın altında"
             lines.append(
-                f"{rank}. {row['MA']} | {side_text} | uzaklık %{format_tr(row['uzaklık_%'], 1)} | "
-                f"{int(row['ziyaret'])} temas"
+                f"{rank}. {row['MA']} | {side_text} | {int(row['ziyaret'])} temas | "
+                f"geri %{format_tr(row['geri_dönüş_%'], 0)} | uzaklık %{format_tr(row['uzaklık_%'], 1)}"
             )
     lines.extend([
         "",
-        "Kısa okuma: önce temas sayısı, sonra tepki% ve geri alma% değerine bak.",
-        "Telegram sade özet gönderir; tam ham karne CSV artifact içindedir.",
+        "Kısa okuma: önce temas sayısı, sonra geri alma/tepki; yakınlık son filtredir.",
+        "1-2 temas ham izdir; güçlü ortalama sayılmaz. Tam ham karne CSV artifact içindedir.",
     ])
     return "\n".join(lines)
 
@@ -1124,18 +1162,17 @@ def render_respect_images(
     )
     current_visible = _filtered_scorecard(current, min_visits)
     if detail_top >= 0 and not current_visible.empty:
-        near = current_visible.copy()
-        near = _limit_frame(near.reindex(near["uzakl\u0131k_%"].abs().sort_values().index), detail_top)
+        near = _limit_frame(_rank_current_strength(current_visible), detail_top)
         if not near.empty:
             near_headers, near_rows, near_heatmap = _respect_image_rows(near, include_symbol=include_symbol)
             images.extend(
                 render_respect_table_image(
                     near_headers,
                     near_rows,
-                    title=f"Fiyata Yak\u0131n G\u00fc\u00e7l\u00fc MA - {label}",
+                    title=f"G\u00fc\u00e7l\u00fc ve \u0130zlenebilir MA - {label}",
                     subtitle=subtitle,
                     badge=f"{len(near)} sat\u0131r",
-                    footer="Yakınlık tek başına sinyal değildir; temas ve tepkiyle birlikte okunmalı.",
+                    footer="Önce temas/saygı, sonra geri alma/tepki, en son yakınlık. 1-2 temas güçlü sayılmaz.",
                     heatmap=near_heatmap,
                 )
             )

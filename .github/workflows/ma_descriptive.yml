@@ -91,9 +91,9 @@ on:
         required: true
         default: '2'
       min_visits:
-        description: 'Gorselde minimum ham ziyaret; 0 temas olmayanlari da gosterir'
+        description: 'Gorselde minimum ham ziyaret; pratik varsayilan 5+, ham denetim icin 1/0 yapilabilir'
         required: true
-        default: '1'
+        default: '5'
       sort_by:
         description: 'Ana sıralama'
         required: true
