@@ -621,8 +621,10 @@ def _row_identity(row: pd.Series, include_symbol: bool = False) -> str:
 
 
 def _ma_card_lines(row: pd.Series, rank: int, include_symbol: bool = False) -> list[str]:
+    side = str(row.get("taraf", "")).strip()
+    side_part = f" | {side}" if side else ""
     return [
-        f"{rank}. {_row_identity(row, include_symbol)} | {int(row['ziyaret'])} temas",
+        f"{rank}. {_row_identity(row, include_symbol)}{side_part} | {int(row['ziyaret'])} temas",
         (
             f"   Tepki %{format_tr(row['tepki_oranı_%'], 0)} | "
             f"Geri alma %{format_tr(row['geri_dönüş_%'], 0)} | "
@@ -948,7 +950,7 @@ def _respect_image_rows(frame: pd.DataFrame, *, include_symbol: bool) -> tuple[l
         common = [
             _image_cell(row.get("MA"), 14),
             format_tr(row.get("ma_de\u011feri"), 2),
-            _current_side_label(row),
+            str(row.get("taraf", "")) or _current_side_label(row),
             str(int(row.get("ziyaret", 0))),
             "%" + format_tr(row.get("tepki_oran\u0131_%"), 0),
             "%" + format_tr(row.get("geri_d\u00f6n\u00fc\u015f_%"), 0),

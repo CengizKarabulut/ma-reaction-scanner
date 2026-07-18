@@ -503,9 +503,32 @@ class DescriptiveMaCliTests(unittest.TestCase):
         )
         main_section = report.split("MA DNA okumasi", 1)[0]
 
-        self.assertIn("1. HMA89", main_section)
-        self.assertIn("2. SMA200", main_section)
+        self.assertIn("1. HMA89 | Diren\u00e7 | 30 temas", main_section)
+        self.assertIn("2. SMA200 | Destek | 9 temas", main_section)
         self.assertNotIn("2. HMA100", main_section)
+
+    def test_respect_image_rows_use_historical_side_column(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "MA": "SMA50",
+                    "taraf": "Diren\u00e7",
+                    "fiyat": 110.0,
+                    "ma_de\u011feri": 100.0,
+                    "ziyaret": 12,
+                    "tepki_oran\u0131_%": 58.0,
+                    "geri_d\u00f6n\u00fc\u015f_%": 75.0,
+                    "uzakl\u0131k_%": -9.1,
+                    "\u015fu_an": "\u00fcst\u00fcnde 3 bar",
+                }
+            ]
+        )
+
+        headers, rows, _ = desc_cli._respect_image_rows(frame, include_symbol=False)
+
+        self.assertEqual(headers[2], "Taraf")
+        self.assertEqual(rows[0][2], "Diren\u00e7")
 
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
