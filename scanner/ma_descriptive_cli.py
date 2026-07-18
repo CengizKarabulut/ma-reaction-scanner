@@ -1634,8 +1634,12 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 )
         except Exception as exc:
-            errors.append(f"{symbol}: {exc}")
-            print(f"{symbol}: hata: {exc}", file=sys.stderr)
+            import traceback
+            err_msg = f"{symbol}: {exc}"
+            errors.append(err_msg)
+            print(f"ERROR: {err_msg}", file=sys.stderr)
+            # Log full traceback to help debugging in CI logs
+            traceback.print_exc(file=sys.stderr)
 
     scorecard_all = pd.concat(all_scorecards, ignore_index=True) if all_scorecards else pd.DataFrame()
     events_all = pd.concat(all_events, ignore_index=True) if all_events else pd.DataFrame()

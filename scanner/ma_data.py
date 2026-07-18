@@ -32,7 +32,7 @@ TIMEFRAMES: tuple[str, ...] = ("5m", "15m", "30m", "1h", "4h", "1d", "1wk", "1mo
 DIRECT_INTERVALS = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d"}
 BASE_INTERVAL = {"4h": "1h", "1wk": "1d", "1mo": "1d"}
 YF_PERIODS = {"5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d", "1d": "10y"}
-BP_PERIODS = {"5m": "5g", "15m": "5g", "30m": "5g", "1h": "1ay"}
+BP_PERIODS = {"5m": "5g", "15m": "5g", "30m": "5g", "1h": "1ay", "4h": "3ay"}
 
 
 def _safe_name(value: str) -> str:

@@ -19,7 +19,7 @@ import pandas as pd
 import requests
 
 
-def send_telegram(token: str, chat_id: str, text: str, parse_mode: str = "Markdown") -> bool:
+def send_telegram(token: str, chat_id: str, text: str, parse_mode: str | None = "Markdown") -> bool:
     """Telegram'a mesaj gönder (uzunsa parçala — limit 4096).
 
     Markdown parse hatasi olursa otomatik plain text fallback yapar.
@@ -54,13 +54,16 @@ def send_telegram(token: str, chat_id: str, text: str, parse_mode: str = "Markdo
         if i > 0:
             chunk = f"(devam {i+1}/{len(chunks)})\n" + chunk
 
-        # 1. ONCE Markdown ile dene
-        resp = requests.post(url, json={
+        # 1. ONCE Markdown ile dene (parse_mode None ise direkt plain text gider)
+        payload = {
             'chat_id': chat_id,
             'text': chunk,
-            'parse_mode': parse_mode,
             'disable_web_page_preview': True,
-        }, timeout=20)
+        }
+        if parse_mode:
+            payload['parse_mode'] = parse_mode
+
+        resp = requests.post(url, json=payload, timeout=20)
 
         if resp.ok:
             print(f"  ✓ Chunk {i+1}/{len(chunks)} Markdown OK ({len(chunk)} char)", file=sys.stderr)
