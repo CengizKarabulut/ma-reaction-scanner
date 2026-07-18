@@ -227,7 +227,9 @@ class MarketDataProvider:
         if prefer_cache and cached is not None:
             return self._read_cache(cached, ticker, timeframe)
 
-        base = BASE_INTERVAL.get(timeframe, DIRECT_INTERVALS[timeframe])
+        base = BASE_INTERVAL.get(timeframe) or DIRECT_INTERVALS.get(timeframe)
+        if base is None:
+            raise ValueError(f"unsupported timeframe mapping: {timeframe}")
         if self.source != "auto":
             sources = [self.source]
         elif market not in {None, "BIST"} or asset_class in {"crypto", "commodity"}:
