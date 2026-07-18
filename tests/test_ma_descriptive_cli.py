@@ -47,7 +47,7 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertIn(200, parsed_periods)
         self.assertEqual(len(parsed_periods), 16)
         self.assertEqual(args.ma_types, "SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA")
-        self.assertEqual(args.min_visits, 1)
+        self.assertEqual(args.min_visits, 5)
         self.assertEqual(args.side, "auto")
         self.assertEqual(args.top, 0)
         self.assertEqual(args.detail_top, 10)
@@ -282,6 +282,83 @@ class DescriptiveMaCliTests(unittest.TestCase):
 
         self.assertEqual(images, [b"png"])
         self.assertEqual(captured["row_count"], 45)
+
+    def test_current_table_prefers_touch_strength_over_raw_proximity(self):
+        prepared = pd.DataFrame(
+            {"Close": [100.0]},
+            index=pd.date_range("2026-01-01", periods=1, freq="D"),
+        )
+        rows = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Destek",
+                    "MA": "EMA5",
+                    "tür": "EMA",
+                    "periyot": 5,
+                    "fiyat": 100.0,
+                    "ma_değeri": 100.1,
+                    "üst/alt_bar_%": 52.0,
+                    "ziyaret": 6,
+                    "tepki_sayısı": 2,
+                    "tepki_oranı_%": 33.0,
+                    "sarkma_epizodu": 3,
+                    "geri_dönen": 1,
+                    "geri_dönüş_%": 33.0,
+                    "ort_sarkma_bar": 4.0,
+                    "en_uzun_sarkma_bar": 8,
+                    "ort_tepki_%": 0.2,
+                    "ort_tepki_ATR": 0.2,
+                    "şu_an": "üstünde 1 bar",
+                    "uzaklık_%": 0.1,
+                    "uzaklık_ATR": 0.02,
+                    "saygı_skoru": 22.0,
+                },
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Destek",
+                    "MA": "HMA55",
+                    "tür": "HMA",
+                    "periyot": 55,
+                    "fiyat": 100.0,
+                    "ma_değeri": 105.0,
+                    "üst/alt_bar_%": 78.0,
+                    "ziyaret": 30,
+                    "tepki_sayısı": 18,
+                    "tepki_oranı_%": 60.0,
+                    "sarkma_epizodu": 10,
+                    "geri_dönen": 9,
+                    "geri_dönüş_%": 90.0,
+                    "ort_sarkma_bar": 1.2,
+                    "en_uzun_sarkma_bar": 3,
+                    "ort_tepki_%": 1.1,
+                    "ort_tepki_ATR": 0.9,
+                    "şu_an": "altında 2 bar",
+                    "uzaklık_%": 5.0,
+                    "uzaklık_ATR": 1.0,
+                    "saygı_skoru": 82.0,
+                },
+            ]
+        )
+
+        report = format_report(
+            "ASELS",
+            "1d",
+            prepared,
+            rows,
+            pd.DataFrame(),
+            rows,
+            top=0,
+            detail_top=1,
+            min_visits=5,
+        )
+        current_section = report.split("Güçlü ve izlenebilir ortalamalar", 1)[1]
+
+        self.assertIn("1. HMA55", current_section)
+        self.assertNotIn("1. EMA5", current_section)
+
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
         prepared, scorecard, events, current = scan_ma_respect(

@@ -49,11 +49,11 @@ karşılaştırıp ham ziyaret, tepki, sarkma ve geri dönüş karnesi üretir.
 Varsayılan havuz: `5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377` ve
 `SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA`. Bu alanlar workflow'da serbestçe değiştirilebilir;
 istersen 50/200 çıkarabilir, başka periyot ekleyebilirsin. Ana sıralama varsayılan
-olarak en çok temas/ziyaret alan MA'lardan başlar (`sort_by=visits`). `top=0` tüm
-temaslı ortalamaları görsele ve Telegram'a taşır; `min_visits` ise istersen görseli
-sadeleştirmek için 5/10 gibi yükseltebileceğin eşiktir. Varsayılan `min_visits=1`
-kalır, çünkü ham DNA okumasında düşük temaslı zayıf adayları da görmek bazen faydalıdır;
-ama bu satırlar `Ana DNA` diye parlatılmaz.
+olarak en çok temas/ziyaret alan MA'lardan başlar (`sort_by=visits`). Varsayılan
+`min_visits=5` kullanılır; çünkü 1-2 temas pratikte güçlü ortalama sayılmaz ve
+yakın olsa bile ana raporda öne çıkarılmamalıdır. `top=0` tüm eşik üstü satırları
+gösterir. Ham denetim için `min_visits=1` veya `0` yapılabilir; tam ham liste zaten
+CSV artifact içinde saklanır.
 
 CSV artifact ayrımı bilinçlidir: `ma_respect_scorecard.csv` ham ziyaret/tepki karnesi,
 `ma_respect_current.csv` bugünkü yakın MA listesi, `ma_dna_profile.csv` ise hissenin
