@@ -1,6 +1,9 @@
 name: Daily Guarded MA Scan
 
 on:
+  schedule:
+    # GitHub cron UTC çalışır; 17:10 UTC = Türkiye saati 20:10.
+    - cron: '10 17 * * 1-5'
   workflow_dispatch:
     inputs:
       universe:
@@ -101,17 +104,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      INPUT_UNIVERSE: ${{ inputs.universe }}
-      INPUT_SECTOR: ${{ inputs.sector }}
-      INPUT_ASSET_CLASS: ${{ inputs.custom_asset_class }}
-      INPUT_MARKET: ${{ inputs.custom_market }}
-      INPUT_SYMBOLS: ${{ inputs.custom_symbols }}
-      INPUT_INTERVAL: ${{ inputs.interval }}
-      INPUT_PERIODS: ${{ inputs.periods }}
-      INPUT_SOURCE: ${{ inputs.source }}
-      INPUT_TOP: ${{ inputs.top }}
-      INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations }}
-      INPUT_BEHAVIOR_MIN_TOUCHES: ${{ inputs.behavior_min_touches }}
+      INPUT_UNIVERSE: ${{ inputs.universe || 'bist100_stocks' }}
+      INPUT_SECTOR: ${{ inputs.sector || 'Tümü / uygulanmaz' }}
+      INPUT_ASSET_CLASS: ${{ inputs.custom_asset_class || 'stock' }}
+      INPUT_MARKET: ${{ inputs.custom_market || 'BIST' }}
+      INPUT_SYMBOLS: ${{ inputs.custom_symbols || 'THYAO' }}
+      INPUT_INTERVAL: ${{ inputs.interval || '1d' }}
+      INPUT_PERIODS: ${{ inputs.periods || '5,8,13,20,21,22,34,55,89,100,144,200,233,377' }}
+      INPUT_SOURCE: ${{ inputs.source || 'auto' }}
+      INPUT_TOP: ${{ inputs.top || '5' }}
+      INPUT_NULL_ITERATIONS: ${{ inputs.null_iterations || '499' }}
+      INPUT_BEHAVIOR_MIN_TOUCHES: ${{ inputs.behavior_min_touches || '10' }}
     steps:
       - name: Repo checkout
         uses: actions/checkout@v4
@@ -147,7 +150,7 @@ jobs:
         run: |
           python -m scanner.guarded_notifier \
             --summary reports/daily/instrument_summary.csv \
-            --label "Daily Guarded MA (${{ inputs.interval }})" \
+            --label "Daily Guarded MA ($INPUT_INTERVAL)" \
             --top 20 \
             --behavior-min-touches "$INPUT_BEHAVIOR_MIN_TOUCHES"
         continue-on-error: true
@@ -162,7 +165,7 @@ jobs:
             --summary reports/daily/instrument_summary.csv \
             --behavior-dir reports/daily \
             --output-dir reports/daily/descriptive_highlights \
-            --label "Daily Ek Liste MA Saygi (${{ inputs.interval }})" \
+            --label "Daily Ek Liste MA Saygi ($INPUT_INTERVAL)" \
             --timeframe "$INPUT_INTERVAL" \
             --periods "$INPUT_PERIODS" \
             --source "$INPUT_SOURCE" \
