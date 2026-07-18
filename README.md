@@ -53,7 +53,7 @@ olarak en çok temas/ziyaret alan MA'lardan başlar (`sort_by=visits`). Varsayı
 `min_visits=5` kullanılır; çünkü 1-2 temas pratikte güçlü ortalama sayılmaz ve
 yakın olsa bile ana raporda öne çıkarılmamalıdır. `top=0` tüm eşik üstü satırları
 gösterir. Ham denetim için `min_visits=1` veya `0` yapılabilir; tam ham liste zaten
-CSV artifact içinde saklanır.
+CSV artifact içinde saklanır. `side=auto` artık bugünkü fiyata göre tek taraf seçmez; destek ve direnç davranışını aynı MA havuzu için ayrı ayrı tarar. İstersen yalnız destek için `support`, yalnız direnç için `resistance` seçebilirsin.
 
 CSV artifact ayrımı bilinçlidir: `ma_respect_scorecard.csv` ham ziyaret/tepki karnesi,
 `ma_respect_current.csv` bugünkü yakın MA listesi, `ma_dna_profile.csv` ise hissenin
