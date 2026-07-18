@@ -805,7 +805,7 @@ def format_universe_report(
     sort_by: str,
 ) -> str:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
-    visible = _filtered_scorecard(sorted_scorecard, min_visits)
+    visible = _with_current_side(_filtered_scorecard(sorted_scorecard, min_visits))
     heading = "genel ilk liste - temas sayısına göre" if sort_by == "visits" else "genel ilk liste - saygı skoruna göre"
     unique_symbols = sorted_scorecard["symbol"].nunique() if not sorted_scorecard.empty else 0
     lines = [

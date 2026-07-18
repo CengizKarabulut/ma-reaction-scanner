@@ -329,6 +329,80 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertEqual(images, [b"png"])
         self.assertEqual(captured["row_count"], 45)
 
+
+    def test_universe_report_uses_current_price_side_sections(self):
+        rows = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Destek",
+                    "MA": "SMA50",
+                    "t\u00fcr": "SMA",
+                    "periyot": 50,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 110.0,
+                    "\u00fcst/alt_bar_%": 55.0,
+                    "ziyaret": 15,
+                    "tepki_say\u0131s\u0131": 8,
+                    "tepki_oran\u0131_%": 53.0,
+                    "sarkma_epizodu": 5,
+                    "geri_d\u00f6nen": 4,
+                    "geri_d\u00f6n\u00fc\u015f_%": 80.0,
+                    "ort_sarkma_bar": 2.0,
+                    "en_uzun_sarkma_bar": 6,
+                    "ort_tepki_%": 1.0,
+                    "ort_tepki_ATR": 0.8,
+                    "\u015fu_an": "alt\u0131nda 3 bar",
+                    "uzakl\u0131k_%": 10.0,
+                    "uzakl\u0131k_ATR": 2.0,
+                    "sayg\u0131_skoru": 70.0,
+                },
+                {
+                    "symbol": "THYAO",
+                    "timeframe": "1d",
+                    "taraf": "Diren\u00e7",
+                    "MA": "EMA20",
+                    "t\u00fcr": "EMA",
+                    "periyot": 20,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 95.0,
+                    "\u00fcst/alt_bar_%": 60.0,
+                    "ziyaret": 14,
+                    "tepki_say\u0131s\u0131": 7,
+                    "tepki_oran\u0131_%": 50.0,
+                    "sarkma_epizodu": 5,
+                    "geri_d\u00f6nen": 4,
+                    "geri_d\u00f6n\u00fc\u015f_%": 80.0,
+                    "ort_sarkma_bar": 2.0,
+                    "en_uzun_sarkma_bar": 6,
+                    "ort_tepki_%": 1.0,
+                    "ort_tepki_ATR": 0.8,
+                    "\u015fu_an": "\u00fcst\u00fcnde 2 bar",
+                    "uzakl\u0131k_%": 5.0,
+                    "uzakl\u0131k_ATR": 1.0,
+                    "sayg\u0131_skoru": 65.0,
+                },
+            ]
+        )
+
+        report = desc_cli.format_universe_report(
+            rows,
+            [],
+            universe="BIST_TEST",
+            timeframe="1d",
+            top=5,
+            per_symbol_top=1,
+            min_visits=5,
+            sort_by="visits",
+        )
+
+        support_section = report.split("Destek", 1)[1].split("Diren\u00e7", 1)[0]
+        resistance_section = report.split("Diren\u00e7", 1)[1]
+        self.assertIn("THYAO \u2014 EMA20 | Destek", support_section)
+        self.assertIn("ASELS \u2014 SMA50 | Diren\u00e7", resistance_section)
+        self.assertNotIn("ASELS \u2014 SMA50", support_section)
+
     def test_current_table_prefers_touch_strength_over_raw_proximity(self):
         prepared = pd.DataFrame(
             {"Close": [100.0]},
