@@ -148,7 +148,7 @@ class DescriptiveMaCliTests(unittest.TestCase):
         self.assertTrue(images[0].startswith(b"\x89PNG"))
 
 
-    def test_auto_side_uses_current_price_position(self):
+    def test_auto_side_scans_support_and_resistance(self):
         idx = pd.date_range("2025-01-01", periods=80, freq="D")
         close = np.linspace(100.0, 150.0, 80)
         close[-1] = 80.0
@@ -163,7 +163,7 @@ class DescriptiveMaCliTests(unittest.TestCase):
             index=idx,
         )
 
-        _, scorecard, _, _ = scan_ma_respect(
+        _, scorecard, _, current = scan_ma_respect(
             frame,
             symbol="ASELS",
             timeframe="1d",
@@ -173,7 +173,53 @@ class DescriptiveMaCliTests(unittest.TestCase):
             config=AnalysisConfig(horizon=3, zone_atr=0.8, separation_atr=0.1),
         )
 
-        self.assertEqual(scorecard.iloc[0]["taraf"], "Direnç")
+        self.assertEqual(set(scorecard["taraf"]), {"Destek", "Direnç"})
+        self.assertEqual(set(current["taraf"]), {"Destek", "Direnç"})
+        self.assertEqual(scorecard["MA"].nunique(), 1)
+
+    def test_dna_profile_keeps_support_and_resistance_separate(self):
+        scorecard = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Destek",
+                    "MA": "SMA50",
+                    "t\u00fcr": "SMA",
+                    "periyot": 50,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 96.0,
+                    "ziyaret": 12,
+                    "tepki_oran\u0131_%": 67.0,
+                    "geri_d\u00f6n\u00fc\u015f_%": 80.0,
+                    "ort_tepki_ATR": 0.9,
+                    "uzakl\u0131k_%": -4.0,
+                    "uzakl\u0131k_ATR": -0.8,
+                },
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Diren\u00e7",
+                    "MA": "SMA50",
+                    "t\u00fcr": "SMA",
+                    "periyot": 50,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 104.0,
+                    "ziyaret": 11,
+                    "tepki_oran\u0131_%": 64.0,
+                    "geri_d\u00f6n\u00fc\u015f_%": 73.0,
+                    "ort_tepki_ATR": 0.7,
+                    "uzakl\u0131k_%": 4.0,
+                    "uzakl\u0131k_ATR": 0.8,
+                },
+            ]
+        )
+
+        dna = build_ma_dna_profile(scorecard, min_visits=1)
+
+        self.assertEqual(len(dna), 2)
+        self.assertEqual(set(dna["guncel_taraf"]), {"Destek", "Diren\u00e7"})
+        self.assertEqual(dna["MA"].nunique(), 1)
 
     def test_dna_profile_scores_and_report_block_are_created(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)
@@ -358,6 +404,108 @@ class DescriptiveMaCliTests(unittest.TestCase):
 
         self.assertIn("1. HMA55", current_section)
         self.assertNotIn("1. EMA5", current_section)
+
+    def test_report_balances_support_and_resistance_in_top_rows(self):
+        prepared = pd.DataFrame(
+            {"Close": [100.0]},
+            index=pd.date_range("2026-01-01", periods=1, freq="D"),
+        )
+        rows = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Diren\u00e7",
+                    "MA": "HMA89",
+                    "t\u00fcr": "HMA",
+                    "periyot": 89,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 108.0,
+                    "\u00fcst/alt_bar_%": 80.0,
+                    "ziyaret": 30,
+                    "tepki_say\u0131s\u0131": 15,
+                    "tepki_oran\u0131_%": 50.0,
+                    "sarkma_epizodu": 12,
+                    "geri_d\u00f6nen": 10,
+                    "geri_d\u00f6n\u00fc\u015f_%": 83.0,
+                    "ort_sarkma_bar": 2.0,
+                    "en_uzun_sarkma_bar": 5,
+                    "ort_tepki_%": 1.2,
+                    "ort_tepki_ATR": 0.8,
+                    "\u015fu_an": "alt\u0131nda 8 bar",
+                    "uzakl\u0131k_%": 8.0,
+                    "uzakl\u0131k_ATR": 1.4,
+                    "sayg\u0131_skoru": 82.0,
+                },
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Diren\u00e7",
+                    "MA": "HMA100",
+                    "t\u00fcr": "HMA",
+                    "periyot": 100,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 111.0,
+                    "\u00fcst/alt_bar_%": 78.0,
+                    "ziyaret": 25,
+                    "tepki_say\u0131s\u0131": 10,
+                    "tepki_oran\u0131_%": 40.0,
+                    "sarkma_epizodu": 10,
+                    "geri_d\u00f6nen": 8,
+                    "geri_d\u00f6n\u00fc\u015f_%": 80.0,
+                    "ort_sarkma_bar": 2.4,
+                    "en_uzun_sarkma_bar": 7,
+                    "ort_tepki_%": 1.0,
+                    "ort_tepki_ATR": 0.7,
+                    "\u015fu_an": "alt\u0131nda 7 bar",
+                    "uzakl\u0131k_%": 11.0,
+                    "uzakl\u0131k_ATR": 1.8,
+                    "sayg\u0131_skoru": 78.0,
+                },
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "taraf": "Destek",
+                    "MA": "SMA200",
+                    "t\u00fcr": "SMA",
+                    "periyot": 200,
+                    "fiyat": 100.0,
+                    "ma_de\u011feri": 91.0,
+                    "\u00fcst/alt_bar_%": 68.0,
+                    "ziyaret": 9,
+                    "tepki_say\u0131s\u0131": 6,
+                    "tepki_oran\u0131_%": 67.0,
+                    "sarkma_epizodu": 5,
+                    "geri_d\u00f6nen": 4,
+                    "geri_d\u00f6n\u00fc\u015f_%": 80.0,
+                    "ort_sarkma_bar": 1.6,
+                    "en_uzun_sarkma_bar": 4,
+                    "ort_tepki_%": 1.1,
+                    "ort_tepki_ATR": 0.9,
+                    "\u015fu_an": "\u00fcst\u00fcnde 3 bar",
+                    "uzakl\u0131k_%": -9.0,
+                    "uzakl\u0131k_ATR": -1.3,
+                    "sayg\u0131_skoru": 65.0,
+                },
+            ]
+        )
+
+        report = format_report(
+            "ASELS",
+            "1d",
+            prepared,
+            rows,
+            pd.DataFrame(),
+            rows,
+            top=2,
+            detail_top=0,
+            min_visits=5,
+        )
+        main_section = report.split("MA DNA okumasi", 1)[0]
+
+        self.assertIn("1. HMA89", main_section)
+        self.assertIn("2. SMA200", main_section)
+        self.assertNotIn("2. HMA100", main_section)
 
     def test_scan_builds_descriptive_scorecard_without_guard_terms(self):
         cfg = AnalysisConfig(horizon=5, zone_atr=0.8, separation_atr=0.2)

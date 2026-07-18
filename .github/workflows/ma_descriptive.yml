@@ -63,7 +63,7 @@ on:
         required: true
         default: 'SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA'
       side:
-        description: 'auto=fiyat ustu destek, fiyat alti direnc; support/resistance zorlanabilir'
+        description: 'auto=destek ve direnci birlikte tarar; support/resistance tek yon zorlar'
         required: true
         default: 'auto'
         type: choice

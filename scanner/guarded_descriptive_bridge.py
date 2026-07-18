@@ -20,11 +20,11 @@ import pandas as pd
 try:
     from .asset_universe import ASSET_CLASSES
     from .guarded_notifier import select_top_instruments
-    from .ma_descriptive_cli import DEFAULT_DESC_PERIODS, MA_TYPES, main as descriptive_main
+    from .ma_descriptive_cli import DEFAULT_DESC_PERIODS, DEFAULT_REPORT_MIN_VISITS, MA_TYPES, main as descriptive_main
 except ImportError:  # direct script execution
     from asset_universe import ASSET_CLASSES
     from guarded_notifier import select_top_instruments
-    from ma_descriptive_cli import DEFAULT_DESC_PERIODS, MA_TYPES, main as descriptive_main
+    from ma_descriptive_cli import DEFAULT_DESC_PERIODS, DEFAULT_REPORT_MIN_VISITS, MA_TYPES, main as descriptive_main
 
 
 _BEHAVIOR_FILES: tuple[tuple[str, str], ...] = (
@@ -205,7 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top", type=int, default=20)
     parser.add_argument("--detail-top", type=int, default=10)
     parser.add_argument("--per-symbol-top", type=int, default=2)
-    parser.add_argument("--min-visits", type=int, default=1)
+    parser.add_argument("--min-visits", type=int, default=DEFAULT_REPORT_MIN_VISITS)
     parser.add_argument("--sort-by", default="visits", choices=["visits", "score"])
     parser.add_argument("--telegram", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="write manifest only")

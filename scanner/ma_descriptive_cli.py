@@ -401,7 +401,7 @@ def build_ma_dna_profile(scorecard: pd.DataFrame, min_visits: int = DEFAULT_REPO
                     "periyot": int(_num_value(row.get("periyot"), 0.0)),
                     "fiyat": price,
                     "seviye": level,
-                    "guncel_taraf": _dna_side(price, level),
+                    "guncel_taraf": str(row.get("taraf", "")) or _dna_side(price, level),
                     "temas": visit_count,
                     "temas_gucu_%": 100.0 * visit_count / max_visits,
                     "tepki_%": reaction,
@@ -481,128 +481,127 @@ def scan_ma_respect(
             label = f"{ma_type}{period}"
             valid = np.isfinite(ma) & np.isfinite(close)
             current_ma = float(ma[-1])
-            scan_side = side
-            if scan_side == 0:
-                scan_side = 1 if current_price >= current_ma else -1
-            visits = detect_behavior_touches(df, ma_series, cfg, side=scan_side)
-            measured = 0
-            reaction_count = 0
-            pct_moves: list[float] = []
-            atr_moves: list[float] = []
+            scan_sides = (1, -1) if side == 0 else (side,)
+            for scan_side in scan_sides:
+                visits = detect_behavior_touches(df, ma_series, cfg, side=scan_side)
+                measured = 0
+                reaction_count = 0
+                pct_moves: list[float] = []
+                atr_moves: list[float] = []
 
-            for touch in visits:
-                measurement = forward.measurement(touch.position, scan_side)
-                if measurement is None:
-                    continue
-                measured += 1
-                is_reaction = measurement.first_hit == 1
-                if is_reaction:
-                    reaction_count += 1
-                atr_moves.append(float(measurement.favorable_atr))
-                pct_move = (
-                    measurement.favorable_atr * touch.atr / touch.entry * 100.0
-                    if touch.entry
+                for touch in visits:
+                    measurement = forward.measurement(touch.position, scan_side)
+                    if measurement is None:
+                        continue
+                    measured += 1
+                    is_reaction = measurement.first_hit == 1
+                    if is_reaction:
+                        reaction_count += 1
+                    atr_moves.append(float(measurement.favorable_atr))
+                    pct_move = (
+                        measurement.favorable_atr * touch.atr / touch.entry * 100.0
+                        if touch.entry
+                        else np.nan
+                    )
+                    if np.isfinite(pct_move):
+                        pct_moves.append(float(pct_move))
+                    events.append(
+                        {
+                            "symbol": symbol.upper(),
+                            "timeframe": timeframe,
+                            "taraf": _SIDE_LABEL[scan_side],
+                            "MA": label,
+                            "tarih": _format_event_timestamp(touch.timestamp, timeframe),
+                            "tarih_sort": pd.Timestamp(touch.timestamp),
+                            "ma_değeri": float(touch.ma_value),
+                            "olay": _TOUCH_LABEL[scan_side],
+                            "bar": "-",
+                            "tepki": "Evet" if is_reaction else "Hayır",
+                            "sonraki_%": pct_move,
+                            "sonraki_ATR": float(measurement.favorable_atr),
+                            "rejim": touch.regime,
+                        }
+                    )
+
+                reaction_rate = reaction_count / measured * 100.0 if measured else np.nan
+                avg_pct_move = float(np.mean(pct_moves)) if pct_moves else np.nan
+                avg_atr_move = float(np.mean(atr_moves)) if atr_moves else np.nan
+
+                if scan_side == 1:
+                    episode_state = valid & (close < ma)
+                    favorable_side = close > ma
+                else:
+                    episode_state = valid & (close > ma)
+                    favorable_side = close < ma
+                episodes = crossing_episodes(df.index, episode_state, valid)
+                recovered_count = sum(1 for episode in episodes if episode.recovered)
+                recovery_rate = recovered_count / len(episodes) * 100.0 if episodes else np.nan
+                avg_episode_bars = float(np.mean([episode.bars for episode in episodes])) if episodes else 0.0
+                max_episode_bars = max((episode.bars for episode in episodes), default=0)
+
+                for episode in episodes:
+                    events.append(
+                        {
+                            "symbol": symbol.upper(),
+                            "timeframe": timeframe,
+                            "taraf": _SIDE_LABEL[scan_side],
+                            "MA": label,
+                            "tarih": _format_episode_range(episode.start, episode.end, timeframe),
+                            "tarih_sort": pd.Timestamp(episode.start),
+                            "ma_değeri": np.nan,
+                            "olay": _episode_event_name(scan_side, episode.recovered),
+                            "bar": int(episode.bars),
+                            "tepki": "Evet" if episode.recovered else "Hayır",
+                            "sonraki_%": np.nan,
+                            "sonraki_ATR": np.nan,
+                            "rejim": "",
+                        }
+                    )
+
+                valid_count = int(valid.sum())
+                favorable_bar_pct = float(np.mean(favorable_side[valid]) * 100.0) if valid_count else np.nan
+                status, streak = _latest_side_state(scan_side, close, ma, valid)
+                distance_pct = (current_ma - current_price) / current_price * 100.0
+                distance_atr = (
+                    (current_ma - current_price) / current_atr
+                    if np.isfinite(current_atr) and current_atr > 0
                     else np.nan
                 )
-                if np.isfinite(pct_move):
-                    pct_moves.append(float(pct_move))
-                events.append(
-                    {
-                        "symbol": symbol.upper(),
-                        "timeframe": timeframe,
-                        "taraf": _SIDE_LABEL[scan_side],
-                        "MA": label,
-                        "tarih": _format_event_timestamp(touch.timestamp, timeframe),
-                        "tarih_sort": pd.Timestamp(touch.timestamp),
-                        "ma_değeri": float(touch.ma_value),
-                        "olay": _TOUCH_LABEL[scan_side],
-                        "bar": "-",
-                        "tepki": "Evet" if is_reaction else "Hayır",
-                        "sonraki_%": pct_move,
-                        "sonraki_ATR": float(measurement.favorable_atr),
-                        "rejim": touch.regime,
-                    }
+                score = _score_row(
+                    visits=len(visits),
+                    reaction_rate=reaction_rate,
+                    recovery_rate=recovery_rate,
+                    favorable_bar_pct=favorable_bar_pct,
+                    avg_atr_move=avg_atr_move,
                 )
 
-            reaction_rate = reaction_count / measured * 100.0 if measured else np.nan
-            avg_pct_move = float(np.mean(pct_moves)) if pct_moves else np.nan
-            avg_atr_move = float(np.mean(atr_moves)) if atr_moves else np.nan
-
-            if scan_side == 1:
-                episode_state = valid & (close < ma)
-                favorable_side = close > ma
-            else:
-                episode_state = valid & (close > ma)
-                favorable_side = close < ma
-            episodes = crossing_episodes(df.index, episode_state, valid)
-            recovered_count = sum(1 for episode in episodes if episode.recovered)
-            recovery_rate = recovered_count / len(episodes) * 100.0 if episodes else np.nan
-            avg_episode_bars = float(np.mean([episode.bars for episode in episodes])) if episodes else 0.0
-            max_episode_bars = max((episode.bars for episode in episodes), default=0)
-
-            for episode in episodes:
-                events.append(
-                    {
-                        "symbol": symbol.upper(),
-                        "timeframe": timeframe,
-                        "taraf": _SIDE_LABEL[scan_side],
-                        "MA": label,
-                        "tarih": _format_episode_range(episode.start, episode.end, timeframe),
-                        "tarih_sort": pd.Timestamp(episode.start),
-                        "ma_değeri": np.nan,
-                        "olay": _episode_event_name(scan_side, episode.recovered),
-                        "bar": int(episode.bars),
-                        "tepki": "Evet" if episode.recovered else "Hayır",
-                        "sonraki_%": np.nan,
-                        "sonraki_ATR": np.nan,
-                        "rejim": "",
-                    }
-                )
-
-            valid_count = int(valid.sum())
-            favorable_bar_pct = float(np.mean(favorable_side[valid]) * 100.0) if valid_count else np.nan
-            status, streak = _latest_side_state(scan_side, close, ma, valid)
-            distance_pct = (current_ma - current_price) / current_price * 100.0
-            distance_atr = (
-                (current_ma - current_price) / current_atr
-                if np.isfinite(current_atr) and current_atr > 0
-                else np.nan
-            )
-            score = _score_row(
-                visits=len(visits),
-                reaction_rate=reaction_rate,
-                recovery_rate=recovery_rate,
-                favorable_bar_pct=favorable_bar_pct,
-                avg_atr_move=avg_atr_move,
-            )
-
-            row = {
-                "symbol": symbol.upper(),
-                "timeframe": timeframe,
-                "taraf": _SIDE_LABEL[scan_side],
-                "MA": label,
-                "tür": ma_type,
-                "periyot": period,
-                "fiyat": current_price,
-                "ma_değeri": current_ma,
-                "üst/alt_bar_%": favorable_bar_pct,
-                "ziyaret": len(visits),
-                "tepki_sayısı": reaction_count,
-                "tepki_oranı_%": reaction_rate,
-                "sarkma_epizodu": len(episodes),
-                "geri_dönen": recovered_count,
-                "geri_dönüş_%": recovery_rate,
-                "ort_sarkma_bar": avg_episode_bars,
-                "en_uzun_sarkma_bar": max_episode_bars,
-                "ort_tepki_%": avg_pct_move,
-                "ort_tepki_ATR": avg_atr_move,
-                "şu_an": f"{status} {streak} bar",
-                "uzaklık_%": distance_pct,
-                "uzaklık_ATR": distance_atr,
-                "saygı_skoru": score,
-            }
-            rows.append(row)
-            current_rows.append(row.copy())
+                row = {
+                    "symbol": symbol.upper(),
+                    "timeframe": timeframe,
+                    "taraf": _SIDE_LABEL[scan_side],
+                    "MA": label,
+                    "tür": ma_type,
+                    "periyot": period,
+                    "fiyat": current_price,
+                    "ma_değeri": current_ma,
+                    "üst/alt_bar_%": favorable_bar_pct,
+                    "ziyaret": len(visits),
+                    "tepki_sayısı": reaction_count,
+                    "tepki_oranı_%": reaction_rate,
+                    "sarkma_epizodu": len(episodes),
+                    "geri_dönen": recovered_count,
+                    "geri_dönüş_%": recovery_rate,
+                    "ort_sarkma_bar": avg_episode_bars,
+                    "en_uzun_sarkma_bar": max_episode_bars,
+                    "ort_tepki_%": avg_pct_move,
+                    "ort_tepki_ATR": avg_atr_move,
+                    "şu_an": f"{status} {streak} bar",
+                    "uzaklık_%": distance_pct,
+                    "uzaklık_ATR": distance_atr,
+                    "saygı_skoru": score,
+                }
+                rows.append(row)
+                current_rows.append(row.copy())
 
     scorecard = _sort_scorecard(pd.DataFrame(rows), sort_by=sort_by)
     events_df = pd.DataFrame(events)
@@ -659,7 +658,7 @@ def _format_dna_block(
             ascending=[False, False, False],
             na_position="last",
         )
-    shown = _limit_frame(block, top)
+    shown = _balance_sides(block, top, side_col="guncel_taraf")
     lines = ["", "MA DNA okumasi"]
     for rank, (_, row) in enumerate(shown.iterrows(), 1):
         lines.append(
@@ -765,7 +764,7 @@ def format_report(
         lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
         lines.append("Eşiği düşürmek mümkün; ama 1-2 temas iyi ortalama sayılmaz.")
     else:
-        for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
+        for rank, (_, row) in enumerate(_balance_sides(visible, top, side_col="taraf").iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank))
     lines.extend(_format_dna_block(dna_profile, top=5, include_symbol=False))
     lines.extend(["", "Güçlü ve izlenebilir ortalamalar"])
@@ -773,7 +772,7 @@ def format_report(
     if current_visible.empty:
         lines.append("Bu eşikte fiyata yakın güçlü MA yok.")
     else:
-        near = _limit_frame(_rank_current_strength(current_visible), detail_top)
+        near = _balance_sides(_rank_current_strength(current_visible), detail_top, side_col="taraf")
         for rank, (_, row) in enumerate(near.iterrows(), 1):
             side_text = "fiyatın üstünde" if float(row["uzaklık_%"]) > 0 else "fiyatın altında"
             lines.append(
@@ -815,7 +814,7 @@ def format_universe_report(
         max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
         lines.append(f"{min_visits}+ temaslı MA bulunamadı. En yüksek ham temas: {max_visits}.")
     else:
-        for rank, (_, row) in enumerate(_limit_frame(visible, top).iterrows(), 1):
+        for rank, (_, row) in enumerate(_balance_sides(visible, top, side_col="taraf").iterrows(), 1):
             lines.extend(_ma_card_lines(row, rank, include_symbol=True))
     lines.extend(_format_dna_block(dna_profile, top=top, include_symbol=True))
     if not visible.empty and per_symbol_top > 0:
@@ -828,7 +827,7 @@ def format_universe_report(
         )
         symbol_limit = len(symbol_order) if int(top) <= 0 else max(1, int(top))
         for symbol in symbol_order[:symbol_limit]:
-            group = visible[visible["symbol"] == symbol].head(per_symbol_top)
+            group = _balance_sides(visible[visible["symbol"] == symbol], per_symbol_top, side_col="taraf")
             if group.empty:
                 continue
             compact = "; ".join(
@@ -858,6 +857,41 @@ def _limit_frame(frame: pd.DataFrame, top: int) -> pd.DataFrame:
     if top <= 0:
         return frame
     return frame.head(max(1, top))
+
+
+def _balance_sides(frame: pd.DataFrame, top: int, *, side_col: str = "taraf") -> pd.DataFrame:
+    """Interleave support/resistance rows without changing each side's strength order."""
+
+    if frame.empty or side_col not in frame:
+        return _limit_frame(frame, top)
+    side_text = frame[side_col].astype(str)
+    support = frame[side_text.str.contains("Destek|support", case=False, regex=True, na=False)]
+    resistance = frame[side_text.str.contains("Diren|resistance", case=False, regex=True, na=False)]
+    used = support.index.union(resistance.index)
+    other = frame.loc[~frame.index.isin(used)]
+    if support.empty or resistance.empty:
+        return _limit_frame(frame, top)
+
+    first_value = str(frame.iloc[0].get(side_col, ""))
+    side_frames = [support, resistance]
+    if "Diren" in first_value or "resistance" in first_value.lower():
+        side_frames = [resistance, support]
+
+    top = int(top)
+    wanted = len(frame) if top <= 0 else max(1, top)
+    rows: list[pd.Series] = []
+    max_len = max(len(side_frames[0]), len(side_frames[1]))
+    for index in range(max_len):
+        for group in side_frames:
+            if index < len(group):
+                rows.append(group.iloc[index])
+                if len(rows) >= wanted:
+                    return pd.DataFrame(rows).reset_index(drop=True)
+    for _, row in other.iterrows():
+        rows.append(row)
+        if len(rows) >= wanted:
+            break
+    return pd.DataFrame(rows).reset_index(drop=True)
 
 
 def _current_side_label(row: pd.Series) -> str:
@@ -1138,7 +1172,7 @@ def render_respect_images(
     include_symbol: bool,
 ) -> list[bytes]:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
-    visible = _limit_frame(_filtered_scorecard(sorted_scorecard, min_visits), top)
+    visible = _balance_sides(_filtered_scorecard(sorted_scorecard, min_visits), top, side_col="taraf")
     if visible.empty:
         return []
     symbol_count = sorted_scorecard["symbol"].nunique() if "symbol" in sorted_scorecard else 1
@@ -1162,7 +1196,7 @@ def render_respect_images(
     )
     current_visible = _filtered_scorecard(current, min_visits)
     if detail_top >= 0 and not current_visible.empty:
-        near = _limit_frame(_rank_current_strength(current_visible), detail_top)
+        near = _balance_sides(_rank_current_strength(current_visible), detail_top, side_col="taraf")
         if not near.empty:
             near_headers, near_rows, near_heatmap = _respect_image_rows(near, include_symbol=include_symbol)
             images.extend(
@@ -1242,14 +1276,14 @@ def render_dna_profile_images(
         ascending=[False, False, False],
         na_position="last",
     ).reset_index(drop=True)
-    visible = _limit_frame(profile, int(top))
+    visible = _balance_sides(profile, int(top), side_col="guncel_taraf")
     if visible.empty:
         return []
     max_dna = float(pd.to_numeric(visible["dna_skoru"], errors="coerce").max())
     headers, rows, heatmap = _dna_image_rows(visible, include_symbol=include_symbol)
     badge = f"{len(visible)} satir | max DNA {format_tr(max_dna, 1)}"
-    subtitle = f"{timeframe} | DNA=gecmis karakter, Aksiyon=bugunku yakinlik"
-    footer = "Ana DNA uzak olsa da karakteristiktir; Aksiyon skoru su an izlenebilirligi ekler. Tam liste CSV artifact icinde."
+    subtitle = f"{timeframe} | Taraf=gecmis destek/direnc, DNA=karakter, Aksiyon=bugunku yakinlik"
+    footer = "Destek ve direnc ayri davranistir; Aksiyon skoru su an izlenebilirligi ekler. Tam liste CSV artifact icinde."
     return render_respect_table_image(
         headers,
         rows,
@@ -1352,7 +1386,7 @@ def _write_outputs(
         dna_top = (
             dna_out.sort_values(["symbol", "dna_skoru", "temas"], ascending=[True, False, False])
             .groupby("symbol", group_keys=False)
-            .head(5)
+            .apply(lambda group: _balance_sides(group, 5, side_col="guncel_taraf"))
             .reset_index(drop=True)
         )
         dna_top.to_csv(output_dir / "ma_dna_top_per_symbol.csv", index=False, encoding="utf-8-sig")
@@ -1362,7 +1396,7 @@ def _write_outputs(
         top_per_symbol = (
             _sort_scorecard(scorecard, sort_by="visits")
             .groupby("symbol", group_keys=False)
-            .head(5)
+            .apply(lambda group: _balance_sides(group, 5, side_col="taraf"))
             .reset_index(drop=True)
         )
         top_per_symbol.to_csv(
@@ -1388,7 +1422,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--csv", default=None, help="OHLCV CSV ile tek sembolde çevrimdışı çalıştır")
     parser.add_argument("--periods", default=",".join(map(str, DEFAULT_DESC_PERIODS)))
     parser.add_argument("--ma-types", default=",".join(MA_TYPES))
-    parser.add_argument("--side", default="auto", choices=["auto", "support", "resistance"])
+    parser.add_argument("--side", default="auto", choices=["auto", "support", "resistance"], help="auto destek ve direnci birlikte tarar; support/resistance tek yön zorlar")
     parser.add_argument("--lookback", type=int, default=750, help="Son N bar; 0 tüm veri")
     parser.add_argument("--zone-atr", type=float, default=None)
     parser.add_argument("--separation-atr", type=float, default=None)
