@@ -277,7 +277,7 @@ def _dna_side(price: float, level: float) -> str:
     if np.isfinite(price) and np.isfinite(level) and price >= level:
         return "Destek"
     if np.isfinite(price) and np.isfinite(level):
-        return "Direnc"
+        return "Diren\u00e7"
     return "-"
 
 
@@ -401,7 +401,7 @@ def build_ma_dna_profile(scorecard: pd.DataFrame, min_visits: int = DEFAULT_REPO
                     "periyot": int(_num_value(row.get("periyot"), 0.0)),
                     "fiyat": price,
                     "seviye": level,
-                    "guncel_taraf": str(row.get("taraf", "")) or _dna_side(price, level),
+                    "guncel_taraf": _dna_side(price, level),
                     "temas": visit_count,
                     "temas_gucu_%": 100.0 * visit_count / max_visits,
                     "tepki_%": reaction,
@@ -653,7 +653,7 @@ def _format_dna_block(
 ) -> list[str]:
     if dna_profile is None or dna_profile.empty:
         return ["", "MA DNA okumasi", "DNA profili uretilemedi."]
-    block = dna_profile
+    block = _with_current_side(dna_profile, side_col="guncel_taraf", level_col="seviye")
     if include_symbol:
         block = block.sort_values(
             ["dna_skoru", "temas", "guncel_aksiyon_skoru"],
@@ -741,7 +741,7 @@ def format_report(
     current_price = float(prepared["Close"].iloc[-1]) if not prepared.empty else np.nan
     last_date = _format_event_timestamp(prepared.index[-1], timeframe) if not prepared.empty else "-"
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
-    visible = _filtered_scorecard(sorted_scorecard, min_visits)
+    visible = _with_current_side(_filtered_scorecard(sorted_scorecard, min_visits))
     max_visits = int(sorted_scorecard["ziyaret"].max()) if not sorted_scorecard.empty else 0
     period_values = (
         sorted(int(value) for value in sorted_scorecard["periyot"].dropna().unique())
@@ -771,7 +771,7 @@ def format_report(
                 lines.extend(_ma_card_lines(row, rank))
     lines.extend(_format_dna_block(dna_profile, top=5, include_symbol=False))
     lines.extend(["", "Güçlü ve izlenebilir ortalamalar"])
-    current_visible = _filtered_scorecard(current, min_visits)
+    current_visible = _with_current_side(_filtered_scorecard(current, min_visits))
     if current_visible.empty:
         lines.append("Bu eşikte fiyata yakın güçlü MA yok.")
     else:
@@ -941,14 +941,47 @@ def _balance_sides(frame: pd.DataFrame, top: int, *, side_col: str = "taraf") ->
     return pd.DataFrame(rows).reset_index(drop=True)
 
 
-def _current_side_label(row: pd.Series) -> str:
-    price = pd.to_numeric(pd.Series([row.get("fiyat")]), errors="coerce").iloc[0]
-    level = pd.to_numeric(pd.Series([row.get("ma_de\u011feri")]), errors="coerce").iloc[0]
+def _current_side_label(
+    row: pd.Series,
+    *,
+    price_col: str = "fiyat",
+    level_col: str = "ma_de\u011feri",
+    fallback_col: str = "taraf",
+) -> str:
+    price = pd.to_numeric(pd.Series([row.get(price_col)]), errors="coerce").iloc[0]
+    level = pd.to_numeric(pd.Series([row.get(level_col)]), errors="coerce").iloc[0]
     if pd.isna(price) or pd.isna(level):
-        return str(row.get("taraf", "-"))
+        return str(row.get(fallback_col, "-"))
     if float(price) >= float(level):
         return "Destek"
     return "Diren\u00e7"
+
+
+def _with_current_side(
+    frame: pd.DataFrame,
+    *,
+    side_col: str = "taraf",
+    price_col: str = "fiyat",
+    level_col: str = "ma_de\u011feri",
+) -> pd.DataFrame:
+    """Return a display frame where support/resistance means current price position."""
+
+    if frame.empty:
+        return frame
+    result = frame.copy()
+    result[side_col] = result.apply(
+        lambda row: _current_side_label(
+            row,
+            price_col=price_col,
+            level_col=level_col,
+            fallback_col=side_col,
+        ),
+        axis=1,
+    )
+    dedupe_cols = [col for col in ("symbol", "timeframe", "MA", side_col) if col in result.columns]
+    if "MA" in dedupe_cols:
+        result = result.drop_duplicates(subset=dedupe_cols, keep="first")
+    return result.reset_index(drop=True)
 
 
 def _numeric_column(frame: pd.DataFrame, column: str, *, absolute: bool = False) -> pd.Series:
@@ -995,7 +1028,7 @@ def _respect_image_rows(frame: pd.DataFrame, *, include_symbol: bool) -> tuple[l
         common = [
             _image_cell(row.get("MA"), 14),
             format_tr(row.get("ma_de\u011feri"), 2),
-            str(row.get("taraf", "")) or _current_side_label(row),
+            _current_side_label(row),
             str(int(row.get("ziyaret", 0))),
             "%" + format_tr(row.get("tepki_oran\u0131_%"), 0),
             "%" + format_tr(row.get("geri_d\u00f6n\u00fc\u015f_%"), 0),
@@ -1219,7 +1252,7 @@ def render_respect_images(
     include_symbol: bool,
 ) -> list[bytes]:
     sorted_scorecard = _sort_scorecard(scorecard, sort_by=sort_by)
-    visible_all = _filtered_scorecard(sorted_scorecard, min_visits)
+    visible_all = _with_current_side(_filtered_scorecard(sorted_scorecard, min_visits))
     if visible_all.empty:
         return []
     symbol_count = sorted_scorecard["symbol"].nunique() if "symbol" in sorted_scorecard else 1
@@ -1269,7 +1302,7 @@ def render_respect_images(
                 heatmap=heatmap,
             )
         )
-    current_visible = _filtered_scorecard(current, min_visits)
+    current_visible = _with_current_side(_filtered_scorecard(current, min_visits))
     if detail_top >= 0 and not current_visible.empty:
         ranked_current = _rank_current_strength(current_visible)
         for side_title, near in _side_sections(ranked_current, detail_top, side_col="taraf"):
@@ -1349,7 +1382,7 @@ def render_dna_profile_images(
 ) -> list[bytes]:
     if dna_profile is None or dna_profile.empty:
         return []
-    profile = dna_profile.sort_values(
+    profile = _with_current_side(dna_profile, side_col="guncel_taraf", level_col="seviye").sort_values(
         ["dna_skoru", "temas", "guncel_aksiyon_skoru"],
         ascending=[False, False, False],
         na_position="last",
@@ -1477,7 +1510,7 @@ def _write_outputs(
         (output_dir / f"ma_respect_visual_{index}.png").write_bytes(image)
     if not scorecard.empty:
         top_per_symbol = (
-            _sort_scorecard(scorecard, sort_by="visits")
+            _with_current_side(_sort_scorecard(scorecard, sort_by="visits"))
             .groupby("symbol", group_keys=False)
             .apply(lambda group: _balance_sides(group, 5, side_col="taraf"))
             .reset_index(drop=True)
