@@ -25,6 +25,10 @@ def parse_periods(value: str) -> tuple[int, ...]:
     periods = tuple(dict.fromkeys(int(item) for item in parse_csv(value)))
     if not periods:
         raise ValueError("En az bir periyot gereklidir")
+    if any(period < 1 or period > 5_000 for period in periods):
+        raise ValueError(
+            "MA periods must be between 1 and 5000; separate CSV values with commas"
+        )
     return periods
 
 
@@ -117,13 +121,42 @@ def write_outputs(
     (output_dir / "market_report.html").write_text(html, encoding="utf-8")
 
 
-def merge_outputs(merge_dir: Path, output_dir: Path) -> int:
+def merge_outputs(
+    merge_dir: Path,
+    output_dir: Path,
+    expected_shards: int = 0,
+) -> int:
     detail_paths = list(merge_dir.rglob("ma_detail.csv"))
     error_paths = list(merge_dir.rglob("errors.csv"))
     config_paths = list(merge_dir.rglob("run_config.json"))
     if not detail_paths:
         raise RuntimeError(f"Birleştirilecek ma_detail.csv bulunamadı: {merge_dir}")
-    details = [pd.read_csv(path) for path in detail_paths if path.stat().st_size > 3]
+    if expected_shards and len(detail_paths) != expected_shards:
+        raise RuntimeError(
+            f"Missing shards: expected={expected_shards}, found={len(detail_paths)}"
+        )
+    if expected_shards and len(config_paths) != expected_shards:
+        raise RuntimeError(
+            f"Missing shard configs: expected={expected_shards}, found={len(config_paths)}"
+        )
+    configs = [
+        json.loads(path.read_text(encoding="utf-8-sig"))
+        for path in config_paths
+    ]
+    if expected_shards:
+        indexes = {int(payload.get("shard_index", -1)) for payload in configs}
+        expected_indexes = set(range(expected_shards))
+        if indexes != expected_indexes:
+            missing = sorted(expected_indexes - indexes)
+            raise RuntimeError(f"Missing shard indexes: {missing}")
+    details = []
+    for path in detail_paths:
+        if path.stat().st_size <= 3:
+            continue
+        try:
+            details.append(pd.read_csv(path))
+        except pd.errors.EmptyDataError:
+            continue
     detail = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
     if not detail.empty:
         detail = detail.drop_duplicates(
@@ -178,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--output-dir", default="reports/ma_scan")
     parser.add_argument("--merge-dir", default="")
+    parser.add_argument(
+        "--expected-shards",
+        type=int,
+        default=0,
+        help="Required shard count during merge; zero disables validation",
+    )
     return parser
 
 
@@ -188,7 +227,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     output_dir = Path(args.output_dir)
     if args.merge_dir:
-        return merge_outputs(Path(args.merge_dir), output_dir)
+        return merge_outputs(
+            Path(args.merge_dir),
+            output_dir,
+            expected_shards=args.expected_shards,
+        )
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         raise ValueError("Shard ayarları geçersiz")
     timeframes = parse_timeframes(args.timeframes)
@@ -255,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     write_outputs(output_dir, detail, error_frame, payload)
     print(f"Çıktılar: {output_dir.resolve()}")
-    return 0 if not detail.empty else 1
+    return 0
 
 
 if __name__ == "__main__":

@@ -284,8 +284,15 @@ def detect_touches(
         if not in_zone:
             if side == 1 and signed_distance >= config.separation_atr:
                 was_far = True
+            elif side == 1 and high[index] < values[index] - zone:
+                # A later approach from below is resistance, not support.
+                was_far = False
             elif side == -1 and signed_distance <= -config.separation_atr:
                 was_far = True
+            elif side == -1 and low[index] > values[index] + zone:
+                # Mirrored case: do not retain resistance eligibility after a
+                # cross to the support side.
+                was_far = False
         independent = index - last_touch > config.max_holding_bars
         if in_zone and not previous_in_zone and was_far and independent:
             touches.append(Touch(index, df.index[index], side, float(values[index]), float(atr[index])))
@@ -319,13 +326,18 @@ def simulate_trade(df: pd.DataFrame, touch: Touch, config: ScanConfig) -> Trade 
             float(df["Low"].iloc[position]),
             float(df["Close"].iloc[position]),
         )
+        bar_open = float(df["Open"].iloc[position])
         if direction == 1:
             favorable, adverse, stop_hit = high - entry, entry - low, low <= stop
+            gap_through_stop = bar_open <= stop
         else:
             favorable, adverse, stop_hit = entry - low, high - entry, high >= stop
+            gap_through_stop = bar_open >= stop
         max_favorable, max_adverse = max(max_favorable, favorable), max(max_adverse, adverse)
         if stop_hit:
-            exit_price, exit_position = stop, position
+            # A stale stop is not executable when the bar opens through it.
+            exit_price = bar_open if gap_through_stop else stop
+            exit_position = position
             exit_reason = "Takip eden stop" if stop != initial_stop else "İlk stop"
             break
         reached_1r, reached_2r = reached_1r or favorable >= risk, reached_2r or favorable >= 2.0 * risk
