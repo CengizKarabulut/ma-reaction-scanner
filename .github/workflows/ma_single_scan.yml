@@ -142,7 +142,13 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m scanner.ma_notify --summary reports/single/market_summary.csv --label "Tek Hisse MA Trend ve Tepki · ${{ inputs.symbol }}" --top 1
+        run: >-
+          python -m scanner.ma_notify
+          --summary reports/single/market_summary.csv
+          --detail reports/single/single_stock_table.csv
+          --report reports/single/single_stock_report.html
+          --label "Tek Hisse MA Trend ve Tepki · ${{ inputs.symbol }}"
+          --top 20
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         if: always()

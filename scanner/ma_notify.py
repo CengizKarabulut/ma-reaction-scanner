@@ -93,33 +93,95 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     return "\n".join(lines)
 
 
-def send(summary_path: Path, label: str, top: int) -> None:
+def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
+    lines = [
+        f"<b>{str(label)[:200]}</b>",
+        f"Seçilen kombinasyonlar: <b>{len(frame)}</b> destek/direnç satırı",
+        "En güçlü satırlar aşağıdadır; tam tablo CSV ve HTML ekindedir.",
+        "",
+        "<pre>",
+        f"{'TF':<4} {'MA':<8} {'Taraf':<7} {'Tms':>3} {'Kor%':>5} "
+        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5}",
+        "-" * 53,
+    ]
+    displayed = 0
+    footer = [
+        "</pre>",
+        "",
+        "Kor% = MA'nın beklenen tarafında geçirilen süre.",
+        "Tms = bağımsız temas. MedR/Edge = R cinsinden tepki kalitesi.",
+    ]
+    for _, row in frame.head(max(1, top)).iterrows():
+        table_row = (
+            f"{str(row.get('Zaman Dilimi', '-')):<4} "
+            f"{str(row.get('MA', '-')):<8} "
+            f"{str(row.get('Taraf', '-')):<7} "
+            f"{_number(row.get('Temas'), 0):>3} "
+            f"{_number(row.get('Taraf Koruma %')):>5} "
+            f"{_number(row.get('Kazanma %')):>5} "
+            f"{_number(row.get('Medyan R')):>5} "
+            f"{_number(row.get('Edge R')):>5}"
+        )
+        if len("\n".join([*lines, table_row, *footer])) > _TELEGRAM_TEXT_BUDGET:
+            break
+        lines.append(table_row)
+        displayed += 1
+    lines.extend(footer)
+    if displayed < min(len(frame), max(1, top)):
+        lines.append("Diğer satırlar tam CSV/HTML tablosundadır.")
+    return "\n".join(lines)
+
+
+def send(
+    summary_path: Path,
+    label: str,
+    top: int,
+    detail_path: Path | None = None,
+    report_path: Path | None = None,
+) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
-    frame = pd.read_csv(summary_path)
+    message_path = detail_path or summary_path
+    frame = pd.read_csv(message_path)
+    message = (
+        format_single_detail(frame, label, top)
+        if detail_path is not None
+        else format_summary(frame, label, top)
+    )
     base = f"https://api.telegram.org/bot{token}"
     with httpx.Client(timeout=60.0) as client:
         response = client.post(
             f"{base}/sendMessage",
-            data={"chat_id": chat_id, "text": format_summary(frame, label, top), "parse_mode": "HTML"},
+            data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
         )
         response.raise_for_status()
-        with summary_path.open("rb") as handle:
-            response = client.post(
-                f"{base}/sendDocument",
-                data={"chat_id": chat_id, "caption": f"{label} — tam tekilleştirilmiş rapor"},
-                files={"document": (summary_path.name, handle, "text/csv")},
-            )
-        response.raise_for_status()
-
+        attachments = [message_path]
+        if report_path is not None and report_path.exists():
+            attachments.append(report_path)
+        for attachment in attachments:
+            with attachment.open("rb") as handle:
+                response = client.post(
+                    f"{base}/sendDocument",
+                    data={"chat_id": chat_id, "caption": f"{label} — tam tablo"},
+                    files={"document": (attachment.name, handle)},
+                )
+            response.raise_for_status()
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", required=True)
     parser.add_argument("--label", default="MA Trend ve Tepki")
     parser.add_argument("--top", type=int, default=25)
+    parser.add_argument("--detail")
+    parser.add_argument("--report")
     args = parser.parse_args()
-    send(Path(args.summary), args.label, args.top)
+    send(
+        Path(args.summary),
+        args.label,
+        args.top,
+        detail_path=Path(args.detail) if args.detail else None,
+        report_path=Path(args.report) if args.report else None,
+    )
     return 0
 
 

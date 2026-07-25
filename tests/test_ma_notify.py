@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from scanner.ma_notify import format_summary
+from scanner.ma_notify import format_single_detail, format_summary
 
 
 class NotificationTests(unittest.TestCase):
@@ -52,5 +52,21 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("</pre>", message)
         self.assertIn("tam CSV'de", message)
 
+    def test_single_detail_lists_selected_combinations(self):
+        frame = pd.DataFrame(
+            [
+                {"Zaman Dilimi": "1d", "MA": "SMA233", "Taraf": "Destek", "Temas": 18,
+                 "Taraf Koruma %": 81.5, "Kazanma %": 64.0, "Medyan R": 0.8, "Edge R": 0.3},
+                {"Zaman Dilimi": "1h", "MA": "EMA55", "Taraf": "Direnç", "Temas": 11,
+                 "Taraf Koruma %": 72.0, "Kazanma %": 55.0, "Medyan R": 0.4, "Edge R": 0.1},
+            ]
+        )
+
+        message = format_single_detail(frame, "AVPGY", top=20)
+
+        self.assertIn("SMA233", message)
+        self.assertIn("EMA55", message)
+        self.assertIn("Kor%", message)
+        self.assertLessEqual(len(message), 4_000)
 if __name__ == "__main__":
     unittest.main()

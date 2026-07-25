@@ -87,6 +87,71 @@ def instrument_metadata(instrument) -> dict[str, object]:
     }
 
 
+_SINGLE_TABLE_COLUMNS = {
+    "timeframe": "Zaman Dilimi",
+    "ma_type": "MA Türü",
+    "period": "Periyot",
+    "ma": "MA",
+    "side": "Taraf",
+    "active_side": "Güncel Rol",
+    "trend_state": "Trend",
+    "current_price": "Fiyat",
+    "current_ma": "MA Değeri",
+    "touches": "Temas",
+    "side_adherence_pct": "Taraf Koruma %",
+    "wrong_side_pct": "Yanlış Taraf %",
+    "cross_count": "Kesişim",
+    "win_rate_pct": "Kazanma %",
+    "median_net_r": "Medyan R",
+    "edge_r": "Edge R",
+    "positive_periods": "Pozitif Dönem",
+    "compatibility": "Uyum",
+    "distance_pct": "Uzaklık %",
+    "distance_atr": "ATR Uzaklık",
+    "filter_status": "Filtre",
+    "filter_reasons": "Filtre Nedeni",
+}
+
+
+def build_single_stock_table(detail: pd.DataFrame) -> pd.DataFrame:
+    if detail is None or detail.empty:
+        return pd.DataFrame(columns=list(_SINGLE_TABLE_COLUMNS.values()))
+    table = detail.copy()
+    quality_rank = {
+        "Güçlü uyum": 4,
+        "Uyumlu": 3,
+        "İzleme": 2,
+        "Uyumsuz": 1,
+        "Yetersiz veri": 0,
+    }
+    filter_pass = table["filter_pass"] if "filter_pass" in table else pd.Series(True, index=table.index)
+    active_side = table["active_side"] if "active_side" in table else pd.Series(False, index=table.index)
+    table["_filter_rank"] = filter_pass.fillna(False).astype(int)
+    table["_active_rank"] = active_side.fillna(False).astype(int)
+    table["_quality_rank"] = table["compatibility"].map(quality_rank).fillna(0)
+    table["_abs_distance"] = pd.to_numeric(table["distance_atr"], errors="coerce").abs()
+    table = table.sort_values(
+        [
+            "_filter_rank",
+            "_active_rank",
+            "_quality_rank",
+            "touches",
+            "positive_periods",
+            "edge_r",
+            "median_net_r",
+            "_abs_distance",
+        ],
+        ascending=[False, False, False, False, False, False, False, True],
+        na_position="last",
+    )
+    available = [column for column in _SINGLE_TABLE_COLUMNS if column in table]
+    result = table[available].rename(columns=_SINGLE_TABLE_COLUMNS).reset_index(drop=True)
+    if "Güncel Rol" in result:
+        result["Güncel Rol"] = result["Güncel Rol"].map(
+            {True: "Aktif", False: "Diğer taraf"}
+        )
+    return result
+
 def write_outputs(
     output_dir: Path,
     detail: pd.DataFrame,
@@ -105,6 +170,14 @@ def write_outputs(
         json.dumps(config_payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    single_table = None
+    if int(config_payload.get("instrument_count", 0)) == 1:
+        single_table = build_single_stock_table(detail)
+        single_table.to_csv(
+            output_dir / "single_stock_table.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
     html = (
         "<!doctype html><html lang='tr'><head><meta charset='utf-8'>"
         "<title>MA Trend ve Tepki Raporu</title>"
@@ -135,7 +208,39 @@ def write_outputs(
         + "</body></html>"
     )
     (output_dir / "market_report.html").write_text(html, encoding="utf-8")
-
+    if single_table is not None:
+        single_html = (
+            "<!doctype html><html lang='tr'><head><meta charset='utf-8'>"
+            "<title>Tek Hisse MA Detay Tablosu</title>"
+            "<style>body{font:14px system-ui;margin:24px;background:#f7f8fa;color:#18202a}"
+            "table{border-collapse:collapse;width:100%;background:white}th,td{padding:7px;"
+            "border:1px solid #dfe3e8;text-align:left;white-space:nowrap}th{position:sticky;"
+            "top:0;background:#172b4d;color:white}tr:nth-child(even){background:#f2f5f8}"
+            "h1,h2{color:#172b4d}.guide{background:white;padding:16px;border:1px solid "
+            "#dfe3e8;margin:14px 0}</style></head><body>"
+            "<h1>Tek Hisse - Seçilen MA Türleri ve Periyotları</h1>"
+            f"<p>{len(single_table)} destek/direnç satırı</p>"
+            "<div class='guide'><h2>Tablo nasıl okunur?</h2><ul>"
+            "<li><b>Temas</b>: birbirinden ayrıştırılmış tarihsel MA temas sayısıdır.</li>"
+            "<li><b>Taraf Koruma %</b>: destek için MA üstünde, direnç için MA altında "
+            "kapanan mumların oranıdır.</li>"
+            "<li><b>Yanlış Taraf %</b>: fiyatın beklenen tarafın tersinde kaldığı orandır.</li>"
+            "<li><b>Kesişim</b>: fiyatın MA tarafını kaç kez değiştirdiğini gösterir; "
+            "yüksek değer kararsızlığa işaret edebilir.</li>"
+            "<li><b>Medyan R / Edge R</b>: temas sonrası maliyet düzeltilmiş tepki ve "
+            "rastgele giriş bazına göre avantajdır.</li></ul></div>"
+            + single_table.to_html(
+                index=False,
+                border=0,
+                escape=True,
+                float_format=lambda value: f"{value:,.2f}",
+            )
+            + "</body></html>"
+        )
+        (output_dir / "single_stock_report.html").write_text(
+            single_html,
+            encoding="utf-8",
+        )
 
 def merge_outputs(
     merge_dir: Path,

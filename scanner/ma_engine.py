@@ -527,6 +527,11 @@ def scan_frame(
             )
             current_ma = float(ma.iloc[-1])
             distance_atr = (current_ma - current_price) / current_atr if current_atr > 0 else np.nan
+            relative = (df["Close"] - ma).dropna()
+            above_ma_pct = float(100.0 * (relative >= 0).mean()) if not relative.empty else np.nan
+            below_ma_pct = float(100.0 * (relative < 0).mean()) if not relative.empty else np.nan
+            signs = np.sign(relative).replace(0, np.nan).ffill()
+            cross_count = int((signs.diff().abs() == 2).sum())
             for side in (1, -1):
                 trades = [
                     trade for touch in detect_touches(df, ma, side, config)
@@ -573,6 +578,11 @@ def scan_frame(
                     "distance_value": float(current_ma - current_price),
                     "distance_atr": float(distance_atr),
                     "distance_pct": float((current_ma - current_price) / current_price * 100.0),
+                    "above_ma_pct": above_ma_pct,
+                    "below_ma_pct": below_ma_pct,
+                    "side_adherence_pct": above_ma_pct if side == 1 else below_ma_pct,
+                    "wrong_side_pct": below_ma_pct if side == 1 else above_ma_pct,
+                    "cross_count": cross_count,
                     "active_side": bool(active_side),
                     "trend_state": state,
                     "price_position": price_position,

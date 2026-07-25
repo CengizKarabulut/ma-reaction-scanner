@@ -8,6 +8,7 @@ import pandas as pd
 
 from scanner.ma_engine import MA_TYPES, TIMEFRAMES
 from scanner.ma_scan import (
+    build_single_stock_table,
     main,
     merge_outputs,
     parse_ma_types,
@@ -104,5 +105,44 @@ class ScannerInputTests(unittest.TestCase):
                 )
         self.assertEqual(code, 0)
 
+    def test_single_stock_table_keeps_each_selected_ma_side(self):
+        detail = pd.DataFrame(
+            [
+                {
+                    "timeframe": "1d", "ma_type": "SMA", "period": 233,
+                    "ma": "SMA233", "side": "Destek", "active_side": True,
+                    "trend_state": "Yükselen", "current_price": 52.85,
+                    "current_ma": 53.42, "touches": 18,
+                    "side_adherence_pct": 81.5, "wrong_side_pct": 18.5,
+                    "cross_count": 7, "win_rate_pct": 64.0,
+                    "median_net_r": 0.8, "edge_r": 0.3,
+                    "positive_periods": 3, "compatibility": "Güçlü uyum",
+                    "distance_pct": 1.08, "distance_atr": 0.45,
+                    "filter_pass": True, "filter_status": "Uygun",
+                    "filter_reasons": "",
+                },
+                {
+                    "timeframe": "1d", "ma_type": "SMA", "period": 233,
+                    "ma": "SMA233", "side": "Direnç", "active_side": False,
+                    "trend_state": "Yükselen", "current_price": 52.85,
+                    "current_ma": 53.42, "touches": 4,
+                    "side_adherence_pct": 18.5, "wrong_side_pct": 81.5,
+                    "cross_count": 7, "win_rate_pct": 40.0,
+                    "median_net_r": -0.2, "edge_r": -0.1,
+                    "positive_periods": 1, "compatibility": "İzleme",
+                    "distance_pct": 1.08, "distance_atr": 0.45,
+                    "filter_pass": True, "filter_status": "Uygun",
+                    "filter_reasons": "",
+                },
+            ]
+        )
+
+        table = build_single_stock_table(detail)
+
+        self.assertEqual(len(table), 2)
+        self.assertEqual(table.loc[0, "Taraf"], "Destek")
+        self.assertEqual(table.loc[0, "Temas"], 18)
+        self.assertEqual(table.loc[0, "Taraf Koruma %"], 81.5)
+        self.assertEqual(table.loc[0, "Güncel Rol"], "Aktif")
 if __name__ == "__main__":
     unittest.main()
