@@ -16,9 +16,18 @@ def _number(value: object, digits: int = 2) -> str:
     return "-" if pd.isna(number) else f"{float(number):.{digits}f}"
 
 
+def _decision_code(value: object) -> str:
+    return {
+        "Güçlü Aday": "GUCLU", "Tetik Bekliyor": "BEKLE",
+        "Yaklaşıyor": "YAKIN", "Uzak": "UZAK", "İşlem Yok": "YOK",
+        "Uyumsuz": "UYMSZ", "Yetersiz Veri": "AZVER", "Filtre Dışı": "Disi",
+    }.get(str(value), "-")
+
+
 _TELEGRAM_TEXT_BUDGET = 4_000
 _FOOTER = [
     "Uzk% = (MA - fiyat) / fiyat. Skor = 0-100 tarihsel MA uyumu.",
+    "Kar: GUCLU aday; BEKLE teyit bekler; YAKIN yaklaşır; UYMSZ uygun değil.",
     "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
     "Tam rapor CSV eki ve GitHub artifact icindedir.",
 ]
@@ -37,8 +46,9 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
         "",
         "<pre>",
         f"{'Varlik':<7} {'MA':<8} {'TF':<4} {'Tms':>3} {'Kor%':>5} "
-        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Uzk%':>6} {'Skor':>5} {'Dur':<4}",
-        "-" * 74,
+        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Uzk%':>6} {'Skor':>5} "
+        f"{'Kar':<5} {'RVOL':>5} {'ADX':>5}",
+        "-" * 91,
     ]
     has_exclusions = (
         "filter_status" in selected.columns
@@ -58,7 +68,9 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
             f"{_number(row.get('best_edge_r')):>5} "
             f"{_number(row.get('best_distance_pct')):>6} "
             f"{_number(row.get('best_compatibility_score')):>5} "
-            f"{'OK' if eligible else 'Disi':<4}"
+            f"{_decision_code(row.get('best_decision') if eligible else 'Filtre Dışı'):<5} "
+            f"{_number(row.get('best_relative_volume')):>5} "
+            f"{_number(row.get('best_adx')):>5}"
         )
         if not _fits(lines, [table_row, "</pre>", "", *reason_reserve]):
             break
@@ -104,8 +116,9 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
         "",
         "<pre>",
         f"{'TF':<4} {'MA':<8} {'Taraf':<7} {'Tms':>3} {'Kor%':>5} "
-        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Skor':>5}",
-        "-" * 59,
+        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Skor':>5} {'Kar':<5} "
+        f"{'RVOL':>5} {'ADX':>5}",
+        "-" * 78,
     ]
     displayed = 0
     footer = [
@@ -124,7 +137,10 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
             f"{_number(row.get('Kazanma %')):>5} "
             f"{_number(row.get('Medyan R')):>5} "
             f"{_number(row.get('Edge R')):>5} "
-            f"{_number(row.get('Uyum Skoru')):>5}"
+            f"{_number(row.get('Uyum Skoru')):>5} "
+            f"{_decision_code(row.get('Karar')):<5} "
+            f"{_number(row.get('RVOL')):>5} "
+            f"{_number(row.get('ADX')):>5}"
         )
         if len("\n".join([*lines, table_row, *footer])) > _TELEGRAM_TEXT_BUDGET:
             break

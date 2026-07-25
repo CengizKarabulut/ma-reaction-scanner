@@ -87,6 +87,18 @@ on:
         description: Maksimum mutlak aykiri Edge (R)
         required: true
         default: "5"
+      decision_settings:
+        description: "Karar: taraf%,pozitif dönem,izleme ATR,gürültü/100"
+        required: true
+        default: "60,2,1.5,20"
+      confirmation_settings:
+        description: "Teyit: ADX periyot,min ADX,hacim periyot,min RVOL,hacim?,ADX?"
+        required: true
+        default: "14,20,20,1.2,true,true"
+      indicator_settings:
+        description: "RSI,yum,MACD h/y/s,SMI p/y/s,Ichi d/b/B,BB p/std,aşırılık bar/%"
+        required: true
+        default: "14,9,12,26,9,14,3,3,9,26,52,20,2,100,90"
       source:
         description: Veri kaynağı
         required: true
@@ -111,6 +123,9 @@ jobs:
       - name: Tek hisse analizi
         shell: bash
         run: |
+          IFS=',' read -r MIN_ADHERENCE MIN_POSITIVE WATCH_ATR MAX_CROSS <<< "${{ inputs.decision_settings }}"
+          IFS=',' read -r ADX_PERIOD MIN_ADX VOLUME_LOOKBACK MIN_RVOL USE_VOLUME USE_ADX <<< "${{ inputs.confirmation_settings }}"
+          IFS=',' read -r RSI_PERIOD RSI_SMOOTH MACD_FAST MACD_SLOW MACD_SIGNAL SMI_PERIOD SMI_SMOOTH SMI_SIGNAL ICHI_CONVERSION ICHI_BASE ICHI_SPAN_B BB_PERIOD BB_STD EXTREME_LOOKBACK EXTREME_PERCENTILE <<< "${{ inputs.indicator_settings }}"
           python -m scanner.ma_scan \
             --universe custom \
             --asset-class stock \
@@ -136,6 +151,31 @@ jobs:
             --max-zero-volume-pct "${{ inputs.max_zero_volume_pct }}" \
             --max-gap-pct "${{ inputs.max_gap_pct }}" \
             --max-abs-edge-r "${{ inputs.max_abs_edge_r }}" \
+            --min-side-adherence-pct "$MIN_ADHERENCE" \
+            --min-positive-periods "$MIN_POSITIVE" \
+            --watch-distance-atr "$WATCH_ATR" \
+            --max-cross-rate-per-100 "$MAX_CROSS" \
+            --adx-period "$ADX_PERIOD" \
+            --min-adx "$MIN_ADX" \
+            --volume-lookback "$VOLUME_LOOKBACK" \
+            --min-relative-volume "$MIN_RVOL" \
+            --use-volume-confirmation "$USE_VOLUME" \
+            --use-adx-confirmation "$USE_ADX" \
+            --rsi-period "$RSI_PERIOD" \
+            --rsi-smoothing-period "$RSI_SMOOTH" \
+            --macd-fast-period "$MACD_FAST" \
+            --macd-slow-period "$MACD_SLOW" \
+            --macd-signal-period "$MACD_SIGNAL" \
+            --smi-period "$SMI_PERIOD" \
+            --smi-smoothing-period "$SMI_SMOOTH" \
+            --smi-signal-period "$SMI_SIGNAL" \
+            --ichimoku-conversion-period "$ICHI_CONVERSION" \
+            --ichimoku-base-period "$ICHI_BASE" \
+            --ichimoku-span-b-period "$ICHI_SPAN_B" \
+            --bollinger-period "$BB_PERIOD" \
+            --bollinger-stddev "$BB_STD" \
+            --indicator-extreme-lookback "$EXTREME_LOOKBACK" \
+            --extreme-percentile "$EXTREME_PERCENTILE" \
             --source "${{ inputs.source }}" \
             --output-dir reports/single
       - name: Telegram

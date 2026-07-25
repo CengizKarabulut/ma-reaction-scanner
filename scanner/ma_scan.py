@@ -21,6 +21,17 @@ def parse_csv(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def parse_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "evet", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "hayır", "hayir", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("Boolean değer true/false olmalıdır")
+
+
 def parse_periods(value: str) -> tuple[int, ...]:
     periods = tuple(dict.fromkeys(int(item) for item in parse_csv(value)))
     if not periods:
@@ -101,6 +112,7 @@ _SINGLE_TABLE_COLUMNS = {
     "side_adherence_pct": "Taraf Koruma %",
     "wrong_side_pct": "Yanlış Taraf %",
     "cross_count": "Kesişim",
+    "cross_rate_per_100": "Gürültü / 100 Bar",
     "win_rate_pct": "Kazanma %",
     "median_net_r": "Medyan R",
     "edge_r": "Edge R",
@@ -109,6 +121,31 @@ _SINGLE_TABLE_COLUMNS = {
     "compatibility_score": "Uyum Skoru",
     "distance_pct": "Uzaklık %",
     "distance_atr": "ATR Uzaklık",
+    "decision": "Karar",
+    "decision_reason": "Karar Nedeni",
+    "quality_pass": "Kalite Geçti",
+    "price_trigger": "Fiyat Tetik",
+    "relative_volume": "RVOL",
+    "volume_confirmed": "Hacim Teyidi",
+    "adx": "ADX",
+    "adx_confirmed": "ADX Teyidi",
+    "rsi": "RSI",
+    "rsi_smoothing": "RSI Yumuşatma",
+    "rsi_status": "RSI Durumu",
+    "macd": "MACD",
+    "macd_signal": "MACD Signal",
+    "macd_gap_atr": "MACD Açılma / ATR",
+    "macd_gap_percentile": "MACD Açılma Yüzdeliği",
+    "macd_stretched": "MACD Aşırı Açık",
+    "macd_status": "MACD Durumu",
+    "smi": "SMI",
+    "smi_signal": "SMI Signal",
+    "smi_status": "SMI Durumu",
+    "ichimoku_status": "Ichimoku Durumu",
+    "bollinger_percent_b": "Bollinger %B",
+    "bollinger_width_pct": "Bollinger Genişlik %",
+    "bollinger_width_percentile": "Bollinger Genişlik Yüzdeliği",
+    "bollinger_status": "Bollinger Durumu",
     "filter_status": "Filtre",
     "filter_reasons": "Filtre Nedeni",
 }
@@ -156,6 +193,9 @@ def build_single_stock_table(
                 "positive_periods": 0,
                 "compatibility": "Yetersiz veri",
                 "compatibility_score": 0.0,
+                "quality_pass": False,
+                "decision": "Yetersiz Veri",
+                "decision_reason": "Seçilen MA için yeterli geçmiş mum yok",
                 "filter_pass": False,
                 "filter_status": "Yetersiz veri",
                 "filter_reasons": "Seçilen MA için yeterli geçmiş mum yok",
@@ -175,10 +215,16 @@ def build_single_stock_table(
         "Uyumsuz": 1,
         "Yetersiz veri": 0,
     }
+    decision_rank = {
+        "Güçlü Aday": 7, "Tetik Bekliyor": 6, "Yaklaşıyor": 5,
+        "Uzak": 4, "İşlem Yok": 3, "Uyumsuz": 2,
+        "Yetersiz Veri": 1, "Filtre Dışı": 0,
+    }
     filter_pass = table["filter_pass"] if "filter_pass" in table else pd.Series(True, index=table.index)
     active_side = table["active_side"] if "active_side" in table else pd.Series(False, index=table.index)
     table["_filter_rank"] = filter_pass.fillna(False).astype(int)
     table["_active_rank"] = active_side.fillna(False).astype(int)
+    table["_decision_rank"] = table["decision"].map(decision_rank).fillna(0)
     table["_quality_rank"] = table["compatibility"].map(quality_rank).fillna(0)
     table["compatibility_score"] = pd.to_numeric(
         table["compatibility_score"], errors="coerce"
@@ -188,6 +234,7 @@ def build_single_stock_table(
         [
             "_filter_rank",
             "_active_rank",
+            "_decision_rank",
             "compatibility_score",
             "touches",
             "_quality_rank",
@@ -196,7 +243,7 @@ def build_single_stock_table(
             "median_net_r",
             "_abs_distance",
         ],
-        ascending=[False, False, False, False, False, False, False, False, True],
+        ascending=[False, False, False, False, False, False, False, False, False, True],
         na_position="last",
     )
     available = [column for column in _SINGLE_TABLE_COLUMNS if column in table]
@@ -226,6 +273,22 @@ def write_outputs(
         "best_win_rate_pct": "Kazanma %", "best_median_net_r": "Medyan R",
         "best_edge_r": "Edge R", "best_distance_pct": "Uzaklık %",
         "best_compatibility_score": "Uyum Skoru",
+        "best_decision": "Karar", "best_decision_reason": "Karar Nedeni",
+        "best_cross_rate_per_100": "Gürültü / 100 Bar",
+        "best_relative_volume": "RVOL", "best_adx": "ADX",
+        "best_rsi": "RSI", "best_rsi_smoothing": "RSI Yumuşatma",
+        "best_rsi_status": "RSI Durumu",
+        "best_macd": "MACD", "best_macd_signal": "MACD Signal",
+        "best_macd_gap_atr": "MACD Açılma / ATR",
+        "best_macd_gap_percentile": "MACD Açılma Yüzdeliği",
+        "best_macd_status": "MACD Durumu",
+        "best_smi": "SMI", "best_smi_signal": "SMI Signal",
+        "best_smi_status": "SMI Durumu",
+        "best_ichimoku_status": "Ichimoku Durumu",
+        "best_bollinger_percent_b": "Bollinger %B",
+        "best_bollinger_width_pct": "Bollinger Genişlik %",
+        "best_bollinger_width_percentile": "Bollinger Genişlik Yüzdeliği",
+        "best_bollinger_status": "Bollinger Durumu",
         "best_compatibility": "Uyum", "best_side": "Taraf",
         "current_price": "Fiyat", "best_ma_value": "MA Değeri",
         "filter_status": "Filtre", "filter_reasons": "Filtre Nedeni",
@@ -270,7 +333,10 @@ def write_outputs(
         "<li><code>best_difference</code> = MA - fiyat (TL).</li>"
         "<li><code>best_distance_pct</code> gercek yuzde uzakliktir. "
         "<code>best_distance_atr</code> ATR uzakligidir; yuzde degildir.</li>"
-        "<li><code>best_compatibility_score</code> 0-100 arası Uyum Skorudur; temas, taraf koruma, kazanma, Medyan R, Edge ve istikrarı birleştirir.</li>"
+        "<li><code>best_compatibility_score</code> tarihsel MA uyumudur; kanıt sınıfı yetersiz satırların puanını sınırlar.</li>"
+        "<li><code>best_decision</code> güncel sonucu verir: Güçlü Aday, Tetik Bekliyor, Yaklaşıyor, Uzak, İşlem Yok veya Uyumsuz. Ayrıntı <code>best_decision_reason</code> alanındadır.</li>"
+        "<li><code>RVOL</code> göreli hacim, <code>ADX</code> trend gücüdür. RSI/MACD/SMI/Ichimoku/Bollinger alanları teyit ve aşırılık bağlamıdır.</li>"
+        "<li><code>MACD Açılma Yüzdeliği</code> mutlak MACD-Signal farkının yakın geçmişteki yüzdelik sırasıdır; tek başına düzeltme sinyali değildir.</li>"
         "<li><code>filter_status</code> Uygun satirlar once gelir. Filtre disi "
         "hisseler silinmez; neden <code>filter_reasons</code> alanindadir.</li>"
         "<li>Uyum sinifi gecmis temas istatistigidir; otomatik al-sat emri degildir.</li>"
@@ -303,7 +369,9 @@ def write_outputs(
             "<li><b>Yanlış Taraf %</b>: fiyatın beklenen tarafın tersinde kaldığı orandır.</li>"
             "<li><b>Kesişim</b>: fiyatın MA tarafını kaç kez değiştirdiğini gösterir; "
             "yüksek değer kararsızlığa işaret edebilir.</li>"
-            "<li><b>Uyum Skoru</b>: temas, taraf koruma, kazanma, Medyan R, Edge ve istikrarın 0-100 birleşimidir.</li>"
+            "<li><b>Uyum Skoru</b>: geçmiş MA davranışıdır; yetersiz kanıt ve uyumsuzluk puana tavan koyar.</li>"
+            "<li><b>Karar / Karar Nedeni</b>: geçmiş kalite, yakınlık, fiyat tetiği, RVOL ve ADX sonucunu açıklar.</li>"
+            "<li><b>RSI, MACD, SMI, Ichimoku, Bollinger</b>: ham değer, çizgi ilişkisi/kesişim ve aşırılık bağlamını gösterir; tek başına al-sat emri değildir.</li>"
             "<li><b>Medyan R / Edge R</b>: temas sonrası maliyet düzeltilmiş tepki ve "
             "rastgele giriş bazına göre avantajdır.</li></ul></div>"
             + single_table.to_html(
@@ -407,6 +475,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-zero-volume-pct", type=float, default=20.0)
     parser.add_argument("--max-gap-pct", type=float, default=15.0)
     parser.add_argument("--max-abs-edge-r", type=float, default=5.0)
+    parser.add_argument("--min-side-adherence-pct", type=float, default=60.0)
+    parser.add_argument("--min-positive-periods", type=int, default=2)
+    parser.add_argument("--watch-distance-atr", type=float, default=1.50)
+    parser.add_argument("--max-cross-rate-per-100", type=float, default=20.0)
+    parser.add_argument("--rsi-period", type=int, default=14)
+    parser.add_argument("--rsi-smoothing-period", type=int, default=9)
+    parser.add_argument("--macd-fast-period", type=int, default=12)
+    parser.add_argument("--macd-slow-period", type=int, default=26)
+    parser.add_argument("--macd-signal-period", type=int, default=9)
+    parser.add_argument("--smi-period", type=int, default=14)
+    parser.add_argument("--smi-smoothing-period", type=int, default=3)
+    parser.add_argument("--smi-signal-period", type=int, default=3)
+    parser.add_argument("--ichimoku-conversion-period", type=int, default=9)
+    parser.add_argument("--ichimoku-base-period", type=int, default=26)
+    parser.add_argument("--ichimoku-span-b-period", type=int, default=52)
+    parser.add_argument("--bollinger-period", type=int, default=20)
+    parser.add_argument("--bollinger-stddev", type=float, default=2.0)
+    parser.add_argument("--indicator-extreme-lookback", type=int, default=100)
+    parser.add_argument("--extreme-percentile", type=float, default=90.0)
+    parser.add_argument("--adx-period", type=int, default=14)
+    parser.add_argument("--min-adx", type=float, default=20.0)
+    parser.add_argument("--volume-lookback", type=int, default=20)
+    parser.add_argument("--min-relative-volume", type=float, default=1.20)
+    parser.add_argument("--use-volume-confirmation", type=parse_bool, default=True)
+    parser.add_argument("--use-adx-confirmation", type=parse_bool, default=True)
     parser.add_argument("--lookback", type=int, default=0)
     parser.add_argument("--source", choices=["auto", "borsapy", "yfinance"], default="auto")
     parser.add_argument("--prefer-cache", action="store_true")
@@ -460,6 +553,31 @@ def main(argv: list[str] | None = None) -> int:
         max_zero_volume_pct=args.max_zero_volume_pct,
         max_gap_pct=args.max_gap_pct,
         max_abs_edge_r=args.max_abs_edge_r,
+        min_side_adherence_pct=args.min_side_adherence_pct,
+        min_positive_periods=args.min_positive_periods,
+        watch_distance_atr=args.watch_distance_atr,
+        max_cross_rate_per_100=args.max_cross_rate_per_100,
+        rsi_period=args.rsi_period,
+        rsi_smoothing_period=args.rsi_smoothing_period,
+        macd_fast_period=args.macd_fast_period,
+        macd_slow_period=args.macd_slow_period,
+        macd_signal_period=args.macd_signal_period,
+        smi_period=args.smi_period,
+        smi_smoothing_period=args.smi_smoothing_period,
+        smi_signal_period=args.smi_signal_period,
+        ichimoku_conversion_period=args.ichimoku_conversion_period,
+        ichimoku_base_period=args.ichimoku_base_period,
+        ichimoku_span_b_period=args.ichimoku_span_b_period,
+        bollinger_period=args.bollinger_period,
+        bollinger_stddev=args.bollinger_stddev,
+        indicator_extreme_lookback=args.indicator_extreme_lookback,
+        extreme_percentile=args.extreme_percentile,
+        adx_period=args.adx_period,
+        min_adx=args.min_adx,
+        volume_lookback=args.volume_lookback,
+        min_relative_volume=args.min_relative_volume,
+        use_volume_confirmation=args.use_volume_confirmation,
+        use_adx_confirmation=args.use_adx_confirmation,
     )
     instruments = resolve_instruments(args)
     attempted_requests = len(instruments) * len(timeframes)

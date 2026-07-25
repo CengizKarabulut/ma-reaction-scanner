@@ -43,6 +43,31 @@ class ScanConfig:
     max_zero_volume_pct: float = 20.0
     max_gap_pct: float = 15.0
     max_abs_edge_r: float = 5.0
+    min_side_adherence_pct: float = 60.0
+    min_positive_periods: int = 2
+    watch_distance_atr: float = 1.50
+    max_cross_rate_per_100: float = 20.0
+    rsi_period: int = 14
+    rsi_smoothing_period: int = 9
+    macd_fast_period: int = 12
+    macd_slow_period: int = 26
+    macd_signal_period: int = 9
+    smi_period: int = 14
+    smi_smoothing_period: int = 3
+    smi_signal_period: int = 3
+    ichimoku_conversion_period: int = 9
+    ichimoku_base_period: int = 26
+    ichimoku_span_b_period: int = 52
+    bollinger_period: int = 20
+    bollinger_stddev: float = 2.0
+    indicator_extreme_lookback: int = 100
+    extreme_percentile: float = 90.0
+    adx_period: int = 14
+    min_adx: float = 20.0
+    volume_lookback: int = 20
+    min_relative_volume: float = 1.20
+    use_volume_confirmation: bool = True
+    use_adx_confirmation: bool = True
 
     def __post_init__(self) -> None:
         unknown = sorted(set(self.ma_types) - set(MA_TYPES))
@@ -58,6 +83,22 @@ class ScanConfig:
             self.min_touches,
             self.max_holding_bars,
             self.quality_lookback,
+            self.min_positive_periods,
+            self.rsi_period,
+            self.rsi_smoothing_period,
+            self.macd_fast_period,
+            self.macd_slow_period,
+            self.macd_signal_period,
+            self.smi_period,
+            self.smi_smoothing_period,
+            self.smi_signal_period,
+            self.ichimoku_conversion_period,
+            self.ichimoku_base_period,
+            self.ichimoku_span_b_period,
+            self.bollinger_period,
+            self.indicator_extreme_lookback,
+            self.adx_period,
+            self.volume_lookback,
         )
         if any(int(value) < 1 for value in integers):
             raise ValueError("Bar ve olay eşikleri pozitif olmalıdır")
@@ -75,11 +116,24 @@ class ScanConfig:
             self.max_zero_volume_pct,
             self.max_gap_pct,
             self.max_abs_edge_r,
+            self.min_side_adherence_pct,
+            self.watch_distance_atr,
+            self.max_cross_rate_per_100,
+            self.min_adx,
+            self.min_relative_volume,
+            self.bollinger_stddev,
+            self.extreme_percentile,
         )
         if any(float(value) < 0 for value in non_negative):
             raise ValueError("ATR, maliyet ve eşik ayarları negatif olamaz")
-        if self.max_zero_volume_pct > 100:
-            raise ValueError("Sıfır hacim yüzdesi 0-100 arasında olmalıdır")
+        if self.max_zero_volume_pct > 100 or self.min_side_adherence_pct > 100:
+            raise ValueError("Yüzde eşikleri 0-100 arasında olmalıdır")
+        if self.macd_fast_period >= self.macd_slow_period:
+            raise ValueError("MACD hızlı periyodu yavaş periyottan küçük olmalıdır")
+        if not 50.0 <= self.extreme_percentile <= 100.0:
+            raise ValueError("Aşırılık yüzdeliği 50-100 arasında olmalıdır")
+        if self.bollinger_stddev == 0:
+            raise ValueError("Bollinger standart sapma çarpanı sıfır olamaz")
 
     def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
@@ -452,29 +506,421 @@ def compatibility_score(
     edge_r: float,
     stability: int,
     config: ScanConfig,
+    cross_rate_per_100: float = 0.0,
+    compatibility: str = "Güçlü uyum",
 ) -> float:
-    """Return a transparent 0-100 historical MA compatibility score."""
+    """Return a 0-100 score whose ceiling reflects evidence quality."""
     def bounded(value: float, low: float, high: float) -> float:
         if not np.isfinite(value):
             return 0.0
         return float(np.clip(value, low, high))
 
-    evidence = min(max(touches, 0) / max(config.min_touches, 1), 1.0) * 25.0
-    adherence = bounded(side_adherence_pct, 0.0, 100.0) / 100.0 * 20.0
+    evidence = min(max(touches, 0) / max(config.min_touches, 1), 1.0) * 20.0
+    adherence = bounded(side_adherence_pct, 0.0, 100.0) / 100.0 * 15.0
     win_quality = bounded(win_rate_pct, 0.0, 100.0) / 100.0 * 15.0
     median_quality = bounded(median_r, 0.0, 1.0) * 15.0
     edge_quality = bounded(edge_r, 0.0, 1.0) * 15.0
     stability_quality = bounded(float(stability), 0.0, 3.0) / 3.0 * 10.0
-    return round(
-        evidence
-        + adherence
-        + win_quality
-        + median_quality
-        + edge_quality
-        + stability_quality,
-        2,
+    noise_ratio = bounded(
+        cross_rate_per_100 / max(config.max_cross_rate_per_100, 1e-9),
+        0.0,
+        1.0,
     )
+    noise_quality = (1.0 - noise_ratio) * 10.0 if touches > 0 else 0.0
+    raw_score = (
+        evidence + adherence + win_quality + median_quality
+        + edge_quality + stability_quality + noise_quality
+    )
+    ceilings = {
+        "Yetersiz veri": 39.0,
+        "Uyumsuz": 49.0,
+        "İzleme": 59.0,
+        "Uyumlu": 79.0,
+        "Güçlü uyum": 100.0,
+    }
+    return round(min(raw_score, ceilings.get(compatibility, 49.0)), 2)
 
+
+def confirmation_indicators(
+    df: pd.DataFrame,
+    config: ScanConfig,
+) -> dict[str, float | bool | str]:
+    """Return current confirmation values without blending them into MA history."""
+    close, high, low = df["Close"], df["High"], df["Low"]
+
+    def latest(series: pd.Series) -> float:
+        value = series.iloc[-1]
+        return float(value) if np.isfinite(value) else np.nan
+
+    def percentile_rank(series: pd.Series, *, absolute: bool = False) -> float:
+        values = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan)
+        values = values.abs() if absolute else values
+        values = values.dropna().tail(config.indicator_extreme_lookback)
+        if values.empty:
+            return np.nan
+        return float(100.0 * (values <= values.iloc[-1]).mean())
+
+    delta = close.diff()
+    gains = delta.clip(lower=0.0)
+    losses = -delta.clip(upper=0.0)
+    avg_gain = gains.ewm(
+        alpha=1.0 / config.rsi_period,
+        adjust=False,
+        min_periods=config.rsi_period,
+    ).mean()
+    avg_loss = losses.ewm(
+        alpha=1.0 / config.rsi_period,
+        adjust=False,
+        min_periods=config.rsi_period,
+    ).mean()
+    relative_strength = avg_gain / avg_loss.replace(0.0, np.nan)
+    rsi = 100.0 - 100.0 / (1.0 + relative_strength)
+    rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
+    rsi = rsi.mask((avg_gain == 0) & (avg_loss > 0), 0.0)
+    rsi_smoothing = rsi.ewm(
+        span=config.rsi_smoothing_period,
+        adjust=False,
+        min_periods=config.rsi_smoothing_period,
+    ).mean()
+    rsi_value, rsi_smoothing_value = latest(rsi), latest(rsi_smoothing)
+    if np.isfinite(rsi_value) and np.isfinite(rsi_smoothing_value):
+        rsi_relation = "yumuşatma üstünde" if rsi_value >= rsi_smoothing_value else "yumuşatma altında"
+        if rsi_value >= 70:
+            rsi_status = f"Aşırı alım; {rsi_relation}"
+        elif rsi_value <= 30:
+            rsi_status = f"Aşırı satım; {rsi_relation}"
+        else:
+            rsi_status = rsi_relation.capitalize()
+    else:
+        rsi_status = "Yetersiz veri"
+
+    macd_line = close.ewm(
+        span=config.macd_fast_period, adjust=False,
+        min_periods=config.macd_fast_period,
+    ).mean() - close.ewm(
+        span=config.macd_slow_period, adjust=False,
+        min_periods=config.macd_slow_period,
+    ).mean()
+    macd_signal = macd_line.ewm(
+        span=config.macd_signal_period,
+        adjust=False,
+        min_periods=config.macd_signal_period,
+    ).mean()
+    macd_histogram = macd_line - macd_signal
+    macd_value, macd_signal_value = latest(macd_line), latest(macd_signal)
+    macd_gap = latest(macd_histogram)
+    macd_gap_percentile = percentile_rank(macd_histogram, absolute=True)
+    macd_stretched = bool(np.isfinite(macd_gap_percentile) and macd_gap_percentile >= config.extreme_percentile)
+    atr_value = latest(df["ATR"])
+    macd_gap_atr = macd_gap / atr_value if np.isfinite(atr_value) and atr_value > 0 else np.nan
+    current_macd_above = bool(np.isfinite(macd_value) and np.isfinite(macd_signal_value) and macd_value >= macd_signal_value)
+    previous_macd_above = bool(
+        len(macd_line) > 1
+        and np.isfinite(macd_line.iloc[-2])
+        and np.isfinite(macd_signal.iloc[-2])
+        and macd_line.iloc[-2] >= macd_signal.iloc[-2]
+    )
+    if current_macd_above and not previous_macd_above:
+        macd_status = "Yukarı kesişim"
+    elif not current_macd_above and previous_macd_above:
+        macd_status = "Aşağı kesişim"
+    elif current_macd_above:
+        macd_status = "MACD Signal üstünde"
+    elif np.isfinite(macd_value) and np.isfinite(macd_signal_value):
+        macd_status = "MACD Signal altında"
+    else:
+        macd_status = "Yetersiz veri"
+    if macd_stretched and np.isfinite(macd_gap):
+        stretch_direction = "Pozitif" if macd_gap >= 0 else "Negatif"
+        macd_status = f"{macd_status}; {stretch_direction} açılma yüksek"
+
+    highest = high.rolling(config.smi_period, min_periods=config.smi_period).max()
+    lowest = low.rolling(config.smi_period, min_periods=config.smi_period).min()
+    midpoint_distance = close - (highest + lowest) / 2.0
+    half_range = (highest - lowest) / 2.0
+    smooth_distance = midpoint_distance.ewm(
+        span=config.smi_smoothing_period, adjust=False,
+        min_periods=config.smi_smoothing_period,
+    ).mean().ewm(
+        span=config.smi_smoothing_period, adjust=False,
+        min_periods=config.smi_smoothing_period,
+    ).mean()
+    smooth_range = half_range.ewm(
+        span=config.smi_smoothing_period, adjust=False,
+        min_periods=config.smi_smoothing_period,
+    ).mean().ewm(
+        span=config.smi_smoothing_period, adjust=False,
+        min_periods=config.smi_smoothing_period,
+    ).mean()
+    smi = 100.0 * smooth_distance / smooth_range.replace(0.0, np.nan)
+    smi_signal = smi.ewm(
+        span=config.smi_signal_period, adjust=False,
+        min_periods=config.smi_signal_period,
+    ).mean()
+    smi_value, smi_signal_value = latest(smi), latest(smi_signal)
+    current_smi_above = bool(
+        np.isfinite(smi_value) and np.isfinite(smi_signal_value)
+        and smi_value >= smi_signal_value
+    )
+    previous_smi_above = bool(
+        len(smi) > 1 and np.isfinite(smi.iloc[-2])
+        and np.isfinite(smi_signal.iloc[-2]) and smi.iloc[-2] >= smi_signal.iloc[-2]
+    )
+    if current_smi_above and not previous_smi_above:
+        smi_relation = "Yukarı kesişim"
+    elif not current_smi_above and previous_smi_above:
+        smi_relation = "Aşağı kesişim"
+    elif current_smi_above:
+        smi_relation = "SMI Signal üstünde"
+    elif np.isfinite(smi_value) and np.isfinite(smi_signal_value):
+        smi_relation = "SMI Signal altında"
+    else:
+        smi_relation = "Yetersiz veri"
+    if np.isfinite(smi_value) and smi_value >= 40:
+        smi_status = f"{smi_relation}; aşırı alım bölgesi"
+    elif np.isfinite(smi_value) and smi_value <= -40:
+        smi_status = f"{smi_relation}; aşırı satım bölgesi"
+    else:
+        smi_status = smi_relation
+
+    conversion = (
+        high.rolling(config.ichimoku_conversion_period).max()
+        + low.rolling(config.ichimoku_conversion_period).min()
+    ) / 2.0
+    base = (
+        high.rolling(config.ichimoku_base_period).max()
+        + low.rolling(config.ichimoku_base_period).min()
+    ) / 2.0
+    span_a = ((conversion + base) / 2.0).shift(config.ichimoku_base_period)
+    span_b = (
+        (
+            high.rolling(config.ichimoku_span_b_period).max()
+            + low.rolling(config.ichimoku_span_b_period).min()
+        ) / 2.0
+    ).shift(config.ichimoku_base_period)
+    conversion_value, base_value = latest(conversion), latest(base)
+    span_a_value, span_b_value = latest(span_a), latest(span_b)
+    cloud_top = max(span_a_value, span_b_value) if np.isfinite(span_a_value) and np.isfinite(span_b_value) else np.nan
+    cloud_bottom = min(span_a_value, span_b_value) if np.isfinite(span_a_value) and np.isfinite(span_b_value) else np.nan
+    current_close = latest(close)
+    if np.isfinite(cloud_top) and current_close > cloud_top:
+        cloud_position = "Bulut üstünde"
+    elif np.isfinite(cloud_bottom) and current_close < cloud_bottom:
+        cloud_position = "Bulut altında"
+    elif np.isfinite(cloud_top):
+        cloud_position = "Bulut içinde"
+    else:
+        cloud_position = "Yetersiz veri"
+    line_relation = (
+        "Tenkan Kijun üstünde"
+        if np.isfinite(conversion_value) and np.isfinite(base_value) and conversion_value >= base_value
+        else "Tenkan Kijun altında"
+        if np.isfinite(conversion_value) and np.isfinite(base_value)
+        else "Çizgi verisi yok"
+    )
+    ichimoku_status = f"{cloud_position}; {line_relation}"
+
+    bollinger_mid = close.rolling(
+        config.bollinger_period, min_periods=config.bollinger_period
+    ).mean()
+    bollinger_std = close.rolling(
+        config.bollinger_period, min_periods=config.bollinger_period
+    ).std(ddof=0)
+    bollinger_upper = bollinger_mid + config.bollinger_stddev * bollinger_std
+    bollinger_lower = bollinger_mid - config.bollinger_stddev * bollinger_std
+    bb_mid, bb_upper, bb_lower = latest(bollinger_mid), latest(bollinger_upper), latest(bollinger_lower)
+    bollinger_width_series = (bollinger_upper - bollinger_lower) / bollinger_mid.abs() * 100.0
+    bb_width_percentile = percentile_rank(bollinger_width_series)
+    bb_width_pct = (
+        (bb_upper - bb_lower) / abs(bb_mid) * 100.0
+        if np.isfinite(bb_mid) and bb_mid != 0
+        else np.nan
+    )
+    bb_percent_b = (
+        (current_close - bb_lower) / (bb_upper - bb_lower) * 100.0
+        if np.isfinite(bb_upper) and np.isfinite(bb_lower) and bb_upper != bb_lower
+        else np.nan
+    )
+    if np.isfinite(bb_upper) and current_close > bb_upper:
+        bollinger_status = "Üst bant dışında"
+    elif np.isfinite(bb_lower) and current_close < bb_lower:
+        bollinger_status = "Alt bant dışında"
+    elif np.isfinite(bb_mid) and current_close >= bb_mid:
+        bollinger_status = "Orta-üst bölgede"
+    elif np.isfinite(bb_mid):
+        bollinger_status = "Alt-orta bölgede"
+    else:
+        bollinger_status = "Yetersiz veri"
+    if np.isfinite(bb_width_percentile):
+        if bb_width_percentile >= config.extreme_percentile:
+            bollinger_status = f"{bollinger_status}; bant genişliği yüksek"
+        elif bb_width_percentile <= 100.0 - config.extreme_percentile:
+            bollinger_status = f"{bollinger_status}; sıkışma"
+
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(
+        np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
+        index=df.index,
+    )
+    minus_dm = pd.Series(
+        np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
+        index=df.index,
+    )
+    smoothed_tr = true_range(df).ewm(
+        alpha=1.0 / config.adx_period,
+        adjust=False,
+        min_periods=config.adx_period,
+    ).mean()
+    plus_di = 100.0 * plus_dm.ewm(
+        alpha=1.0 / config.adx_period,
+        adjust=False,
+        min_periods=config.adx_period,
+    ).mean() / smoothed_tr
+    minus_di = 100.0 * minus_dm.ewm(
+        alpha=1.0 / config.adx_period,
+        adjust=False,
+        min_periods=config.adx_period,
+    ).mean() / smoothed_tr
+    denominator = (plus_di + minus_di).replace(0.0, np.nan)
+    dx = 100.0 * (plus_di - minus_di).abs() / denominator
+    adx = dx.ewm(
+        alpha=1.0 / config.adx_period,
+        adjust=False,
+        min_periods=config.adx_period,
+    ).mean()
+
+    volume = pd.to_numeric(df["Volume"], errors="coerce")
+    volume_baseline = volume.rolling(
+        config.volume_lookback,
+        min_periods=config.volume_lookback,
+    ).median().shift(1)
+    baseline = latest(volume_baseline)
+    current_volume = latest(volume)
+    volume_available = bool(np.isfinite(baseline) and baseline > 0)
+    relative_volume = current_volume / baseline if volume_available else np.nan
+    return {
+        "rsi": rsi_value,
+        "rsi_smoothing": rsi_smoothing_value,
+        "rsi_status": rsi_status,
+        "macd": macd_value,
+        "macd_signal": macd_signal_value,
+        "macd_histogram": macd_gap,
+        "macd_gap_atr": float(macd_gap_atr),
+        "macd_gap_percentile": float(macd_gap_percentile),
+        "macd_stretched": macd_stretched,
+        "macd_status": macd_status,
+        "smi": smi_value,
+        "smi_signal": smi_signal_value,
+        "smi_status": smi_status,
+        "ichimoku_conversion": conversion_value,
+        "ichimoku_base": base_value,
+        "ichimoku_span_a": span_a_value,
+        "ichimoku_span_b": span_b_value,
+        "ichimoku_status": ichimoku_status,
+        "bollinger_mid": bb_mid,
+        "bollinger_upper": bb_upper,
+        "bollinger_lower": bb_lower,
+        "bollinger_percent_b": float(bb_percent_b),
+        "bollinger_width_pct": float(bb_width_pct),
+        "bollinger_width_percentile": float(bb_width_percentile),
+        "bollinger_status": bollinger_status,
+        "adx": latest(adx),
+        "relative_volume": float(relative_volume),
+        "volume_available": volume_available,
+    }
+
+
+def decision_state(
+    *,
+    touches: int,
+    median_r: float,
+    edge_r: float,
+    stability: int,
+    side_adherence_pct: float,
+    cross_rate_per_100: float,
+    side: int,
+    trend_state_value: str,
+    active_side: bool,
+    distance_atr: float,
+    price_trigger: bool,
+    relative_volume: float,
+    volume_available: bool,
+    adx: float,
+    filter_reasons: Sequence[str],
+    config: ScanConfig,
+) -> tuple[str, str, bool, bool, bool]:
+    volume_confirmed = bool(
+        not config.use_volume_confirmation
+        or not volume_available
+        or (
+            np.isfinite(relative_volume)
+            and relative_volume >= config.min_relative_volume
+        )
+    )
+    adx_confirmed = bool(
+        not config.use_adx_confirmation
+        or (np.isfinite(adx) and adx >= config.min_adx)
+    )
+    if filter_reasons:
+        return "Filtre Dışı", ", ".join(filter_reasons), False, volume_confirmed, adx_confirmed
+    if touches < config.min_touches:
+        return (
+            "Yetersiz Veri",
+            f"Temas {touches}/{config.min_touches}",
+            False,
+            volume_confirmed,
+            adx_confirmed,
+        )
+
+    quality_reasons: list[str] = []
+    if not np.isfinite(median_r) or median_r <= 0:
+        quality_reasons.append("Medyan R pozitif değil")
+    if not np.isfinite(edge_r) or edge_r < config.min_edge_r:
+        quality_reasons.append("Edge eşik altında")
+    if stability < config.min_positive_periods:
+        quality_reasons.append(
+            f"Pozitif dönem {stability}/{config.min_positive_periods}"
+        )
+    if (
+        not np.isfinite(side_adherence_pct)
+        or side_adherence_pct < config.min_side_adherence_pct
+    ):
+        quality_reasons.append("Taraf koruma düşük")
+    if (
+        np.isfinite(cross_rate_per_100)
+        and cross_rate_per_100 > config.max_cross_rate_per_100
+    ):
+        quality_reasons.append("Gürültü yüksek")
+    trend_aligned = (
+        (side == 1 and trend_state_value == "Yükselen")
+        or (side == -1 and trend_state_value == "Alçalan")
+    )
+    if not trend_aligned:
+        quality_reasons.append("Trend yönü uyumsuz")
+    quality_pass = not quality_reasons
+    if not active_side:
+        return "İşlem Yok", "Güncel rol aktif değil", quality_pass, volume_confirmed, adx_confirmed
+    if not quality_pass:
+        return "Uyumsuz", "; ".join(quality_reasons), False, volume_confirmed, adx_confirmed
+    if not np.isfinite(distance_atr):
+        return "İşlem Yok", "ATR uzaklığı hesaplanamadı", True, volume_confirmed, adx_confirmed
+
+    absolute_distance = abs(distance_atr)
+    if absolute_distance > config.watch_distance_atr:
+        return "Uzak", f"{absolute_distance:.2f} ATR uzakta", True, volume_confirmed, adx_confirmed
+    if absolute_distance > config.touch_zone_atr:
+        return "Yaklaşıyor", f"{absolute_distance:.2f} ATR uzakta", True, volume_confirmed, adx_confirmed
+    if not price_trigger:
+        return "Tetik Bekliyor", "Fiyat teyidi yok", True, volume_confirmed, adx_confirmed
+    confirmations = []
+    if not volume_confirmed:
+        confirmations.append("RVOL düşük")
+    if not adx_confirmed:
+        confirmations.append("ADX düşük")
+    if confirmations:
+        return "Tetik Bekliyor", "; ".join(confirmations), True, volume_confirmed, adx_confirmed
+    return "Güçlü Aday", "Kalite, temas ve teyit uygun", True, volume_confirmed, adx_confirmed
 
 def market_quality_metrics(
     df: pd.DataFrame,
@@ -560,6 +1006,10 @@ def scan_frame(
         latest_time = latest_time.tz_convert("Europe/Istanbul")
     price_time = latest_time.isoformat()
     quality_metrics = market_quality_metrics(df, timeframe, config)
+    indicator_metrics = confirmation_indicators(df, config)
+    latest_open = float(df["Open"].iloc[-1])
+    latest_high = float(df["High"].iloc[-1])
+    latest_low = float(df["Low"].iloc[-1])
     baselines = {side: _random_baseline(df, side, config) for side in (1, -1)}
     rows: list[dict[str, object]] = []
     for ma_type in config.ma_types:
@@ -580,6 +1030,7 @@ def scan_frame(
             below_ma_pct = float(100.0 * (relative < 0).mean()) if not relative.empty else np.nan
             signs = np.sign(relative).replace(0, np.nan).ffill()
             cross_count = int((signs.diff().abs() == 2).sum())
+            cross_rate_per_100 = cross_count / max(len(relative) - 1, 1) * 100.0
             for side in (1, -1):
                 trades = [
                     trade for touch in detect_touches(df, ma, side, config)
@@ -600,14 +1051,17 @@ def scan_frame(
                 quality = compatibility_class(
                     count, median_r, edge_r, win_rate, baseline_win, stability, config
                 )
+                side_adherence = above_ma_pct if side == 1 else below_ma_pct
                 score = compatibility_score(
                     count,
-                    above_ma_pct if side == 1 else below_ma_pct,
+                    side_adherence,
                     win_rate,
                     median_r,
                     edge_r,
                     stability,
                     config,
+                    cross_rate_per_100,
+                    quality,
                 )
                 filter_reasons = quality_filter_reasons(
                     asset_class=str(metadata.get("asset_class", "")),
@@ -620,6 +1074,38 @@ def scan_frame(
                 active_side = (
                     (side == 1 and current_price >= current_ma)
                     or (side == -1 and current_price <= current_ma)
+                )
+                price_trigger = bool(
+                    (
+                        side == 1
+                        and latest_low <= current_ma + config.touch_zone_atr * current_atr
+                        and current_price >= current_ma
+                        and current_price > latest_open
+                    )
+                    or (
+                        side == -1
+                        and latest_high >= current_ma - config.touch_zone_atr * current_atr
+                        and current_price <= current_ma
+                        and current_price < latest_open
+                    )
+                )
+                decision, decision_reason, quality_pass, volume_confirmed, adx_confirmed = decision_state(
+                    touches=count,
+                    median_r=median_r,
+                    edge_r=edge_r,
+                    stability=stability,
+                    side_adherence_pct=side_adherence,
+                    cross_rate_per_100=cross_rate_per_100,
+                    side=side,
+                    trend_state_value=state,
+                    active_side=active_side,
+                    distance_atr=distance_atr,
+                    price_trigger=price_trigger,
+                    relative_volume=float(indicator_metrics["relative_volume"]),
+                    volume_available=bool(indicator_metrics["volume_available"]),
+                    adx=float(indicator_metrics["adx"]),
+                    filter_reasons=filter_reasons,
+                    config=config,
                 )
                 rows.append({
                     **metadata,
@@ -640,6 +1126,7 @@ def scan_frame(
                     "side_adherence_pct": above_ma_pct if side == 1 else below_ma_pct,
                     "wrong_side_pct": below_ma_pct if side == 1 else above_ma_pct,
                     "cross_count": cross_count,
+                    "cross_rate_per_100": cross_rate_per_100,
                     "active_side": bool(active_side),
                     "trend_state": state,
                     "price_position": price_position,
@@ -658,6 +1145,13 @@ def scan_frame(
                     "positive_periods": stability,
                     "compatibility": quality,
                     "compatibility_score": score,
+                    **indicator_metrics,
+                    "price_trigger": price_trigger,
+                    "volume_confirmed": volume_confirmed,
+                    "adx_confirmed": adx_confirmed,
+                    "quality_pass": quality_pass,
+                    "decision": decision,
+                    "decision_reason": decision_reason,
                     **quality_metrics,
                     "filter_pass": not filter_reasons,
                     "filter_status": "Uygun" if not filter_reasons else "Filtre disi",
@@ -669,6 +1163,11 @@ def scan_frame(
 _QUALITY_RANK = {
     "Güçlü uyum": 4, "Uyumlu": 3, "İzleme": 2,
     "Uyumsuz": 1, "Yetersiz veri": 0,
+}
+_DECISION_RANK = {
+    "Güçlü Aday": 7, "Tetik Bekliyor": 6, "Yaklaşıyor": 5,
+    "Uzak": 4, "İşlem Yok": 3, "Uyumsuz": 2,
+    "Yetersiz Veri": 1, "Filtre Dışı": 0,
 }
 
 
@@ -723,12 +1222,20 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
         eligible = active[active["filter_pass"].fillna(False)].copy()
         if not eligible.empty:
             active = eligible
+        if "quality_pass" in active:
+            quality_candidates = active[active["quality_pass"].fillna(False)]
+            if not quality_candidates.empty:
+                active = quality_candidates.copy()
+        active["_decision_rank"] = active.get(
+            "decision", pd.Series("İşlem Yok", index=active.index)
+        ).map(_DECISION_RANK).fillna(0)
         active["_quality_rank"] = active["compatibility"].map(_QUALITY_RANK).fillna(0)
         if "compatibility_score" not in active:
             active["compatibility_score"] = active["_quality_rank"] * 20.0
         active["_abs_distance"] = pd.to_numeric(active["distance_atr"], errors="coerce").abs()
         active = active.sort_values(
             [
+                "_decision_rank",
                 "compatibility_score",
                 "touches",
                 "_quality_rank",
@@ -737,7 +1244,7 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
                 "median_net_r",
                 "_abs_distance",
             ],
-            ascending=[False, False, False, False, False, False, True],
+            ascending=[False, False, False, False, False, False, False, True],
             na_position="last",
         )
         best = active.iloc[0]
@@ -756,6 +1263,32 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
             "best_touches": int(best["touches"]),
             "best_side_adherence_pct": best.get("side_adherence_pct", np.nan),
             "best_compatibility_score": best.get("compatibility_score", np.nan),
+            "best_decision": best.get("decision", "İşlem Yok"),
+            "best_decision_reason": best.get("decision_reason", ""),
+            "best_quality_pass": best.get("quality_pass", False),
+            "best_cross_rate_per_100": best.get("cross_rate_per_100", np.nan),
+            "best_relative_volume": best.get("relative_volume", np.nan),
+            "best_adx": best.get("adx", np.nan),
+            "best_rsi": best.get("rsi", np.nan),
+            "best_rsi_smoothing": best.get("rsi_smoothing", np.nan),
+            "best_rsi_status": best.get("rsi_status", ""),
+            "best_macd": best.get("macd", np.nan),
+            "best_macd_signal": best.get("macd_signal", np.nan),
+            "best_macd_gap_atr": best.get("macd_gap_atr", np.nan),
+            "best_macd_gap_percentile": best.get("macd_gap_percentile", np.nan),
+            "best_macd_stretched": best.get("macd_stretched", False),
+            "best_macd_status": best.get("macd_status", ""),
+            "best_smi": best.get("smi", np.nan),
+            "best_smi_signal": best.get("smi_signal", np.nan),
+            "best_smi_status": best.get("smi_status", ""),
+            "best_ichimoku_status": best.get("ichimoku_status", ""),
+            "best_bollinger_percent_b": best.get("bollinger_percent_b", np.nan),
+            "best_bollinger_width_pct": best.get("bollinger_width_pct", np.nan),
+            "best_bollinger_width_percentile": best.get("bollinger_width_percentile", np.nan),
+            "best_bollinger_status": best.get("bollinger_status", ""),
+            "best_price_trigger": best.get("price_trigger", False),
+            "best_volume_confirmed": best.get("volume_confirmed", False),
+            "best_adx_confirmed": best.get("adx_confirmed", False),
             "best_win_rate_pct": best["win_rate_pct"],
             "best_median_net_r": best["median_net_r"],
             "best_edge_r": best["edge_r"],
@@ -776,16 +1309,16 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
             ),
         })
         distance = abs(float(best["distance_atr"])) if np.isfinite(best["distance_atr"]) else np.inf
-        compatible = best["compatibility"] in {"Güçlü uyum", "Uyumlu"}
-        if compatible and distance <= near_distance_atr:
-            record["setup"] = "Desteğe yakın" if best["side"] == "Destek" else "Dirence yakın"
-        elif compatible:
-            record["setup"] = "Uyumlu MA uzakta"
-        elif best["compatibility"] == "İzleme":
-            record["setup"] = "İzleme"
+        decision_label = str(best.get("decision", "İşlem Yok"))
+        if decision_label == "Güçlü Aday":
+            record["setup"] = (
+                "Güçlü destek adayı" if best["side"] == "Destek"
+                else "Güçlü direnç adayı"
+            )
         else:
-            record["setup"] = "Kurulum yok"
+            record["setup"] = decision_label
         record["_sort_filter"] = int(bool(best.get("filter_pass", True)))
+        record["_sort_decision"] = int(_DECISION_RANK.get(str(best.get("decision", "")), 0))
         record["_sort_score"] = float(best.get("compatibility_score", 0.0))
         record["_sort_quality"] = int(_QUALITY_RANK.get(str(best["compatibility"]), 0))
         record["_sort_stability"] = int(best["positive_periods"])
@@ -797,6 +1330,7 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
         .sort_values(
             [
                 "_sort_filter",
+                "_sort_decision",
                 "_sort_score",
                 "_sort_quality",
                 "_sort_stability",
@@ -804,11 +1338,12 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
                 "_sort_distance",
                 "symbol",
             ],
-            ascending=[False, False, False, False, False, True, True],
+            ascending=[False, False, False, False, False, False, True, True],
         )
         .drop(
             columns=[
                 "_sort_filter",
+                "_sort_decision",
                 "_sort_score",
                 "_sort_quality",
                 "_sort_stability",

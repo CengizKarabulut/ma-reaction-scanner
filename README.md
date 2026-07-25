@@ -64,13 +64,52 @@ Ana tabloda her hisse tek satirdir. En iyi uygun kombinasyon su alanlarla acikla
 - `best_edge_r`: MA temaslarinin kosulsuz baz girislere gore R avantaji.
 - `best_median_net_r`: Maliyet sonrasi medyan islem sonucu.
 - `best_side_adherence_pct`: Destek icin MA ustunde, direnc icin MA altinda gecirilen sure.
-- `best_compatibility_score`: 0-100 Uyum Skoru. Temas %25, taraf koruma %20,
-  kazanma %15, Medyan R %15, Edge %15 ve uc donem istikrari %10 agirliklidir.
-  Negatif veya hesaplanamayan Medyan R/Edge puan kazandirmiyor.
+- `best_compatibility_score`: 0-100 tarihsel Uyum Skoru. Temas %20, taraf koruma %15,
+  kazanma %15, Medyan R %15, Edge %15, üç dönem istikrarı %10 ve düşük normalize
+  kesişim/gürültü %10 ağırlığındadır. Negatif veya hesaplanamayan Medyan R/Edge puan
+  kazandırmaz. Kanıt sınıfı puana tavan koyar: `Yetersiz veri` en fazla 39,
+  `Uyumsuz` 49, `İzleme` 59, `Uyumlu` 79 ve `Güçlü uyum` 100.
 
 Ornek: fiyat `52.85`, SMA233 `53.42` ise fark `0.57`, yuzde uzaklik
 yaklasik `%1.08` olur. ATR uzakligi ayri bir sayidir ve `UZK%` gibi okunmamalidir.
 
+## Karar ve teyit katmanı
+
+`Uyum` geçmişte ne olduğunu, `Karar` ise bugünkü durumun işlem modelindeki yerini
+anlatır. Sıralama şu sırayla yapılır: geçmiş kalite, MA'ya yakınlık, fiyat tetiği ve
+son olarak hacim/trend gücü teyidi.
+
+- `Güçlü Aday`: geçmiş kalite, aktif destek/direnç rolü, MA temas mumu, RVOL ve ADX
+  eşikleri birlikte geçmiştir.
+- `Tetik Bekliyor`: fiyat MA bölgesindedir fakat dönüş mumu, RVOL veya ADX teyitlerinden
+  en az biri eksiktir.
+- `Yaklaşıyor`: kaliteli MA izleme mesafesindedir, henüz temas bölgesinde değildir.
+- `Uzak`: kaliteli MA vardır fakat güncel fiyat seçilen izleme ATR mesafesinin dışındadır.
+- `İşlem Yok`: MA'nın geçmiş kalitesi geçse bile destek/direnç rolü bugün aktif değildir.
+- `Uyumsuz`: Medyan R, Edge, taraf koruma, dönem istikrarı, trend yönü veya normalize
+  kesişim şartlarından biri geçmemiştir.
+- `Yetersiz Veri` ve `Filtre Dışı`: karar üretmek için kanıt yoktur veya piyasa kalitesi
+  filtresi geçilmemiştir.
+
+Teyit panelindeki alanlar:
+
+- `RVOL`: son hacim / önceki seçili barların medyan hacmi. Varsayılan teyit `>= 1.20`.
+- `ADX`: trendin yönünü değil gücünü ölçer. Varsayılan güç eşiği `20`.
+- `RSI` ve `RSI Yumuşatma`: ham RSI ile seçilen EMA yumuşatmasının ilişkisini ve
+  aşırı alım/aşırı satım bölgesini gösterir.
+- `MACD`, `MACD Signal`, `MACD Açılma / ATR`: çizgi ilişkisi, kesişim ve farklı
+  fiyat seviyelerinde karşılaştırılabilir açılmayı gösterir. `MACD Açılma Yüzdeliği`,
+  mutlak açılmanın son seçili penceredeki yüzdelik sırasıdır. Örneğin 94, mevcut farkın
+  pencerenin yaklaşık %94'ünden büyük olduğunu söyler; düzeltme garantisi değildir.
+- `SMI` ve `SMI Signal`: kesişim ile +40/-40 aşırılık bölgelerini birlikte gösterir.
+- `Ichimoku Durumu`: fiyatın bulut üstü/içi/altı konumu ve Tenkan-Kijun ilişkisi.
+- `Bollinger %B`: fiyatın bant içindeki göreli yeri; `Bollinger Genişlik Yüzdeliği`
+  ise güncel bant genişliğinin yakın tarihe göre sıkışık mı geniş mi olduğunu gösterir.
+
+RSI, MACD, SMI, Ichimoku ve Bollinger ham değerleri görünür bağlamdır; aynı bilgiyi
+tekrar tekrar sayıp sahte güven üretmemeleri için varsayılan olarak tarihsel MA Uyum
+Skoruna ek puan vermezler. Giriş teyidinde yalnızca fiyat tetiği, RVOL ve ADX kullanılır.
+Tüm periyotlar ve eşikler CLI'dan; GitHub ekranında üç ayar paketinden değiştirilebilir.
 ## Piyasa kalitesi filtreleri
 
 Filtreler hisseleri rapordan silmez. Tum hisseler gorunur; uygun kombinasyonlar ustte

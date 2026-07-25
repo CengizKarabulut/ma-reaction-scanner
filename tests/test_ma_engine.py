@@ -10,6 +10,8 @@ from scanner.ma_engine import (
     aggregate_trend,
     build_market_summary,
     compatibility_score,
+    confirmation_indicators,
+    decision_state,
     compute_ma,
     detect_touches,
     prepare_frame,
@@ -275,6 +277,51 @@ class MovingAverageEngineTests(unittest.TestCase):
             compatibility_score(0, float("nan"), float("nan"), -1.0, -1.0, 0, config),
             0.0,
         )
+    def test_compatibility_score_caps_insufficient_evidence(self):
+        config = ScanConfig(min_touches=12)
+        score = compatibility_score(
+            100, 100.0, 100.0, 1.0, 1.0, 3, config, 0.0, "Yetersiz veri"
+        )
+        self.assertEqual(score, 39.0)
+
+    def test_confirmation_indicators_report_values_and_states(self):
+        raw = sample_frame(250)
+        raw.loc[raw.index[-1], "Volume"] = 10_000.0
+        frame = prepare_frame(raw)
+        metrics = confirmation_indicators(frame, ScanConfig())
+
+        for key in (
+            "rsi", "rsi_smoothing", "macd", "macd_signal", "macd_gap_atr",
+            "smi", "smi_signal", "ichimoku_conversion", "ichimoku_base",
+            "bollinger_percent_b", "bollinger_width_pct", "adx", "relative_volume",
+        ):
+            self.assertTrue(np.isfinite(metrics[key]), key)
+        self.assertGreater(metrics["relative_volume"], 1.2)
+        self.assertNotEqual(metrics["macd_status"], "Yetersiz veri")
+        self.assertNotEqual(metrics["ichimoku_status"], "Yetersiz veri")
+
+    def test_decision_requires_current_confirmations_after_history_passes(self):
+        config = ScanConfig(min_touches=12, min_adx=20.0, min_relative_volume=1.2)
+        decision = decision_state(
+            touches=20,
+            median_r=0.5,
+            edge_r=0.3,
+            stability=3,
+            side_adherence_pct=75.0,
+            cross_rate_per_100=8.0,
+            side=1,
+            trend_state_value="Yükselen",
+            active_side=True,
+            distance_atr=0.1,
+            price_trigger=True,
+            relative_volume=0.8,
+            volume_available=True,
+            adx=28.0,
+            filter_reasons=[],
+            config=config,
+        )
+        self.assertEqual(decision[0], "Tetik Bekliyor")
+        self.assertIn("RVOL", decision[1])
     def test_prepare_frame_allows_historic_negative_commodity_settlement(self):
         frame = sample_frame(100)
         frame.loc[frame.index[20], ["Open", "High", "Low", "Close"]] = [
