@@ -114,7 +114,11 @@ class Trade:
     exit_reason: str
 
 
-def normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
+def normalize_ohlcv(
+    frame: pd.DataFrame,
+    *,
+    allow_non_positive: bool = False,
+) -> pd.DataFrame:
     if frame is None or frame.empty:
         raise ValueError("OHLCV verisi boş")
     df = frame.copy()
@@ -140,7 +144,7 @@ def normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     )
     if out.empty:
         raise ValueError("Temizleme sonrası OHLCV verisi boş")
-    if (out[["Open", "High", "Low", "Close"]] <= 0).any().any():
+    if not allow_non_positive and (out[["Open", "High", "Low", "Close"]] <= 0).any().any():
         raise ValueError("OHLC fiyatları pozitif olmalıdır")
     tolerance = 1e-12
     if (
@@ -166,8 +170,13 @@ def true_range(frame: pd.DataFrame) -> pd.Series:
     ).max(axis=1)
 
 
-def prepare_frame(frame: pd.DataFrame, atr_period: int = 14) -> pd.DataFrame:
-    df = normalize_ohlcv(frame)
+def prepare_frame(
+    frame: pd.DataFrame,
+    atr_period: int = 14,
+    *,
+    allow_non_positive: bool = False,
+) -> pd.DataFrame:
+    df = normalize_ohlcv(frame, allow_non_positive=allow_non_positive)
     df["ATR"] = true_range(df).ewm(
         alpha=1.0 / atr_period,
         adjust=False,
@@ -534,7 +543,12 @@ def scan_frame(
     config: ScanConfig,
     metadata: dict[str, object] | None = None,
 ) -> pd.DataFrame:
-    df = prepare_frame(frame, config.atr_period)
+    metadata = metadata or {}
+    df = prepare_frame(
+        frame,
+        config.atr_period,
+        allow_non_positive=metadata.get("asset_class") == "commodity",
+    )
     current_price, current_atr = float(df["Close"].iloc[-1]), float(df["ATR"].iloc[-1])
     latest_time = pd.Timestamp(df.index[-1])
     if latest_time.tzinfo is None:
@@ -545,7 +559,6 @@ def scan_frame(
     quality_metrics = market_quality_metrics(df, timeframe, config)
     baselines = {side: _random_baseline(df, side, config) for side in (1, -1)}
     rows: list[dict[str, object]] = []
-    metadata = metadata or {}
     for ma_type in config.ma_types:
         for period in config.periods:
             if period + config.trend_slope_bars >= len(df):
