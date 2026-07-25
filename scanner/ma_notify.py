@@ -16,10 +16,23 @@ def _number(value: object, digits: int = 2) -> str:
     return "-" if pd.isna(number) else f"{float(number):.{digits}f}"
 
 
+_TELEGRAM_TEXT_BUDGET = 4_000
+_FOOTER = [
+    "Uzk% = (MA - fiyat) / fiyat. ATR = volatiliteye gore uzaklik.",
+    "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
+    "Tam rapor CSV eki ve GitHub artifact icindedir.",
+]
+
+
+def _fits(lines: list[str], additions: list[str]) -> bool:
+    return len("\n".join([*lines, *additions, *_FOOTER])) <= _TELEGRAM_TEXT_BUDGET
+
+
 def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     selected = frame.head(max(1, top))
+    safe_label = str(label)[:200]
     lines = [
-        f"<b>{label}</b>",
+        f"<b>{safe_label}</b>",
         f"Toplam: <b>{frame['symbol'].nunique()}</b> varlik - her varlik tek satir",
         "",
         "<pre>",
@@ -27,9 +40,15 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
         f"{'Uzk%':>6} {'ATR':>6} {'Durum':<5}",
         "-" * 71,
     ]
-    for _, row in selected.iterrows():
+    has_exclusions = (
+        "filter_status" in selected.columns
+        and bool((selected["filter_status"] != "Uygun").any())
+    )
+    reason_reserve = ["Filtre disi nedenleri tam CSV'de.", ""] if has_exclusions else []
+    displayed_indices: list[object] = []
+    for index, row in selected.iterrows():
         eligible = str(row.get("filter_status", "Uygun")) == "Uygun"
-        lines.append(
+        table_row = (
             f"{str(row['symbol']):<7} {str(row.get('best_timeframe','-')):<4} "
             f"{str(row.get('best_ma','-')):<8} "
             f"{_number(row.get('current_price')):>8} "
@@ -38,24 +57,39 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
             f"{_number(row.get('best_distance_atr')):>6} "
             f"{'Uygun' if eligible else 'Disi':<5}"
         )
+        if not _fits(lines, [table_row, "</pre>", "", *reason_reserve]):
+            break
+        lines.append(table_row)
+        displayed_indices.append(index)
     lines.extend(["</pre>", ""])
-    if "filter_status" in selected.columns:
-        excluded = selected[selected["filter_status"] != "Uygun"]
+    if len(displayed_indices) < len(selected):
+        note = "Diger tablo satirlari tam CSV'de."
+        if _fits(lines, [note, ""]):
+            lines.extend([note, ""])
+
+    displayed = selected.loc[displayed_indices]
+    if "filter_status" in displayed.columns:
+        excluded = displayed[displayed["filter_status"] != "Uygun"]
     else:
-        excluded = selected.iloc[0:0]
-    if not excluded.empty:
+        excluded = displayed.iloc[0:0]
+    if not excluded.empty and _fits(lines, ["<b>Filtre disi nedenleri</b>"]):
         lines.append("<b>Filtre disi nedenleri</b>")
+        omitted = False
         for _, row in excluded.iterrows():
             reasons = str(row.get("filter_reasons", "")).strip() or "Esik disi"
-            lines.append(f"{row['symbol']}: {reasons}")
+            detail = f"{row['symbol']}: {reasons}"
+            if not _fits(lines, [detail, "Diger filtre nedenleri tam CSV'de.", ""]):
+                omitted = True
+                break
+            lines.append(detail)
+        if omitted:
+            note = "Diger filtre nedenleri tam CSV'de."
+            if _fits(lines, [note, ""]):
+                lines.append(note)
         lines.append("")
-    lines.extend(
-        [
-            "Uzk% = (MA - fiyat) / fiyat. ATR = volatiliteye gore uzaklik.",
-            "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
-            "Tam rapor CSV eki ve GitHub artifact icindedir.",
-        ]
-    )
+    elif has_exclusions and _fits(lines, reason_reserve):
+        lines.extend(reason_reserve)
+    lines.extend(_FOOTER)
     return "\n".join(lines)
 
 
