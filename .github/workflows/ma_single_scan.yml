@@ -63,6 +63,30 @@ on:
         description: Güncel yakınlık ATR
         required: true
         default: "1.0"
+      quality_lookback:
+        description: Likidite ve gap filtresi bakis araligi
+        required: true
+        default: "60"
+      min_price:
+        description: Minimum fiyat (TRY)
+        required: true
+        default: "1"
+      min_daily_turnover_try:
+        description: Minimum medyan gunluk islem degeri (TRY)
+        required: true
+        default: "1000000"
+      max_zero_volume_pct:
+        description: Maksimum sifir hacimli bar orani (%)
+        required: true
+        default: "20"
+      max_gap_pct:
+        description: Maksimum yakin donem gap (%)
+        required: true
+        default: "15"
+      max_abs_edge_r:
+        description: Maksimum mutlak aykiri Edge (R)
+        required: true
+        default: "5"
       source:
         description: Veri kaynağı
         required: true
@@ -106,6 +130,12 @@ jobs:
             --roundtrip-cost-bps "${{ inputs.roundtrip_cost_bps }}" \
             --min-edge-r "${{ inputs.min_edge_r }}" \
             --near-distance-atr "${{ inputs.near_distance_atr }}" \
+            --quality-lookback "${{ inputs.quality_lookback }}" \
+            --min-price "${{ inputs.min_price }}" \
+            --min-daily-turnover-try "${{ inputs.min_daily_turnover_try }}" \
+            --max-zero-volume-pct "${{ inputs.max_zero_volume_pct }}" \
+            --max-gap-pct "${{ inputs.max_gap_pct }}" \
+            --max-abs-edge-r "${{ inputs.max_abs_edge_r }}" \
             --source "${{ inputs.source }}" \
             --output-dir reports/single
       - name: Telegram

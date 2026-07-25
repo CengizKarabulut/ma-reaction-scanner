@@ -67,6 +67,30 @@ on:
         description: Güncel yakınlık ATR
         required: true
         default: "1.0"
+      quality_lookback:
+        description: Likidite ve gap filtresi bakis araligi
+        required: true
+        default: "60"
+      min_price:
+        description: Minimum fiyat (TRY)
+        required: true
+        default: "1"
+      min_daily_turnover_try:
+        description: Minimum medyan gunluk islem degeri (TRY)
+        required: true
+        default: "1000000"
+      max_zero_volume_pct:
+        description: Maksimum sifir hacimli bar orani (%)
+        required: true
+        default: "20"
+      max_gap_pct:
+        description: Maksimum yakin donem gap (%)
+        required: true
+        default: "15"
+      max_abs_edge_r:
+        description: Maksimum mutlak aykiri Edge (R)
+        required: true
+        default: "5"
       source:
         description: Veri kaynağı
         required: true
@@ -111,6 +135,12 @@ jobs:
           COST: ${{ inputs.roundtrip_cost_bps || '25' }}
           MIN_EDGE: ${{ inputs.min_edge_r || '0.10' }}
           NEAR: ${{ inputs.near_distance_atr || '1.0' }}
+          QUALITY_LOOKBACK: ${{ inputs.quality_lookback || '60' }}
+          MIN_PRICE: ${{ inputs.min_price || '1' }}
+          MIN_TURNOVER: ${{ inputs.min_daily_turnover_try || '1000000' }}
+          MAX_ZERO_VOLUME: ${{ inputs.max_zero_volume_pct || '20' }}
+          MAX_GAP: ${{ inputs.max_gap_pct || '15' }}
+          MAX_EDGE: ${{ inputs.max_abs_edge_r || '5' }}
           SOURCE: ${{ inputs.source || 'auto' }}
         run: |
           TIMEFRAMES="$PRESET"
@@ -131,6 +161,12 @@ jobs:
             --roundtrip-cost-bps "$COST" \
             --min-edge-r "$MIN_EDGE" \
             --near-distance-atr "$NEAR" \
+            --quality-lookback "$QUALITY_LOOKBACK" \
+            --min-price "$MIN_PRICE" \
+            --min-daily-turnover-try "$MIN_TURNOVER" \
+            --max-zero-volume-pct "$MAX_ZERO_VOLUME" \
+            --max-gap-pct "$MAX_GAP" \
+            --max-abs-edge-r "$MAX_EDGE" \
             --source "$SOURCE" \
             --shard-index "${{ matrix.shard }}" \
             --shard-count 20 \

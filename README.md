@@ -48,6 +48,38 @@ en az %50'si aynı yöndeyse normal trend, diğer durumlarda karışık/geçiş 
 Ana sınıflar: `Güçlü uyum`, `Uyumlu`, `İzleme`, `Uyumsuz`, `Yetersiz veri`.
 Bunlar gelecek performans garantisi veya otomatik al/sat emri değildir.
 
+
+## Raporu nasil okuyacagim?
+
+Ana tabloda her hisse tek satirdir. En iyi uygun kombinasyon su alanlarla aciklanir:
+
+- `current_price`: Secilen en iyi zaman diliminin son kapanis fiyati.
+- `price_time`: Fiyat ve MA degerinin ait oldugu son mum zamani.
+- `best_ma` / `best_ma_value`: MA adi ve ayni mumdaki sayisal MA degeri.
+- `best_difference`: `MA - fiyat` farki, fiyat para birimindedir.
+- `best_distance_pct`: `(MA - fiyat) / fiyat * 100`; gercek yuzde uzaklik.
+- `best_distance_atr`: Ayni farkin ATR'ye bolunmus hali. Yuzde degildir.
+- `filter_status`: `Uygun` veya `Filtre disi`.
+- `filter_reasons`: Fiyat, likidite, sifir hacim, gap veya aykiri Edge nedeni.
+- `best_edge_r`: MA temaslarinin kosulsuz baz girislere gore R avantaji.
+- `best_median_net_r`: Maliyet sonrasi medyan islem sonucu.
+
+Ornek: fiyat `52.85`, SMA233 `53.42` ise fark `0.57`, yuzde uzaklik
+yaklasik `%1.08` olur. ATR uzakligi ayri bir sayidir ve `UZK%` gibi okunmamalidir.
+
+## Piyasa kalitesi filtreleri
+
+Filtreler hisseleri rapordan silmez. Tum hisseler gorunur; uygun kombinasyonlar ustte
+siralanir, uygun kombinasyonu olmayan hisselerde neden yazilir. Tum esikler hem GitHub
+Actions ekranindan hem CLI'dan degistirilebilir:
+
+- `quality_lookback`: Son kalite penceresi (varsayilan 60).
+- `min_price`: Minimum fiyat (varsayilan 1 TRY).
+- `min_daily_turnover_try`: Medyan gunluk islem degeri (varsayilan 1 milyon TRY).
+- `max_zero_volume_pct`: Sifir hacimli bar ust siniri (varsayilan %20).
+- `max_gap_pct`: Yakin donem maksimum gap (varsayilan %15).
+- `max_abs_edge_r`: Siralamayi bozabilecek aykiri mutlak Edge siniri (varsayilan 5R).
+
 ## GitHub Actions
 
 Kullanıcıya açık iki analiz vardır:

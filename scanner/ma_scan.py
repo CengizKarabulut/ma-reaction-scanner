@@ -112,10 +112,26 @@ def write_outputs(
         "table{border-collapse:collapse;width:100%;background:white}th,td{padding:7px;"
         "border:1px solid #dfe3e8;text-align:left;white-space:nowrap}th{position:sticky;"
         "top:0;background:#172b4d;color:white}tr:nth-child(even){background:#f2f5f8}"
-        "h1{color:#172b4d}.meta{color:#566}</style></head><body>"
-        "<h1>MA Trend ve Tepki — Piyasa Özeti</h1>"
-        f"<p class='meta'>{len(summary)} varlık · her varlık tek satır</p>"
-        + summary.to_html(index=False, border=0, escape=True)
+        "h1,h2{color:#172b4d}.meta{color:#566}.guide{background:white;padding:16px;"
+        "border:1px solid #dfe3e8;margin:14px 0}.guide code{font-weight:bold}</style>"
+        "</head><body><h1>MA Trend ve Tepki - Piyasa Ozeti</h1>"
+        f"<p class='meta'>{len(summary)} varlik - her varlik tek satir</p>"
+        "<div class='guide'><h2>Tablo nasil okunur?</h2><ul>"
+        "<li><code>current_price</code> ve <code>best_ma_value</code> ayni zaman "
+        "dilimindeki <code>price_time</code> anina aittir.</li>"
+        "<li><code>best_difference</code> = MA - fiyat (TL).</li>"
+        "<li><code>best_distance_pct</code> gercek yuzde uzakliktir. "
+        "<code>best_distance_atr</code> ATR uzakligidir; yuzde degildir.</li>"
+        "<li><code>filter_status</code> Uygun satirlar once gelir. Filtre disi "
+        "hisseler silinmez; neden <code>filter_reasons</code> alanindadir.</li>"
+        "<li>Uyum sinifi gecmis temas istatistigidir; otomatik al-sat emri degildir.</li>"
+        "</ul></div>"
+        + summary.to_html(
+            index=False,
+            border=0,
+            escape=True,
+            float_format=lambda value: f"{value:,.2f}",
+        )
         + "</body></html>"
     )
     (output_dir / "market_report.html").write_text(html, encoding="utf-8")
@@ -203,6 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--roundtrip-cost-bps", type=float, default=25.0)
     parser.add_argument("--min-edge-r", type=float, default=0.10)
     parser.add_argument("--near-distance-atr", type=float, default=1.0)
+    parser.add_argument("--quality-lookback", type=int, default=60)
+    parser.add_argument("--min-price", type=float, default=1.0)
+    parser.add_argument("--min-daily-turnover-try", type=float, default=1_000_000.0)
+    parser.add_argument("--max-zero-volume-pct", type=float, default=20.0)
+    parser.add_argument("--max-gap-pct", type=float, default=15.0)
+    parser.add_argument("--max-abs-edge-r", type=float, default=5.0)
     parser.add_argument("--lookback", type=int, default=0)
     parser.add_argument("--source", choices=["auto", "borsapy", "yfinance"], default="auto")
     parser.add_argument("--prefer-cache", action="store_true")
@@ -250,6 +272,12 @@ def main(argv: list[str] | None = None) -> int:
         roundtrip_cost_bps=args.roundtrip_cost_bps,
         min_edge_r=args.min_edge_r,
         near_distance_atr=args.near_distance_atr,
+        quality_lookback=args.quality_lookback,
+        min_price=args.min_price,
+        min_daily_turnover_try=args.min_daily_turnover_try,
+        max_zero_volume_pct=args.max_zero_volume_pct,
+        max_gap_pct=args.max_gap_pct,
+        max_abs_edge_r=args.max_abs_edge_r,
     )
     instruments = resolve_instruments(args)
     attempted_requests = len(instruments) * len(timeframes)
