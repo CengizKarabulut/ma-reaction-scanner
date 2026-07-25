@@ -77,10 +77,15 @@ def _start_date(years: int = 10) -> str:
     )
 
 
-def resample_ohlcv(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+def resample_ohlcv(
+    frame: pd.DataFrame,
+    timeframe: str,
+    *,
+    allow_non_positive: bool = False,
+) -> pd.DataFrame:
     """Resample with BIST-aware 4h bins and completed week/month labels."""
 
-    df = normalize_ohlcv(frame)
+    df = normalize_ohlcv(frame, allow_non_positive=allow_non_positive)
     aggregations = {
         "Open": "first",
         "High": "max",
@@ -100,7 +105,10 @@ def resample_ohlcv(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
         sampled = df.resample("ME", label="right", closed="right").agg(aggregations)
     else:
         raise ValueError(f"unsupported derived timeframe: {timeframe}")
-    return normalize_ohlcv(sampled.dropna(subset=["Open", "High", "Low", "Close"]))
+    return normalize_ohlcv(
+        sampled.dropna(subset=["Open", "High", "Low", "Close"]),
+        allow_non_positive=allow_non_positive,
+    )
 
 
 def _fetch_yfinance(
@@ -124,7 +132,9 @@ def _fetch_yfinance(
     )
     if data is None or data.empty:
         raise RuntimeError(f"yfinance returned no data for {symbol} {interval}")
-    return normalize_ohlcv(data)
+    return normalize_ohlcv(
+        data, allow_non_positive=asset_class == "commodity"
+    )
 
 
 def _bp_history(
@@ -195,13 +205,14 @@ class MarketDataProvider:
 
     def _read_cache(self, path: Path, ticker: str, timeframe: str) -> FetchResult:
         frame = pd.read_csv(path, index_col=0, parse_dates=True)
-        df = normalize_ohlcv(frame)
         metadata_path = path.with_suffix("").with_suffix(".json")
         metadata = (
             json.loads(metadata_path.read_text(encoding="utf-8"))
             if metadata_path.exists()
             else {}
         )
+        allow_non_positive = metadata.get("asset_class") == "commodity"
+        df = normalize_ohlcv(frame, allow_non_positive=allow_non_positive)
         return FetchResult(
             frame=df,
             ticker=ticker.upper(),
@@ -209,7 +220,9 @@ class MarketDataProvider:
             source=str(metadata.get("source", "cache")),
             base_interval=str(metadata.get("base_interval", timeframe)),
             snapshot_path=str(path),
-            fingerprint=fingerprint_frame(df),
+            fingerprint=fingerprint_frame(
+                df, allow_non_positive=allow_non_positive
+            ),
         )
 
     def fetch(
@@ -262,10 +275,15 @@ class MarketDataProvider:
             if cached is not None:
                 return self._read_cache(cached, ticker, timeframe)
             raise RuntimeError("; ".join(errors))
+        allow_non_positive = asset_class == "commodity"
         if timeframe in BASE_INTERVAL:
-            frame = resample_ohlcv(frame, timeframe)
+            frame = resample_ohlcv(
+                frame, timeframe, allow_non_positive=allow_non_positive
+            )
         else:
-            frame = normalize_ohlcv(frame)
+            frame = normalize_ohlcv(
+                frame, allow_non_positive=allow_non_positive
+            )
 
         snapshot_path = None
         if self.snapshot:
@@ -287,7 +305,9 @@ class MarketDataProvider:
             source=used_source or "unknown",
             base_interval=base,
             snapshot_path=snapshot_path,
-            fingerprint=fingerprint_frame(frame),
+            fingerprint=fingerprint_frame(
+                frame, allow_non_positive=allow_non_positive
+            ),
         )
 
     def _write_snapshot(
@@ -303,7 +323,9 @@ class MarketDataProvider:
         folder = self.cache_dir / _safe_name(ticker.upper()) / timeframe
         folder.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        fingerprint = fingerprint_frame(frame)
+        fingerprint = fingerprint_frame(
+            frame, allow_non_positive=asset_class == "commodity"
+        )
         path = folder / f"{stamp}_{fingerprint[:12]}.csv.gz"
         if not path.exists():
             frame.to_csv(path, compression="gzip", float_format="%.10f")
@@ -368,11 +390,17 @@ class MarketDataProvider:
         return rows
 
 
-def fingerprint_frame(frame: pd.DataFrame) -> str:
+def fingerprint_frame(
+    frame: pd.DataFrame,
+    *,
+    allow_non_positive: bool = False,
+) -> str:
     # Vendor floats and CSV round-trips can differ by one ULP. A canonical
     # decimal representation keeps identical market data reproducibly identical
     # without masking economically meaningful price changes.
-    canonical = normalize_ohlcv(frame)
+    canonical = normalize_ohlcv(
+        frame, allow_non_positive=allow_non_positive
+    )
     lines: list[str] = []
     for timestamp, row in canonical.iterrows():
         stamp = pd.Timestamp(timestamp).isoformat()

@@ -250,5 +250,16 @@ class MovingAverageEngineTests(unittest.TestCase):
             compatibility_score(0, float("nan"), float("nan"), -1.0, -1.0, 0, config),
             0.0,
         )
+    def test_prepare_frame_allows_historic_negative_commodity_settlement(self):
+        frame = sample_frame(100)
+        frame.loc[frame.index[20], ["Open", "High", "Low", "Close"]] = [
+            -2.0, -1.0, -3.0, -2.5
+        ]
+
+        with self.assertRaisesRegex(ValueError, "pozitif"):
+            prepare_frame(frame)
+
+        prepared = prepare_frame(frame, allow_non_positive=True)
+        self.assertEqual(float(prepared.loc[frame.index[20], "Close"]), -2.5)
 if __name__ == "__main__":
     unittest.main()
