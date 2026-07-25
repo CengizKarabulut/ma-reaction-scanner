@@ -37,6 +37,12 @@ class ScanConfig:
     roundtrip_cost_bps: float = 25.0
     min_edge_r: float = 0.10
     near_distance_atr: float = 1.0
+    quality_lookback: int = 60
+    min_price: float = 1.0
+    min_daily_turnover_try: float = 1_000_000.0
+    max_zero_volume_pct: float = 20.0
+    max_gap_pct: float = 15.0
+    max_abs_edge_r: float = 5.0
 
     def __post_init__(self) -> None:
         unknown = sorted(set(self.ma_types) - set(MA_TYPES))
@@ -51,6 +57,7 @@ class ScanConfig:
             self.atr_period,
             self.min_touches,
             self.max_holding_bars,
+            self.quality_lookback,
         )
         if any(int(value) < 1 for value in integers):
             raise ValueError("Bar ve olay eşikleri pozitif olmalıdır")
@@ -63,9 +70,16 @@ class ScanConfig:
             self.roundtrip_cost_bps,
             self.min_edge_r,
             self.near_distance_atr,
+            self.min_price,
+            self.min_daily_turnover_try,
+            self.max_zero_volume_pct,
+            self.max_gap_pct,
+            self.max_abs_edge_r,
         )
         if any(float(value) < 0 for value in non_negative):
             raise ValueError("ATR, maliyet ve eşik ayarları negatif olamaz")
+        if self.max_zero_volume_pct > 100:
+            raise ValueError("Sıfır hacim yüzdesi 0-100 arasında olmalıdır")
 
     def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
@@ -418,6 +432,66 @@ def compatibility_class(
     return "Uyumsuz"
 
 
+def market_quality_metrics(
+    df: pd.DataFrame,
+    timeframe: str,
+    config: ScanConfig,
+) -> dict[str, float]:
+    recent = df.tail(config.quality_lookback)
+    turnover = pd.to_numeric(df["Close"] * df["Volume"], errors="coerce")
+    if timeframe in {"5m", "15m", "30m", "1h", "4h"}:
+        daily_turnover = turnover.groupby(df.index.normalize()).sum(min_count=1)
+    elif timeframe == "1wk":
+        daily_turnover = turnover / 5.0
+    elif timeframe == "1mo":
+        daily_turnover = turnover / 21.0
+    else:
+        daily_turnover = turnover
+    median_daily_turnover = float(
+        daily_turnover.dropna().tail(config.quality_lookback).median()
+    )
+    recent_volume = pd.to_numeric(recent["Volume"], errors="coerce")
+    zero_volume_pct = float(100.0 * (recent_volume <= 0).mean())
+    recent_gap = (
+        (df["Open"] / df["Close"].shift(1) - 1.0)
+        .abs()
+        .mul(100.0)
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+        .tail(config.quality_lookback)
+    )
+    max_recent_gap_pct = float(recent_gap.max()) if not recent_gap.empty else 0.0
+    return {
+        "median_daily_turnover_try": median_daily_turnover,
+        "zero_volume_pct": zero_volume_pct,
+        "max_recent_gap_pct": max_recent_gap_pct,
+    }
+
+
+def quality_filter_reasons(
+    *,
+    asset_class: str,
+    price: float,
+    metrics: dict[str, float],
+    edge_r: float,
+    config: ScanConfig,
+) -> list[str]:
+    reasons: list[str] = []
+    if asset_class != "stock":
+        return reasons
+    if price < config.min_price:
+        reasons.append("Fiyat")
+    turnover = metrics["median_daily_turnover_try"]
+    if not np.isfinite(turnover) or turnover < config.min_daily_turnover_try:
+        reasons.append("Likidite")
+    if metrics["zero_volume_pct"] > config.max_zero_volume_pct:
+        reasons.append("Sifir hacim")
+    if metrics["max_recent_gap_pct"] > config.max_gap_pct:
+        reasons.append("Gap")
+    if np.isfinite(edge_r) and abs(edge_r) > config.max_abs_edge_r:
+        reasons.append("Aykiri Edge")
+    return reasons
+
 def scan_frame(
     frame: pd.DataFrame,
     *,
@@ -428,6 +502,13 @@ def scan_frame(
 ) -> pd.DataFrame:
     df = prepare_frame(frame, config.atr_period)
     current_price, current_atr = float(df["Close"].iloc[-1]), float(df["ATR"].iloc[-1])
+    latest_time = pd.Timestamp(df.index[-1])
+    if latest_time.tzinfo is None:
+        latest_time = latest_time.tz_localize("Europe/Istanbul")
+    else:
+        latest_time = latest_time.tz_convert("Europe/Istanbul")
+    price_time = latest_time.isoformat()
+    quality_metrics = market_quality_metrics(df, timeframe, config)
     baselines = {side: _random_baseline(df, side, config) for side in (1, -1)}
     rows: list[dict[str, object]] = []
     metadata = metadata or {}
@@ -464,6 +545,13 @@ def scan_frame(
                 quality = compatibility_class(
                     count, median_r, edge_r, win_rate, baseline_win, stability, config
                 )
+                filter_reasons = quality_filter_reasons(
+                    asset_class=str(metadata.get("asset_class", "")),
+                    price=current_price,
+                    metrics=quality_metrics,
+                    edge_r=edge_r,
+                    config=config,
+                )
                 active_side = (
                     (side == 1 and current_price >= current_ma)
                     or (side == -1 and current_price <= current_ma)
@@ -476,8 +564,10 @@ def scan_frame(
                     "period": int(period),
                     "ma": f"{ma_type}{period}",
                     "side": "Destek" if side == 1 else "Direnç",
+                    "price_time": price_time,
                     "current_price": current_price,
                     "current_ma": current_ma,
+                    "distance_value": float(current_ma - current_price),
                     "distance_atr": float(distance_atr),
                     "distance_pct": float((current_ma - current_price) / current_price * 100.0),
                     "active_side": bool(active_side),
@@ -497,6 +587,10 @@ def scan_frame(
                     "median_mae_r": median_mae,
                     "positive_periods": stability,
                     "compatibility": quality,
+                    **quality_metrics,
+                    "filter_pass": not filter_reasons,
+                    "filter_status": "Uygun" if not filter_reasons else "Filtre disi",
+                    "filter_reasons": ", ".join(filter_reasons),
                 })
     return pd.DataFrame(rows)
 
@@ -553,6 +647,11 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
         active = symbol_rows[symbol_rows["active_side"].fillna(False)].copy()
         if active.empty:
             active = symbol_rows.copy()
+        if "filter_pass" not in active:
+            active["filter_pass"] = True
+        eligible = active[active["filter_pass"].fillna(False)].copy()
+        if not eligible.empty:
+            active = eligible
         active["_quality_rank"] = active["compatibility"].map(_QUALITY_RANK).fillna(0)
         active["_abs_distance"] = pd.to_numeric(active["distance_atr"], errors="coerce").abs()
         active = active.sort_values(
@@ -565,7 +664,12 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
         record.update({
             "trend_summary": " | ".join(timeframe_labels),
             "best_timeframe": best["timeframe"],
+            "price_time": best.get("price_time", ""),
+            "current_price": best.get("current_price", np.nan),
             "best_ma": best["ma"],
+            "best_ma_value": best.get("current_ma", np.nan),
+            "best_difference": best.get("distance_value", np.nan),
+            "best_distance_pct": best.get("distance_pct", np.nan),
             "best_side": best["side"],
             "best_compatibility": best["compatibility"],
             "best_touches": int(best["touches"]),
@@ -573,8 +677,20 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
             "best_median_net_r": best["median_net_r"],
             "best_edge_r": best["edge_r"],
             "best_distance_atr": best["distance_atr"],
+            "median_daily_turnover_try": best.get("median_daily_turnover_try", np.nan),
+            "zero_volume_pct": best.get("zero_volume_pct", np.nan),
+            "max_recent_gap_pct": best.get("max_recent_gap_pct", np.nan),
+            "filter_status": best.get("filter_status", "Uygun"),
+            "filter_reasons": best.get("filter_reasons", ""),
             "best_support": support.iloc[0]["ma"] if not support.empty else "-",
+            "best_support_value": (
+                support.iloc[0].get("current_ma", np.nan) if not support.empty else np.nan
+            ),
             "best_resistance": resistance.iloc[0]["ma"] if not resistance.empty else "-",
+            "best_resistance_value": (
+                resistance.iloc[0].get("current_ma", np.nan)
+                if not resistance.empty else np.nan
+            ),
         })
         distance = abs(float(best["distance_atr"])) if np.isfinite(best["distance_atr"]) else np.inf
         compatible = best["compatibility"] in {"Güçlü uyum", "Uyumlu"}
@@ -586,6 +702,7 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
             record["setup"] = "İzleme"
         else:
             record["setup"] = "Kurulum yok"
+        record["_sort_filter"] = int(bool(best.get("filter_pass", True)))
         record["_sort_quality"] = int(_QUALITY_RANK.get(str(best["compatibility"]), 0))
         record["_sort_stability"] = int(best["positive_periods"])
         record["_sort_edge"] = float(best["edge_r"]) if np.isfinite(best["edge_r"]) else -999.0
@@ -594,9 +711,9 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
     return (
         pd.DataFrame(records)
         .sort_values(
-            ["_sort_quality", "_sort_stability", "_sort_edge", "_sort_distance", "symbol"],
-            ascending=[False, False, False, True, True],
+            ["_sort_filter", "_sort_quality", "_sort_stability", "_sort_edge", "_sort_distance", "symbol"],
+            ascending=[False, False, False, False, True, True],
         )
-        .drop(columns=["_sort_quality", "_sort_stability", "_sort_edge", "_sort_distance"])
+        .drop(columns=["_sort_filter", "_sort_quality", "_sort_stability", "_sort_edge", "_sort_distance"])
         .reset_index(drop=True)
     )

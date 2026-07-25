@@ -141,11 +141,80 @@ class MovingAverageEngineTests(unittest.TestCase):
                             "distance_atr": -0.4,
                             "touches": 16,
                             "win_rate_pct": 62.5,
+                            "current_price": 52.85,
+                            "current_ma": 53.42,
+                            "distance_value": 0.57,
+                            "distance_pct": (53.42 - 52.85) / 52.85 * 100.0,
+                            "filter_pass": True,
+                            "filter_status": "Uygun",
                         }
                     )
         summary = build_market_summary(pd.DataFrame(rows))
         self.assertEqual(len(summary), 2)
         self.assertEqual(summary["symbol"].nunique(), 2)
+        self.assertAlmostEqual(
+            float(summary.iloc[0]["best_distance_pct"]),
+            (53.42 - 52.85) / 52.85 * 100.0,
+        )
+        self.assertEqual(float(summary.iloc[0]["current_price"]), 52.85)
+        self.assertEqual(float(summary.iloc[0]["best_ma_value"]), 53.42)
+
+    def test_filtered_outlier_is_not_selected_as_best(self):
+        rows = pd.DataFrame(
+            [
+                {
+                    "symbol": "TEST",
+                    "timeframe": "1d",
+                    "ma_type": "SMA",
+                    "period": 20,
+                    "ma": "SMA20",
+                    "side": "Destek",
+                    "active_side": True,
+                    "trend_state": "Yukselen",
+                    "compatibility": "Guclu uyum",
+                    "positive_periods": 3,
+                    "edge_r": 43.0,
+                    "median_net_r": 4.0,
+                    "distance_atr": 0.1,
+                    "distance_pct": 0.2,
+                    "touches": 20,
+                    "win_rate_pct": 70.0,
+                    "current_price": 10.0,
+                    "current_ma": 10.02,
+                    "distance_value": 0.02,
+                    "filter_pass": False,
+                    "filter_status": "Filtre disi",
+                    "filter_reasons": "Aykiri Edge",
+                },
+                {
+                    "symbol": "TEST",
+                    "timeframe": "1d",
+                    "ma_type": "EMA",
+                    "period": 20,
+                    "ma": "EMA20",
+                    "side": "Destek",
+                    "active_side": True,
+                    "trend_state": "Yukselen",
+                    "compatibility": "Uyumlu",
+                    "positive_periods": 3,
+                    "edge_r": 1.0,
+                    "median_net_r": 1.0,
+                    "distance_atr": 0.2,
+                    "distance_pct": 0.3,
+                    "touches": 20,
+                    "win_rate_pct": 65.0,
+                    "current_price": 10.0,
+                    "current_ma": 10.03,
+                    "distance_value": 0.03,
+                    "filter_pass": True,
+                    "filter_status": "Uygun",
+                    "filter_reasons": "",
+                },
+            ]
+        )
+        summary = build_market_summary(rows)
+        self.assertEqual(summary.iloc[0]["best_ma"], "EMA20")
+        self.assertEqual(summary.iloc[0]["filter_status"], "Uygun")
 
 
 if __name__ == "__main__":
