@@ -332,7 +332,10 @@ def simulate_trade(df: pd.DataFrame, touch: Touch, config: ScanConfig) -> Trade 
             or (direction == -1 and bar_open >= stop)
         )
         if gap_through_stop:
-            # Exit at the open before consuming any post-exit intrabar range.
+            # The opening gap occurred before execution and belongs in MAE.
+            gap_adverse = entry - bar_open if direction == 1 else bar_open - entry
+            max_adverse = max(max_adverse, gap_adverse)
+            # Exit at the open without consuming post-exit intrabar range.
             exit_price, exit_position = bar_open, position
             exit_reason = "Takip eden stop" if stop != initial_stop else "\u0130lk stop"
             break

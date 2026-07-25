@@ -92,7 +92,7 @@ class MovingAverageEngineTests(unittest.TestCase):
         self.assertLess(trade.net_r, -1.0)
         initial_risk = trade.entry - trade.initial_stop
         self.assertAlmostEqual(trade.mfe_r, 1.0 / initial_risk)
-        self.assertAlmostEqual(trade.mae_r, 0.5 / initial_risk)
+        self.assertAlmostEqual(trade.mae_r, 5.0 / initial_risk)
 
     def test_crossing_wrong_side_resets_touch_eligibility(self):
         index = pd.date_range("2024-01-01", periods=10, freq="D")
