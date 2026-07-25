@@ -432,6 +432,38 @@ def compatibility_class(
     return "Uyumsuz"
 
 
+def compatibility_score(
+    touches: int,
+    side_adherence_pct: float,
+    win_rate_pct: float,
+    median_r: float,
+    edge_r: float,
+    stability: int,
+    config: ScanConfig,
+) -> float:
+    """Return a transparent 0-100 historical MA compatibility score."""
+    def bounded(value: float, low: float, high: float) -> float:
+        if not np.isfinite(value):
+            return 0.0
+        return float(np.clip(value, low, high))
+
+    evidence = min(max(touches, 0) / max(config.min_touches, 1), 1.0) * 25.0
+    adherence = bounded(side_adherence_pct, 0.0, 100.0) / 100.0 * 20.0
+    win_quality = bounded(win_rate_pct, 0.0, 100.0) / 100.0 * 15.0
+    median_quality = bounded(median_r, 0.0, 1.0) * 15.0
+    edge_quality = bounded(edge_r, 0.0, 1.0) * 15.0
+    stability_quality = bounded(float(stability), 0.0, 3.0) / 3.0 * 10.0
+    return round(
+        evidence
+        + adherence
+        + win_quality
+        + median_quality
+        + edge_quality
+        + stability_quality,
+        2,
+    )
+
+
 def market_quality_metrics(
     df: pd.DataFrame,
     timeframe: str,
@@ -552,6 +584,15 @@ def scan_frame(
                 quality = compatibility_class(
                     count, median_r, edge_r, win_rate, baseline_win, stability, config
                 )
+                score = compatibility_score(
+                    count,
+                    above_ma_pct if side == 1 else below_ma_pct,
+                    win_rate,
+                    median_r,
+                    edge_r,
+                    stability,
+                    config,
+                )
                 filter_reasons = quality_filter_reasons(
                     asset_class=str(metadata.get("asset_class", "")),
                     market=str(metadata.get("market", "")),
@@ -600,6 +641,7 @@ def scan_frame(
                     "median_mae_r": median_mae,
                     "positive_periods": stability,
                     "compatibility": quality,
+                    "compatibility_score": score,
                     **quality_metrics,
                     "filter_pass": not filter_reasons,
                     "filter_status": "Uygun" if not filter_reasons else "Filtre disi",
@@ -666,10 +708,20 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
         if not eligible.empty:
             active = eligible
         active["_quality_rank"] = active["compatibility"].map(_QUALITY_RANK).fillna(0)
+        if "compatibility_score" not in active:
+            active["compatibility_score"] = active["_quality_rank"] * 20.0
         active["_abs_distance"] = pd.to_numeric(active["distance_atr"], errors="coerce").abs()
         active = active.sort_values(
-            ["_quality_rank", "positive_periods", "edge_r", "median_net_r", "_abs_distance"],
-            ascending=[False, False, False, False, True],
+            [
+                "compatibility_score",
+                "touches",
+                "_quality_rank",
+                "positive_periods",
+                "edge_r",
+                "median_net_r",
+                "_abs_distance",
+            ],
+            ascending=[False, False, False, False, False, False, True],
             na_position="last",
         )
         best = active.iloc[0]
@@ -686,6 +738,8 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
             "best_side": best["side"],
             "best_compatibility": best["compatibility"],
             "best_touches": int(best["touches"]),
+            "best_side_adherence_pct": best.get("side_adherence_pct", np.nan),
+            "best_compatibility_score": best.get("compatibility_score", np.nan),
             "best_win_rate_pct": best["win_rate_pct"],
             "best_median_net_r": best["median_net_r"],
             "best_edge_r": best["edge_r"],
@@ -716,6 +770,7 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
         else:
             record["setup"] = "Kurulum yok"
         record["_sort_filter"] = int(bool(best.get("filter_pass", True)))
+        record["_sort_score"] = float(best.get("compatibility_score", 0.0))
         record["_sort_quality"] = int(_QUALITY_RANK.get(str(best["compatibility"]), 0))
         record["_sort_stability"] = int(best["positive_periods"])
         record["_sort_edge"] = float(best["edge_r"]) if np.isfinite(best["edge_r"]) else -999.0
@@ -724,9 +779,26 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
     return (
         pd.DataFrame(records)
         .sort_values(
-            ["_sort_filter", "_sort_quality", "_sort_stability", "_sort_edge", "_sort_distance", "symbol"],
-            ascending=[False, False, False, False, True, True],
+            [
+                "_sort_filter",
+                "_sort_score",
+                "_sort_quality",
+                "_sort_stability",
+                "_sort_edge",
+                "_sort_distance",
+                "symbol",
+            ],
+            ascending=[False, False, False, False, False, True, True],
         )
-        .drop(columns=["_sort_filter", "_sort_quality", "_sort_stability", "_sort_edge", "_sort_distance"])
+        .drop(
+            columns=[
+                "_sort_filter",
+                "_sort_score",
+                "_sort_quality",
+                "_sort_stability",
+                "_sort_edge",
+                "_sort_distance",
+            ]
+        )
         .reset_index(drop=True)
     )

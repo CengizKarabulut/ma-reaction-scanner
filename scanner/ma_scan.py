@@ -106,6 +106,7 @@ _SINGLE_TABLE_COLUMNS = {
     "edge_r": "Edge R",
     "positive_periods": "Pozitif Dönem",
     "compatibility": "Uyum",
+    "compatibility_score": "Uyum Skoru",
     "distance_pct": "Uzaklık %",
     "distance_atr": "ATR Uzaklık",
     "filter_status": "Filtre",
@@ -113,10 +114,60 @@ _SINGLE_TABLE_COLUMNS = {
 }
 
 
-def build_single_stock_table(detail: pd.DataFrame) -> pd.DataFrame:
-    if detail is None or detail.empty:
+def build_single_stock_table(
+    detail: pd.DataFrame,
+    timeframes: list[str] | tuple[str, ...] | None = None,
+    ma_types: list[str] | tuple[str, ...] | None = None,
+    periods: list[int] | tuple[int, ...] | None = None,
+) -> pd.DataFrame:
+    table = detail.copy() if detail is not None else pd.DataFrame()
+    requested = {
+        (str(timeframe), str(ma_type), int(period))
+        for timeframe in (timeframes or [])
+        for ma_type in (ma_types or [])
+        for period in (periods or [])
+    }
+    present = (
+        set(
+            zip(
+                table.get("timeframe", pd.Series(dtype=str)).astype(str),
+                table.get("ma_type", pd.Series(dtype=str)).astype(str),
+                pd.to_numeric(
+                    table.get("period", pd.Series(dtype=float)), errors="coerce"
+                ).fillna(-1).astype(int),
+            )
+        )
+        if not table.empty
+        else set()
+    )
+    missing_rows = []
+    for timeframe, ma_type, period in sorted(requested - present):
+        missing_rows.append(
+            {
+                "timeframe": timeframe,
+                "ma_type": ma_type,
+                "period": period,
+                "ma": f"{ma_type}{period}",
+                "side": "Veri yok",
+                "active_side": False,
+                "trend_state": "Yetersiz veri",
+                "touches": 0,
+                "cross_count": 0,
+                "positive_periods": 0,
+                "compatibility": "Yetersiz veri",
+                "compatibility_score": 0.0,
+                "filter_pass": False,
+                "filter_status": "Yetersiz veri",
+                "filter_reasons": "Seçilen MA için yeterli geçmiş mum yok",
+            }
+        )
+    if missing_rows:
+        table = pd.concat([table, pd.DataFrame(missing_rows)], ignore_index=True)
+    if table.empty:
         return pd.DataFrame(columns=list(_SINGLE_TABLE_COLUMNS.values()))
-    table = detail.copy()
+    for column in _SINGLE_TABLE_COLUMNS:
+        if column not in table:
+            table[column] = float("nan")
     quality_rank = {
         "Güçlü uyum": 4,
         "Uyumlu": 3,
@@ -129,19 +180,23 @@ def build_single_stock_table(detail: pd.DataFrame) -> pd.DataFrame:
     table["_filter_rank"] = filter_pass.fillna(False).astype(int)
     table["_active_rank"] = active_side.fillna(False).astype(int)
     table["_quality_rank"] = table["compatibility"].map(quality_rank).fillna(0)
+    table["compatibility_score"] = pd.to_numeric(
+        table["compatibility_score"], errors="coerce"
+    ).fillna(table["_quality_rank"] * 20.0)
     table["_abs_distance"] = pd.to_numeric(table["distance_atr"], errors="coerce").abs()
     table = table.sort_values(
         [
             "_filter_rank",
             "_active_rank",
-            "_quality_rank",
+            "compatibility_score",
             "touches",
+            "_quality_rank",
             "positive_periods",
             "edge_r",
             "median_net_r",
             "_abs_distance",
         ],
-        ascending=[False, False, False, False, False, False, False, True],
+        ascending=[False, False, False, False, False, False, False, False, True],
         na_position="last",
     )
     available = [column for column in _SINGLE_TABLE_COLUMNS if column in table]
@@ -165,6 +220,20 @@ def write_outputs(
     )
     detail.to_csv(output_dir / "ma_detail.csv", index=False, encoding="utf-8-sig")
     summary.to_csv(output_dir / "market_summary.csv", index=False, encoding="utf-8-sig")
+    market_columns = {
+        "symbol": "Varlık", "best_ma": "MA", "best_timeframe": "Zaman Dilimi",
+        "best_touches": "Temas", "best_side_adherence_pct": "Taraf Koruma %",
+        "best_win_rate_pct": "Kazanma %", "best_median_net_r": "Medyan R",
+        "best_edge_r": "Edge R", "best_distance_pct": "Uzaklık %",
+        "best_compatibility_score": "Uyum Skoru",
+        "best_compatibility": "Uyum", "best_side": "Taraf",
+        "current_price": "Fiyat", "best_ma_value": "MA Değeri",
+        "filter_status": "Filtre", "filter_reasons": "Filtre Nedeni",
+    }
+    market_table = summary[[column for column in market_columns if column in summary]].rename(
+        columns=market_columns
+    )
+    market_table.to_csv(output_dir / "market_table.csv", index=False, encoding="utf-8-sig")
     errors.to_csv(output_dir / "errors.csv", index=False, encoding="utf-8-sig")
     (output_dir / "run_config.json").write_text(
         json.dumps(config_payload, ensure_ascii=False, indent=2),
@@ -172,7 +241,13 @@ def write_outputs(
     )
     single_table = None
     if int(config_payload.get("instrument_count", 0)) == 1:
-        single_table = build_single_stock_table(detail)
+        scan_settings = config_payload.get("scan", {})
+        single_table = build_single_stock_table(
+            detail,
+            timeframes=config_payload.get("timeframes", []),
+            ma_types=scan_settings.get("ma_types", []),
+            periods=scan_settings.get("periods", []),
+        )
         single_table.to_csv(
             output_dir / "single_stock_table.csv",
             index=False,
@@ -195,11 +270,12 @@ def write_outputs(
         "<li><code>best_difference</code> = MA - fiyat (TL).</li>"
         "<li><code>best_distance_pct</code> gercek yuzde uzakliktir. "
         "<code>best_distance_atr</code> ATR uzakligidir; yuzde degildir.</li>"
+        "<li><code>best_compatibility_score</code> 0-100 arası Uyum Skorudur; temas, taraf koruma, kazanma, Medyan R, Edge ve istikrarı birleştirir.</li>"
         "<li><code>filter_status</code> Uygun satirlar once gelir. Filtre disi "
         "hisseler silinmez; neden <code>filter_reasons</code> alanindadir.</li>"
         "<li>Uyum sinifi gecmis temas istatistigidir; otomatik al-sat emri degildir.</li>"
         "</ul></div>"
-        + summary.to_html(
+        + market_table.to_html(
             index=False,
             border=0,
             escape=True,
@@ -219,7 +295,7 @@ def write_outputs(
             "h1,h2{color:#172b4d}.guide{background:white;padding:16px;border:1px solid "
             "#dfe3e8;margin:14px 0}</style></head><body>"
             "<h1>Tek Hisse - Seçilen MA Türleri ve Periyotları</h1>"
-            f"<p>{len(single_table)} destek/direnç satırı</p>"
+            f"<p>{len(single_table)} analiz satırı</p>"
             "<div class='guide'><h2>Tablo nasıl okunur?</h2><ul>"
             "<li><b>Temas</b>: birbirinden ayrıştırılmış tarihsel MA temas sayısıdır.</li>"
             "<li><b>Taraf Koruma %</b>: destek için MA üstünde, direnç için MA altında "
@@ -227,6 +303,7 @@ def write_outputs(
             "<li><b>Yanlış Taraf %</b>: fiyatın beklenen tarafın tersinde kaldığı orandır.</li>"
             "<li><b>Kesişim</b>: fiyatın MA tarafını kaç kez değiştirdiğini gösterir; "
             "yüksek değer kararsızlığa işaret edebilir.</li>"
+            "<li><b>Uyum Skoru</b>: temas, taraf koruma, kazanma, Medyan R, Edge ve istikrarın 0-100 birleşimidir.</li>"
             "<li><b>Medyan R / Edge R</b>: temas sonrası maliyet düzeltilmiş tepki ve "
             "rastgele giriş bazına göre avantajdır.</li></ul></div>"
             + single_table.to_html(

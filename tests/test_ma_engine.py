@@ -9,6 +9,7 @@ from scanner.ma_engine import (
     Touch,
     aggregate_trend,
     build_market_summary,
+    compatibility_score,
     compute_ma,
     detect_touches,
     prepare_frame,
@@ -239,5 +240,15 @@ class MovingAverageEngineTests(unittest.TestCase):
         )
         self.assertEqual(reasons, [])
 
+    def test_compatibility_score_is_transparent_zero_to_one_hundred(self):
+        config = ScanConfig(min_touches=12)
+
+        score = compatibility_score(12, 100.0, 100.0, 1.0, 1.0, 3, config)
+
+        self.assertEqual(score, 100.0)
+        self.assertEqual(
+            compatibility_score(0, float("nan"), float("nan"), -1.0, -1.0, 0, config),
+            0.0,
+        )
 if __name__ == "__main__":
     unittest.main()

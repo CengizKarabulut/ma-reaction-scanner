@@ -18,7 +18,7 @@ def _number(value: object, digits: int = 2) -> str:
 
 _TELEGRAM_TEXT_BUDGET = 4_000
 _FOOTER = [
-    "Uzk% = (MA - fiyat) / fiyat. ATR = volatiliteye gore uzaklik.",
+    "Uzk% = (MA - fiyat) / fiyat. Skor = 0-100 tarihsel MA uyumu.",
     "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
     "Tam rapor CSV eki ve GitHub artifact icindedir.",
 ]
@@ -36,9 +36,9 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
         f"Toplam: <b>{frame['symbol'].nunique()}</b> varlik - her varlik tek satir",
         "",
         "<pre>",
-        f"{'Hisse':<7} {'TF':<4} {'MA':<8} {'Fiyat':>8} {'MA Deg':>8} "
-        f"{'Uzk%':>6} {'ATR':>6} {'Durum':<5}",
-        "-" * 71,
+        f"{'Varlik':<7} {'MA':<8} {'TF':<4} {'Tms':>3} {'Kor%':>5} "
+        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Uzk%':>6} {'Skor':>5} {'Dur':<4}",
+        "-" * 74,
     ]
     has_exclusions = (
         "filter_status" in selected.columns
@@ -49,13 +49,16 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     for index, row in selected.iterrows():
         eligible = str(row.get("filter_status", "Uygun")) == "Uygun"
         table_row = (
-            f"{str(row['symbol']):<7} {str(row.get('best_timeframe','-')):<4} "
-            f"{str(row.get('best_ma','-')):<8} "
-            f"{_number(row.get('current_price')):>8} "
-            f"{_number(row.get('best_ma_value')):>8} "
+            f"{str(row['symbol']):<7} {str(row.get('best_ma','-')):<8} "
+            f"{str(row.get('best_timeframe','-')):<4} "
+            f"{_number(row.get('best_touches'), 0):>3} "
+            f"{_number(row.get('best_side_adherence_pct')):>5} "
+            f"{_number(row.get('best_win_rate_pct')):>5} "
+            f"{_number(row.get('best_median_net_r')):>5} "
+            f"{_number(row.get('best_edge_r')):>5} "
             f"{_number(row.get('best_distance_pct')):>6} "
-            f"{_number(row.get('best_distance_atr')):>6} "
-            f"{'Uygun' if eligible else 'Disi':<5}"
+            f"{_number(row.get('best_compatibility_score')):>5} "
+            f"{'OK' if eligible else 'Disi':<4}"
         )
         if not _fits(lines, [table_row, "</pre>", "", *reason_reserve]):
             break
@@ -96,13 +99,13 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
 def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
     lines = [
         f"<b>{str(label)[:200]}</b>",
-        f"Seçilen kombinasyonlar: <b>{len(frame)}</b> destek/direnç satırı",
+        f"Seçilen sonuçlar: <b>{len(frame)}</b> analiz satırı",
         "En güçlü satırlar aşağıdadır; tam tablo CSV ve HTML ekindedir.",
         "",
         "<pre>",
         f"{'TF':<4} {'MA':<8} {'Taraf':<7} {'Tms':>3} {'Kor%':>5} "
-        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5}",
-        "-" * 53,
+        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Skor':>5}",
+        "-" * 59,
     ]
     displayed = 0
     footer = [
@@ -120,7 +123,8 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
             f"{_number(row.get('Taraf Koruma %')):>5} "
             f"{_number(row.get('Kazanma %')):>5} "
             f"{_number(row.get('Medyan R')):>5} "
-            f"{_number(row.get('Edge R')):>5}"
+            f"{_number(row.get('Edge R')):>5} "
+            f"{_number(row.get('Uyum Skoru')):>5}"
         )
         if len("\n".join([*lines, table_row, *footer])) > _TELEGRAM_TEXT_BUDGET:
             break

@@ -17,6 +17,12 @@ class NotificationTests(unittest.TestCase):
                     "best_ma_value": 10.2,
                     "best_distance_pct": 2.0,
                     "best_distance_atr": 1.5,
+                    "best_touches": 18,
+                    "best_side_adherence_pct": 81.5,
+                    "best_win_rate_pct": 64.0,
+                    "best_median_net_r": 0.8,
+                    "best_edge_r": 0.3,
+                    "best_compatibility_score": 78.2,
                     "filter_status": "Filtre disi",
                     "filter_reasons": "Likidite, Gap",
                 }
@@ -27,6 +33,8 @@ class NotificationTests(unittest.TestCase):
 
         self.assertIn("Disi", message)
         self.assertIn("TEST: Likidite, Gap", message)
+        self.assertIn("78.20", message)
+        self.assertIn("81.50", message)
 
     def test_large_filtered_summary_stays_within_telegram_limit(self):
         frame = pd.DataFrame(

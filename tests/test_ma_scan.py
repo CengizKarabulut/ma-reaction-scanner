@@ -144,5 +144,30 @@ class ScannerInputTests(unittest.TestCase):
         self.assertEqual(table.loc[0, "Temas"], 18)
         self.assertEqual(table.loc[0, "Taraf Koruma %"], 81.5)
         self.assertEqual(table.loc[0, "Güncel Rol"], "Aktif")
+    def test_single_stock_table_marks_requested_combination_without_history(self):
+        detail = pd.DataFrame(
+            [
+                {
+                    "timeframe": "1mo", "ma_type": "SMA", "period": 55,
+                    "ma": "SMA55", "side": "Destek", "active_side": True,
+                    "compatibility": "Uyumlu", "compatibility_score": 70.0,
+                    "touches": 14, "positive_periods": 3, "edge_r": 0.3,
+                    "median_net_r": 0.4, "distance_atr": 0.2,
+                    "filter_pass": True,
+                }
+            ]
+        )
+
+        table = build_single_stock_table(
+            detail,
+            timeframes=["1mo"],
+            ma_types=["SMA"],
+            periods=[55, 377],
+        )
+
+        missing = table[table["MA"] == "SMA377"].iloc[0]
+        self.assertEqual(missing["Taraf"], "Veri yok")
+        self.assertEqual(missing["Uyum"], "Yetersiz veri")
+        self.assertEqual(missing["Filtre Nedeni"], "Seçilen MA için yeterli geçmiş mum yok")
 if __name__ == "__main__":
     unittest.main()
