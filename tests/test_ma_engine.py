@@ -12,6 +12,7 @@ from scanner.ma_engine import (
     compute_ma,
     detect_touches,
     prepare_frame,
+    quality_filter_reasons,
     simulate_trade,
     trend_state,
 )
@@ -216,6 +217,27 @@ class MovingAverageEngineTests(unittest.TestCase):
         self.assertEqual(summary.iloc[0]["best_ma"], "EMA20")
         self.assertEqual(summary.iloc[0]["filter_status"], "Uygun")
 
+    def test_try_filters_are_not_applied_to_global_stocks(self):
+        config = ScanConfig(
+            min_price=100.0,
+            min_daily_turnover_try=1_000_000.0,
+            max_zero_volume_pct=20.0,
+            max_gap_pct=15.0,
+            max_abs_edge_r=5.0,
+        )
+        reasons = quality_filter_reasons(
+            asset_class="stock",
+            market="GLOBAL",
+            price=12.0,
+            metrics={
+                "median_daily_turnover_try": 50_000.0,
+                "zero_volume_pct": 0.0,
+                "max_recent_gap_pct": 0.0,
+            },
+            edge_r=1.0,
+            config=config,
+        )
+        self.assertEqual(reasons, [])
 
 if __name__ == "__main__":
     unittest.main()
