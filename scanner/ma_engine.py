@@ -327,17 +327,22 @@ def simulate_trade(df: pd.DataFrame, touch: Touch, config: ScanConfig) -> Trade 
             float(df["Close"].iloc[position]),
         )
         bar_open = float(df["Open"].iloc[position])
+        gap_through_stop = (
+            (direction == 1 and bar_open <= stop)
+            or (direction == -1 and bar_open >= stop)
+        )
+        if gap_through_stop:
+            # Exit at the open before consuming any post-exit intrabar range.
+            exit_price, exit_position = bar_open, position
+            exit_reason = "Takip eden stop" if stop != initial_stop else "\u0130lk stop"
+            break
         if direction == 1:
             favorable, adverse, stop_hit = high - entry, entry - low, low <= stop
-            gap_through_stop = bar_open <= stop
         else:
             favorable, adverse, stop_hit = entry - low, high - entry, high >= stop
-            gap_through_stop = bar_open >= stop
         max_favorable, max_adverse = max(max_favorable, favorable), max(max_adverse, adverse)
         if stop_hit:
-            # A stale stop is not executable when the bar opens through it.
-            exit_price = bar_open if gap_through_stop else stop
-            exit_position = position
+            exit_price, exit_position = stop, position
             exit_reason = "Takip eden stop" if stop != initial_stop else "İlk stop"
             break
         reached_1r, reached_2r = reached_1r or favorable >= risk, reached_2r or favorable >= 2.0 * risk
