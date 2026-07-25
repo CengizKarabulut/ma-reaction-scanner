@@ -471,6 +471,7 @@ def market_quality_metrics(
 def quality_filter_reasons(
     *,
     asset_class: str,
+    market: str,
     price: float,
     metrics: dict[str, float],
     edge_r: float,
@@ -479,11 +480,12 @@ def quality_filter_reasons(
     reasons: list[str] = []
     if asset_class != "stock":
         return reasons
-    if price < config.min_price:
-        reasons.append("Fiyat")
-    turnover = metrics["median_daily_turnover_try"]
-    if not np.isfinite(turnover) or turnover < config.min_daily_turnover_try:
-        reasons.append("Likidite")
+    if market == "BIST":
+        if price < config.min_price:
+            reasons.append("Fiyat")
+        turnover = metrics["median_daily_turnover_try"]
+        if not np.isfinite(turnover) or turnover < config.min_daily_turnover_try:
+            reasons.append("Likidite")
     if metrics["zero_volume_pct"] > config.max_zero_volume_pct:
         reasons.append("Sifir hacim")
     if metrics["max_recent_gap_pct"] > config.max_gap_pct:
@@ -547,6 +549,7 @@ def scan_frame(
                 )
                 filter_reasons = quality_filter_reasons(
                     asset_class=str(metadata.get("asset_class", "")),
+                    market=str(metadata.get("market", "")),
                     price=current_price,
                     metrics=quality_metrics,
                     edge_r=edge_r,

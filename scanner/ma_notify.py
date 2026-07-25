@@ -17,31 +17,47 @@ def _number(value: object, digits: int = 2) -> str:
 
 
 def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
+    selected = frame.head(max(1, top))
     lines = [
         f"<b>{label}</b>",
         f"Toplam: <b>{frame['symbol'].nunique()}</b> varlik - her varlik tek satir",
         "",
         "<pre>",
-        f"{'Hisse':<7} {'TF':<4} {'MA':<8} {'Fiyat':>8} {'MA Deg':>8} {'Uzk%':>6} {'ATR':>6}",
-        "-" * 65,
+        f"{'Hisse':<7} {'TF':<4} {'MA':<8} {'Fiyat':>8} {'MA Deg':>8} "
+        f"{'Uzk%':>6} {'ATR':>6} {'Durum':<5}",
+        "-" * 71,
     ]
-    for _, row in frame.head(max(1, top)).iterrows():
+    for _, row in selected.iterrows():
+        eligible = str(row.get("filter_status", "Uygun")) == "Uygun"
         lines.append(
             f"{str(row['symbol']):<7} {str(row.get('best_timeframe','-')):<4} "
             f"{str(row.get('best_ma','-')):<8} "
             f"{_number(row.get('current_price')):>8} "
             f"{_number(row.get('best_ma_value')):>8} "
             f"{_number(row.get('best_distance_pct')):>6} "
-            f"{_number(row.get('best_distance_atr')):>6}"
+            f"{_number(row.get('best_distance_atr')):>6} "
+            f"{'Uygun' if eligible else 'Disi':<5}"
         )
-    lines.extend([
-        "</pre>",
-        "",
-        "Uzk% = (MA - fiyat) / fiyat. ATR = volatiliteye gore uzaklik.",
-        "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
-        "Tam rapor CSV eki ve GitHub artifact icindedir.",
-    ])
+    lines.extend(["</pre>", ""])
+    if "filter_status" in selected.columns:
+        excluded = selected[selected["filter_status"] != "Uygun"]
+    else:
+        excluded = selected.iloc[0:0]
+    if not excluded.empty:
+        lines.append("<b>Filtre disi nedenleri</b>")
+        for _, row in excluded.iterrows():
+            reasons = str(row.get("filter_reasons", "")).strip() or "Esik disi"
+            lines.append(f"{row['symbol']}: {reasons}")
+        lines.append("")
+    lines.extend(
+        [
+            "Uzk% = (MA - fiyat) / fiyat. ATR = volatiliteye gore uzaklik.",
+            "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
+            "Tam rapor CSV eki ve GitHub artifact icindedir.",
+        ]
+    )
     return "\n".join(lines)
+
 
 def send(summary_path: Path, label: str, top: int) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
