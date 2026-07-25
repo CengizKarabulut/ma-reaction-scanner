@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""Configurable MA trend and reaction scanner."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import sys
+
+import pandas as pd
+
+from .asset_universe import ASSET_CLASSES, build_custom_instruments, list_universes, resolve_universe
+from .ma_data import MarketDataProvider
+from .ma_engine import DEFAULT_PERIODS, MA_TYPES, TIMEFRAMES, ScanConfig, build_market_summary, scan_frame
+from .stock_metadata import enrich_stock_instruments, format_index_memberships
+
+
+def parse_csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def parse_periods(value: str) -> tuple[int, ...]:
+    periods = tuple(dict.fromkeys(int(item) for item in parse_csv(value)))
+    if not periods:
+        raise ValueError("En az bir periyot gereklidir")
+    return periods
+
+
+def parse_ma_types(value: str) -> tuple[str, ...]:
+    values = tuple(dict.fromkeys(item.upper() for item in parse_csv(value)))
+    unknown = sorted(set(values) - set(MA_TYPES))
+    if unknown:
+        raise ValueError(f"Bilinmeyen MA türleri: {', '.join(unknown)}")
+    return values
+
+
+def parse_timeframes(value: str) -> tuple[str, ...]:
+    presets = {
+        "all": TIMEFRAMES,
+        "intraday": ("5m", "15m", "30m", "1h", "4h"),
+        "swing": ("1d", "1wk", "1mo"),
+        "daily": ("1d",),
+    }
+    key = value.strip().lower()
+    values = presets.get(key, tuple(dict.fromkeys(item.lower() for item in parse_csv(value))))
+    unknown = sorted(set(values) - set(TIMEFRAMES))
+    if unknown:
+        raise ValueError(f"Bilinmeyen zaman dilimleri: {', '.join(unknown)}")
+    if not values:
+        raise ValueError("En az bir zaman dilimi gereklidir")
+    return tuple(values)
+
+
+def resolve_instruments(args: argparse.Namespace):
+    if args.universe == "custom":
+        instruments = build_custom_instruments(
+            parse_csv(args.symbols or args.symbol),
+            asset_class=args.asset_class,
+            market=args.market,
+        )
+    else:
+        instruments = resolve_universe(args.universe, sector=args.sector)
+    instruments = enrich_stock_instruments(instruments)
+    if args.shard_count > 1:
+        instruments = [
+            item for index, item in enumerate(instruments)
+            if index % args.shard_count == args.shard_index
+        ]
+    return instruments[: args.max_symbols] if args.max_symbols > 0 else instruments
+
+
+def instrument_metadata(instrument) -> dict[str, object]:
+    return {
+        "asset_class": instrument.asset_class,
+        "asset_label": instrument.asset_label,
+        "display_name": instrument.display_name,
+        "market": instrument.market,
+        "sector": instrument.sector,
+        "industry": instrument.industry,
+        "index_memberships": format_index_memberships(instrument.index_memberships),
+    }
+
+
+def write_outputs(
+    output_dir: Path,
+    detail: pd.DataFrame,
+    errors: pd.DataFrame,
+    config_payload: dict[str, object],
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary = build_market_summary(
+        detail,
+        near_distance_atr=float(config_payload["scan"]["near_distance_atr"]),
+    )
+    detail.to_csv(output_dir / "ma_detail.csv", index=False, encoding="utf-8-sig")
+    summary.to_csv(output_dir / "market_summary.csv", index=False, encoding="utf-8-sig")
+    errors.to_csv(output_dir / "errors.csv", index=False, encoding="utf-8-sig")
+    (output_dir / "run_config.json").write_text(
+        json.dumps(config_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    html = (
+        "<!doctype html><html lang='tr'><head><meta charset='utf-8'>"
+        "<title>MA Trend ve Tepki Raporu</title>"
+        "<style>body{font:14px system-ui;margin:24px;background:#f7f8fa;color:#18202a}"
+        "table{border-collapse:collapse;width:100%;background:white}th,td{padding:7px;"
+        "border:1px solid #dfe3e8;text-align:left;white-space:nowrap}th{position:sticky;"
+        "top:0;background:#172b4d;color:white}tr:nth-child(even){background:#f2f5f8}"
+        "h1{color:#172b4d}.meta{color:#566}</style></head><body>"
+        "<h1>MA Trend ve Tepki — Piyasa Özeti</h1>"
+        f"<p class='meta'>{len(summary)} varlık · her varlık tek satır</p>"
+        + summary.to_html(index=False, border=0, escape=True)
+        + "</body></html>"
+    )
+    (output_dir / "market_report.html").write_text(html, encoding="utf-8")
+
+
+def merge_outputs(merge_dir: Path, output_dir: Path) -> int:
+    detail_paths = list(merge_dir.rglob("ma_detail.csv"))
+    error_paths = list(merge_dir.rglob("errors.csv"))
+    config_paths = list(merge_dir.rglob("run_config.json"))
+    if not detail_paths:
+        raise RuntimeError(f"Birleştirilecek ma_detail.csv bulunamadı: {merge_dir}")
+    details = [pd.read_csv(path) for path in detail_paths if path.stat().st_size > 3]
+    detail = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
+    if not detail.empty:
+        detail = detail.drop_duplicates(
+            ["asset_class", "symbol", "timeframe", "ma_type", "period", "side"]
+        )
+    error_frames = [pd.read_csv(path) for path in error_paths if path.stat().st_size > 3]
+    errors = (
+        pd.concat(error_frames, ignore_index=True)
+        if error_frames
+        else pd.DataFrame(columns=["symbol", "timeframe", "error"])
+    )
+    config_payload = (
+        json.loads(config_paths[0].read_text(encoding="utf-8-sig"))
+        if config_paths
+        else {"scan": ScanConfig().to_dict()}
+    )
+    config_payload["merged_shards"] = len(detail_paths)
+    write_outputs(output_dir, detail, errors, config_payload)
+    print(f"Birleştirildi: {len(detail_paths)} parça")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--universe", default="custom")
+    parser.add_argument("--symbol", default="ASELS")
+    parser.add_argument("--symbols", default="")
+    parser.add_argument("--asset-class", choices=list(ASSET_CLASSES), default="stock")
+    parser.add_argument("--market", choices=["BIST", "GLOBAL"], default="BIST")
+    parser.add_argument("--sector", default="Tümü / uygulanmaz")
+    parser.add_argument("--list-universes", action="store_true")
+    parser.add_argument("--timeframes", default="1d", help="CSV veya all/intraday/swing/daily")
+    parser.add_argument("--ma-types", default=",".join(MA_TYPES))
+    parser.add_argument("--periods", default=",".join(map(str, DEFAULT_PERIODS)))
+    parser.add_argument("--trend-slope-bars", type=int, default=10)
+    parser.add_argument("--trend-slope-threshold-atr", type=float, default=0.10)
+    parser.add_argument("--atr-period", type=int, default=14)
+    parser.add_argument("--touch-zone-atr", type=float, default=0.20)
+    parser.add_argument("--separation-atr", type=float, default=2.0)
+    parser.add_argument("--min-touches", type=int, default=12)
+    parser.add_argument("--stop-buffer-atr", type=float, default=0.20)
+    parser.add_argument("--trailing-stop-atr", type=float, default=2.0)
+    parser.add_argument("--max-holding-bars", type=int, default=20)
+    parser.add_argument("--roundtrip-cost-bps", type=float, default=25.0)
+    parser.add_argument("--min-edge-r", type=float, default=0.10)
+    parser.add_argument("--near-distance-atr", type=float, default=1.0)
+    parser.add_argument("--lookback", type=int, default=0)
+    parser.add_argument("--source", choices=["auto", "borsapy", "yfinance"], default="auto")
+    parser.add_argument("--prefer-cache", action="store_true")
+    parser.add_argument("--max-symbols", type=int, default=0)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--output-dir", default="reports/ma_scan")
+    parser.add_argument("--merge-dir", default="")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.list_universes:
+        print(pd.DataFrame(list_universes()).to_string(index=False))
+        return 0
+    output_dir = Path(args.output_dir)
+    if args.merge_dir:
+        return merge_outputs(Path(args.merge_dir), output_dir)
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        raise ValueError("Shard ayarları geçersiz")
+    timeframes = parse_timeframes(args.timeframes)
+    config = ScanConfig(
+        ma_types=parse_ma_types(args.ma_types),
+        periods=parse_periods(args.periods),
+        trend_slope_bars=args.trend_slope_bars,
+        trend_slope_threshold_atr=args.trend_slope_threshold_atr,
+        atr_period=args.atr_period,
+        touch_zone_atr=args.touch_zone_atr,
+        separation_atr=args.separation_atr,
+        min_touches=args.min_touches,
+        stop_buffer_atr=args.stop_buffer_atr,
+        trailing_stop_atr=args.trailing_stop_atr,
+        max_holding_bars=args.max_holding_bars,
+        roundtrip_cost_bps=args.roundtrip_cost_bps,
+        min_edge_r=args.min_edge_r,
+        near_distance_atr=args.near_distance_atr,
+    )
+    instruments = resolve_instruments(args)
+    provider = MarketDataProvider(source=args.source)
+    details: list[pd.DataFrame] = []
+    errors: list[dict[str, str]] = []
+    for instrument in instruments:
+        for timeframe in timeframes:
+            try:
+                fetched = provider.fetch(
+                    instrument.symbol,
+                    timeframe,
+                    prefer_cache=args.prefer_cache,
+                    asset_class=instrument.asset_class,
+                    market=instrument.market,
+                )
+                frame = fetched.frame.tail(args.lookback) if args.lookback > 0 else fetched.frame
+                result = scan_frame(
+                    frame,
+                    symbol=instrument.symbol,
+                    timeframe=timeframe,
+                    config=config,
+                    metadata={
+                        **instrument_metadata(instrument),
+                        "data_source": fetched.source,
+                        "data_fingerprint": fetched.fingerprint,
+                    },
+                )
+                if not result.empty:
+                    details.append(result)
+                print(f"OK {instrument.symbol} {timeframe}: {len(result)} satır")
+            except Exception as exc:
+                errors.append({"symbol": instrument.symbol, "timeframe": timeframe, "error": str(exc)})
+                print(f"ERROR {instrument.symbol} {timeframe}: {exc}", file=sys.stderr)
+    detail = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
+    error_frame = pd.DataFrame(errors, columns=["symbol", "timeframe", "error"])
+    payload = {
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "universe": args.universe,
+        "timeframes": list(timeframes),
+        "scan": config.to_dict(),
+        "lookback": args.lookback,
+        "source": args.source,
+        "shard_index": args.shard_index,
+        "shard_count": args.shard_count,
+        "instrument_count": len(instruments),
+    }
+    write_outputs(output_dir, detail, error_frame, payload)
+    print(f"Çıktılar: {output_dir.resolve()}")
+    return 0 if not detail.empty else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

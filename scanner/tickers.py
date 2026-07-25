@@ -13,7 +13,6 @@ Desteklenen isimler:
 """
 
 import json
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -327,7 +326,7 @@ def get_list(name: str) -> list:
             print(f"  ⚠️ {index_sym} bileşenleri alınamadı")
             return []
         except ImportError:
-            print(f"  ⚠️ sector_resolver.py bulunamadı")
+            print("  ⚠️ sector_resolver.py bulunamadı")
             return []
 
     # === YENİ 2: Tüm BIST endeksleri (79 adet) ===
@@ -345,10 +344,10 @@ def get_list(name: str) -> list:
                 symbols = [d['symbol'] if isinstance(d, dict) else d for d in idxs]
                 print(f"  Tüm BIST endeksleri: {len(symbols)} adet (borsapy)")
                 return symbols
-            print(f"  ⚠️ Endeks listesi alınamadı")
+            print("  ⚠️ Endeks listesi alınamadı")
             return []
         except ImportError:
-            print(f"  ⚠️ sector_resolver.py bulunamadı")
+            print("  ⚠️ sector_resolver.py bulunamadı")
             return []
 
     # === Dinamik sektör grubu (cache'ten) ===
@@ -367,10 +366,10 @@ def get_list(name: str) -> list:
                 return tickers
             else:
                 print(f"  ⚠️ '{sector_name}' sektöründe hisse yok (cache boş olabilir)")
-                print(f"  → Önce: python scanner/sector_resolver.py --build-cache")
+                print("  → Önce: python scanner/sector_resolver.py --build-cache")
                 return []
         except ImportError:
-            print(f"  ⚠️ sector_resolver.py bulunamadi")
+            print("  ⚠️ sector_resolver.py bulunamadi")
             return []
 
     # Multi-instrument grup kontrolu (BIST disi + statik)
@@ -389,7 +388,7 @@ def get_list(name: str) -> list:
         all_avail = list(INDEX_MAP.keys()) + list(INSTRUMENT_GROUPS.keys())
         print(f"  HATA: '{name}' tanımlı değil.")
         print(f"  Geçerli isim grupları: {', '.join(all_avail[:15])}...")
-        print(f"  Veya: 'BIST_SEKTOR:Banks', 'BIST_SEKTOR:Technology' (cache'ten)")
+        print("  Veya: 'BIST_SEKTOR:Banks', 'BIST_SEKTOR:Technology' (cache'ten)")
         return []
 
     # === Cache'i yükle (varsa) ===
@@ -409,7 +408,7 @@ def get_list(name: str) -> list:
         if age <= 30:
             return cached_symbols
         else:
-            print(f"     ✗ Cache 30+ gün eski, kullanılmıyor!")
+            print("     ✗ Cache 30+ gün eski, kullanılmıyor!")
 
     # === Canlı kaynaklardan çek (birden çok yöntem) ===
     if name_upper in ('BIST_TUM', 'BIST_ALL', 'XUTUM'):
@@ -423,13 +422,11 @@ def get_list(name: str) -> list:
         _save_cache(cache)
         # bist_data_fetcher cache'ine de yaz (eğer var ise)
         try:
-            sys_path_inserted = False
             import sys as _sys
             from pathlib import Path as _Path
             scanner_dir = _Path(__file__).parent
             if str(scanner_dir) not in _sys.path:
                 _sys.path.insert(0, str(scanner_dir))
-                sys_path_inserted = True
             from bist_data_fetcher import update_index as _update
             _update(index_symbol, verbose=False)
         except Exception:
@@ -445,9 +442,9 @@ def get_list(name: str) -> list:
 
     # === Tamamen başarısız ===
     print(f"  ✗ HATA: '{name}' listesi alınamadı.")
-    print(f"     Hiçbir kaynak çalışmıyor ve cache yok.")
+    print("     Hiçbir kaynak çalışmıyor ve cache yok.")
     print(f"     Çözüm 1: python scanner/bist_data_fetcher.py --update {index_symbol}")
-    print(f"     Çözüm 2: --tickers HISSE1,HISSE2,... şeklinde manuel liste verin")
+    print("     Çözüm 2: --tickers HISSE1,HISSE2,... şeklinde manuel liste verin")
     return []
 
 
