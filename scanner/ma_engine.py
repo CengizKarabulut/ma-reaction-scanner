@@ -144,7 +144,10 @@ def normalize_ohlcv(
     )
     if out.empty:
         raise ValueError("Temizleme sonrası OHLCV verisi boş")
-    if not allow_non_positive and (out[["Open", "High", "Low", "Close"]] <= 0).any().any():
+    prices = out[["Open", "High", "Low", "Close"]]
+    if (prices == 0).any().any():
+        raise ValueError("OHLC fiyatları sıfır olamaz")
+    if not allow_non_positive and (prices < 0).any().any():
         raise ValueError("OHLC fiyatları pozitif olmalıdır")
     tolerance = 1e-12
     if (
@@ -336,7 +339,7 @@ def simulate_trade(df: pd.DataFrame, touch: Touch, config: ScanConfig) -> Trade 
     else:
         initial_stop = max(float(df["High"].iloc[touch.position]), touch.ma_value) + config.stop_buffer_atr * touch.atr
         risk = initial_stop - entry
-    if not np.isfinite(risk) or risk <= max(entry * 1e-6, 1e-12):
+    if not np.isfinite(risk) or risk <= max(abs(entry) * 1e-6, 1e-12):
         return None
     stop, best_close = float(initial_stop), entry
     max_favorable = max_adverse = 0.0
@@ -380,7 +383,7 @@ def simulate_trade(df: pd.DataFrame, touch: Touch, config: ScanConfig) -> Trade 
             stop = min(stop, best_close + config.trailing_stop_atr * touch.atr)
         exit_price, exit_position = close, position
     gross_r = direction * (exit_price - entry) / risk
-    cost_r = (config.roundtrip_cost_bps / 10_000.0) * entry / risk
+    cost_r = (config.roundtrip_cost_bps / 10_000.0) * abs(entry) / risk
     return Trade(
         touch.position, entry_position, exit_position, direction, entry,
         initial_stop, float(exit_price), float(gross_r - cost_r),
