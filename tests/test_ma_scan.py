@@ -1,9 +1,19 @@
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+import pandas as pd
 
 from scanner.ma_engine import MA_TYPES, TIMEFRAMES
-from scanner.ma_scan import merge_outputs, parse_ma_types, parse_periods, parse_timeframes
+from scanner.ma_scan import (
+    main,
+    merge_outputs,
+    parse_ma_types,
+    parse_periods,
+    parse_timeframes,
+)
 
 
 class ScannerInputTests(unittest.TestCase):
@@ -34,6 +44,65 @@ class ScannerInputTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Missing shards"):
                 merge_outputs(root, root / "output", expected_shards=2)
 
+    def test_main_fails_when_every_request_errors(self):
+        instrument = SimpleNamespace(
+            symbol="ASELS",
+            asset_class="stock",
+            market="BIST",
+            asset_label="Hisse",
+            display_name="ASELS",
+            sector="",
+            industry="",
+            index_memberships=(),
+        )
+        with TemporaryDirectory() as temporary:
+            with (
+                patch("scanner.ma_scan.resolve_instruments", return_value=[instrument]),
+                patch("scanner.ma_scan.MarketDataProvider") as provider_class,
+            ):
+                provider_class.return_value.fetch.side_effect = RuntimeError("offline")
+                code = main(
+                    [
+                        "--timeframes",
+                        "1d",
+                        "--output-dir",
+                        str(Path(temporary) / "output"),
+                    ]
+                )
+        self.assertEqual(code, 1)
+
+    def test_main_accepts_valid_empty_analysis(self):
+        instrument = SimpleNamespace(
+            symbol="ASELS",
+            asset_class="stock",
+            market="BIST",
+            asset_label="Hisse",
+            display_name="ASELS",
+            sector="",
+            industry="",
+            index_memberships=(),
+        )
+        fetched = SimpleNamespace(
+            frame=pd.DataFrame(),
+            source="test",
+            fingerprint="abc",
+        )
+        with TemporaryDirectory() as temporary:
+            with (
+                patch("scanner.ma_scan.resolve_instruments", return_value=[instrument]),
+                patch("scanner.ma_scan.MarketDataProvider") as provider_class,
+                patch("scanner.ma_scan.scan_frame", return_value=pd.DataFrame()),
+            ):
+                provider_class.return_value.fetch.return_value = fetched
+                code = main(
+                    [
+                        "--timeframes",
+                        "1d",
+                        "--output-dir",
+                        str(Path(temporary) / "output"),
+                    ]
+                )
+        self.assertEqual(code, 0)
 
 if __name__ == "__main__":
     unittest.main()

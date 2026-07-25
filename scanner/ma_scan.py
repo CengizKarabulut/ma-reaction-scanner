@@ -252,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         near_distance_atr=args.near_distance_atr,
     )
     instruments = resolve_instruments(args)
+    attempted_requests = len(instruments) * len(timeframes)
     provider = MarketDataProvider(source=args.source)
     details: list[pd.DataFrame] = []
     errors: list[dict[str, str]] = []
@@ -298,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     write_outputs(output_dir, detail, error_frame, payload)
     print(f"Çıktılar: {output_dir.resolve()}")
-    return 0
+    return 1 if attempted_requests > 0 and len(errors) == attempted_requests else 0
 
 
 if __name__ == "__main__":
