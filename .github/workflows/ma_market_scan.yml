@@ -1,0 +1,172 @@
+name: Tüm BIST MA Trend ve Tepki Taraması
+
+on:
+  schedule:
+    - cron: "15 17 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      timeframe_preset:
+        description: Zaman dilimi paketi
+        required: true
+        default: all
+        type: choice
+        options: [all, intraday, swing, daily, custom]
+      custom_timeframes:
+        description: "custom için: 5m,15m,30m,1h,4h,1d,1wk,1mo"
+        required: false
+        default: ""
+      ma_types:
+        description: Seçilecek MA türleri
+        required: true
+        default: SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA
+      periods:
+        description: Seçilecek MA periyotları
+        required: true
+        default: 5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377
+      trend_slope_bars:
+        description: Trend eğimi ölçüm barı
+        required: true
+        default: "10"
+      trend_slope_threshold_atr:
+        description: Yatay trend ATR eşiği
+        required: true
+        default: "0.10"
+      touch_zone_atr:
+        description: MA temas bölgesi ATR
+        required: true
+        default: "0.20"
+      separation_atr:
+        description: Temas öncesi uzaklaşma ATR
+        required: true
+        default: "2.0"
+      min_touches:
+        description: Minimum bağımsız temas
+        required: true
+        default: "12"
+      stop_buffer_atr:
+        description: İlk stop tamponu ATR
+        required: true
+        default: "0.20"
+      trailing_stop_atr:
+        description: Takip eden stop ATR
+        required: true
+        default: "2.0"
+      max_holding_bars:
+        description: Azami pozisyon barı
+        required: true
+        default: "20"
+      roundtrip_cost_bps:
+        description: Gidiş-dönüş maliyet baz puanı
+        required: true
+        default: "25"
+      min_edge_r:
+        description: Güçlü uyum minimum baz avantajı (R)
+        required: true
+        default: "0.10"
+      near_distance_atr:
+        description: Güncel yakınlık ATR
+        required: true
+        default: "1.0"
+      source:
+        description: Veri kaynağı
+        required: true
+        default: auto
+        type: choice
+        options: [auto, borsapy, yfinance]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Parçalı tüm BIST taraması
+        shell: bash
+        env:
+          PRESET: ${{ inputs.timeframe_preset || 'all' }}
+          CUSTOM_TF: ${{ inputs.custom_timeframes || '' }}
+          MA_TYPES: ${{ inputs.ma_types || 'SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA' }}
+          PERIODS: ${{ inputs.periods || '5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377' }}
+          SLOPE_BARS: ${{ inputs.trend_slope_bars || '10' }}
+          SLOPE_THRESHOLD: ${{ inputs.trend_slope_threshold_atr || '0.10' }}
+          TOUCH_ZONE: ${{ inputs.touch_zone_atr || '0.20' }}
+          SEPARATION: ${{ inputs.separation_atr || '2.0' }}
+          MIN_TOUCHES: ${{ inputs.min_touches || '12' }}
+          STOP_BUFFER: ${{ inputs.stop_buffer_atr || '0.20' }}
+          TRAIL: ${{ inputs.trailing_stop_atr || '2.0' }}
+          MAX_HOLD: ${{ inputs.max_holding_bars || '20' }}
+          COST: ${{ inputs.roundtrip_cost_bps || '25' }}
+          MIN_EDGE: ${{ inputs.min_edge_r || '0.10' }}
+          NEAR: ${{ inputs.near_distance_atr || '1.0' }}
+          SOURCE: ${{ inputs.source || 'auto' }}
+        run: |
+          TIMEFRAMES="$PRESET"
+          if [ "$PRESET" = "custom" ]; then TIMEFRAMES="$CUSTOM_TF"; fi
+          python -m scanner.ma_scan \
+            --universe bist_all_stocks \
+            --timeframes "$TIMEFRAMES" \
+            --ma-types "$MA_TYPES" \
+            --periods "$PERIODS" \
+            --trend-slope-bars "$SLOPE_BARS" \
+            --trend-slope-threshold-atr "$SLOPE_THRESHOLD" \
+            --touch-zone-atr "$TOUCH_ZONE" \
+            --separation-atr "$SEPARATION" \
+            --min-touches "$MIN_TOUCHES" \
+            --stop-buffer-atr "$STOP_BUFFER" \
+            --trailing-stop-atr "$TRAIL" \
+            --max-holding-bars "$MAX_HOLD" \
+            --roundtrip-cost-bps "$COST" \
+            --min-edge-r "$MIN_EDGE" \
+            --near-distance-atr "$NEAR" \
+            --source "$SOURCE" \
+            --shard-index "${{ matrix.shard }}" \
+            --shard-count 20 \
+            --output-dir "reports/shard-${{ matrix.shard }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ma-shard-${{ matrix.shard }}
+          path: reports/shard-${{ matrix.shard }}/
+          retention-days: 3
+
+  merge:
+    needs: scan
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ma-shard-*
+          path: parts
+      - run: python -m scanner.ma_scan --merge-dir parts --output-dir reports/final
+      - name: Telegram tekilleştirilmiş özet ve tam CSV
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m scanner.ma_notify --summary reports/final/market_summary.csv --label "Tüm BIST MA Trend ve Tepki" --top 25
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tum-bist-ma-trend-tepki-${{ github.run_id }}
+          path: reports/final/
+          retention-days: 90
+

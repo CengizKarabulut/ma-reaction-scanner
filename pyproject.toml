@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ma-reaction-scanner"
-version = "0.1.0"
-description = "Guarded moving-average support/resistance reaction research tools"
+version = "1.0.0"
+description = "Configurable moving-average trend and reaction scanner"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -16,16 +16,10 @@ dependencies = [
     "pandas>=2.0,<3",
     "numpy>=1.26,<3",
     "httpx>=0.27.0,<1",
-    "matplotlib>=3.8,<4",
-    "reportlab>=4,<5",
-    "tabulate>=0.9,<1",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "ruff>=0.5,<1",
-    "mypy>=1.10,<2",
-]
+dev = ["ruff>=0.5,<1"]
 
 [tool.setuptools.packages.find]
 include = ["scanner*"]
@@ -37,12 +31,3 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F"]
 ignore = ["E501"]
-
-[tool.mypy]
-python_version = "3.11"
-ignore_missing_imports = true
-follow_imports = "skip"
-allow_untyped_defs = true
-check_untyped_defs = false
-warn_unused_ignores = false
-no_implicit_optional = false

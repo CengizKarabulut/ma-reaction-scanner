@@ -1,0 +1,124 @@
+name: Tek Hisse MA Trend ve Tepki Analizi
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: BIST hisse kodu
+        required: true
+        default: ASELS
+      timeframes:
+        description: "all veya CSV: 5m,15m,30m,1h,4h,1d,1wk,1mo"
+        required: true
+        default: all
+      ma_types:
+        description: Seçilecek MA türleri
+        required: true
+        default: SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA
+      periods:
+        description: Seçilecek periyotlar
+        required: true
+        default: 5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377
+      trend_slope_bars:
+        description: Trend eğimi ölçüm barı
+        required: true
+        default: "10"
+      trend_slope_threshold_atr:
+        description: Yatay trend ATR eşiği
+        required: true
+        default: "0.10"
+      touch_zone_atr:
+        description: Temas bölgesi ATR
+        required: true
+        default: "0.20"
+      separation_atr:
+        description: Temas öncesi uzaklaşma ATR
+        required: true
+        default: "2.0"
+      min_touches:
+        description: Minimum bağımsız temas
+        required: true
+        default: "12"
+      stop_buffer_atr:
+        description: İlk stop tamponu ATR
+        required: true
+        default: "0.20"
+      trailing_stop_atr:
+        description: Takip eden stop ATR
+        required: true
+        default: "2.0"
+      max_holding_bars:
+        description: Azami pozisyon barı
+        required: true
+        default: "20"
+      roundtrip_cost_bps:
+        description: Gidiş-dönüş maliyet baz puanı
+        required: true
+        default: "25"
+      min_edge_r:
+        description: Güçlü uyum minimum baz avantajı (R)
+        required: true
+        default: "0.10"
+      near_distance_atr:
+        description: Güncel yakınlık ATR
+        required: true
+        default: "1.0"
+      source:
+        description: Veri kaynağı
+        required: true
+        default: auto
+        type: choice
+        options: [auto, borsapy, yfinance]
+
+permissions:
+  contents: read
+
+jobs:
+  single:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Tek hisse analizi
+        shell: bash
+        run: |
+          python -m scanner.ma_scan \
+            --universe custom \
+            --asset-class stock \
+            --market BIST \
+            --symbol "${{ inputs.symbol }}" \
+            --timeframes "${{ inputs.timeframes }}" \
+            --ma-types "${{ inputs.ma_types }}" \
+            --periods "${{ inputs.periods }}" \
+            --trend-slope-bars "${{ inputs.trend_slope_bars }}" \
+            --trend-slope-threshold-atr "${{ inputs.trend_slope_threshold_atr }}" \
+            --touch-zone-atr "${{ inputs.touch_zone_atr }}" \
+            --separation-atr "${{ inputs.separation_atr }}" \
+            --min-touches "${{ inputs.min_touches }}" \
+            --stop-buffer-atr "${{ inputs.stop_buffer_atr }}" \
+            --trailing-stop-atr "${{ inputs.trailing_stop_atr }}" \
+            --max-holding-bars "${{ inputs.max_holding_bars }}" \
+            --roundtrip-cost-bps "${{ inputs.roundtrip_cost_bps }}" \
+            --min-edge-r "${{ inputs.min_edge_r }}" \
+            --near-distance-atr "${{ inputs.near_distance_atr }}" \
+            --source "${{ inputs.source }}" \
+            --output-dir reports/single
+      - name: Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m scanner.ma_notify --summary reports/single/market_summary.csv --label "Tek Hisse MA Trend ve Tepki · ${{ inputs.symbol }}" --top 1
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tek-hisse-ma-trend-tepki-${{ inputs.symbol }}-${{ github.run_id }}
+          path: |
+            reports/single/
+            data_cache/
+          retention-days: 90
