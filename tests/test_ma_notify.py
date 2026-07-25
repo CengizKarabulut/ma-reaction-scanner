@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from scanner.ma_notify import format_summary
+from scanner.ma_notify import format_single_detail, format_summary
 
 
 class NotificationTests(unittest.TestCase):
@@ -17,6 +17,12 @@ class NotificationTests(unittest.TestCase):
                     "best_ma_value": 10.2,
                     "best_distance_pct": 2.0,
                     "best_distance_atr": 1.5,
+                    "best_touches": 18,
+                    "best_side_adherence_pct": 81.5,
+                    "best_win_rate_pct": 64.0,
+                    "best_median_net_r": 0.8,
+                    "best_edge_r": 0.3,
+                    "best_compatibility_score": 78.2,
                     "filter_status": "Filtre disi",
                     "filter_reasons": "Likidite, Gap",
                 }
@@ -27,6 +33,8 @@ class NotificationTests(unittest.TestCase):
 
         self.assertIn("Disi", message)
         self.assertIn("TEST: Likidite, Gap", message)
+        self.assertIn("78.20", message)
+        self.assertIn("81.50", message)
 
     def test_large_filtered_summary_stays_within_telegram_limit(self):
         frame = pd.DataFrame(
@@ -52,5 +60,21 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("</pre>", message)
         self.assertIn("tam CSV'de", message)
 
+    def test_single_detail_lists_selected_combinations(self):
+        frame = pd.DataFrame(
+            [
+                {"Zaman Dilimi": "1d", "MA": "SMA233", "Taraf": "Destek", "Temas": 18,
+                 "Taraf Koruma %": 81.5, "Kazanma %": 64.0, "Medyan R": 0.8, "Edge R": 0.3},
+                {"Zaman Dilimi": "1h", "MA": "EMA55", "Taraf": "Direnç", "Temas": 11,
+                 "Taraf Koruma %": 72.0, "Kazanma %": 55.0, "Medyan R": 0.4, "Edge R": 0.1},
+            ]
+        )
+
+        message = format_single_detail(frame, "AVPGY", top=20)
+
+        self.assertIn("SMA233", message)
+        self.assertIn("EMA55", message)
+        self.assertIn("Kor%", message)
+        self.assertLessEqual(len(message), 4_000)
 if __name__ == "__main__":
     unittest.main()

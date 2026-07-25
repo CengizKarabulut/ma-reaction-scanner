@@ -63,6 +63,10 @@ Ana tabloda her hisse tek satirdir. En iyi uygun kombinasyon su alanlarla acikla
 - `filter_reasons`: Fiyat, likidite, sifir hacim, gap veya aykiri Edge nedeni.
 - `best_edge_r`: MA temaslarinin kosulsuz baz girislere gore R avantaji.
 - `best_median_net_r`: Maliyet sonrasi medyan islem sonucu.
+- `best_side_adherence_pct`: Destek icin MA ustunde, direnc icin MA altinda gecirilen sure.
+- `best_compatibility_score`: 0-100 Uyum Skoru. Temas %25, taraf koruma %20,
+  kazanma %15, Medyan R %15, Edge %15 ve uc donem istikrari %10 agirliklidir.
+  Negatif veya hesaplanamayan Medyan R/Edge puan kazandirmiyor.
 
 Ornek: fiyat `52.85`, SMA233 `53.42` ise fark `0.57`, yuzde uzaklik
 yaklasik `%1.08` olur. ATR uzakligi ayri bir sayidir ve `UZK%` gibi okunmamalidir.
@@ -97,7 +101,11 @@ Altyapı iş akışları:
 Telegram en iyi satırları gönderir ve tam tekilleştirilmiş CSV'yi belge olarak ekler.
 GitHub artifact içinde:
 
-- `market_summary.csv`: her varlık bir satır
+- `market_summary.csv`: her varlık bir satır, tum teknik alanlarla
+- `market_table.csv`: her varlık bir satır; MA, zaman dilimi, temas, taraf koruma,
+  kazanma, Medyan R, Edge, uzaklik ve Uyum Skoru iceren sade tablo
+- `single_stock_table.csv`: secilen tum tek-hisse kombinasyonlari; hesaplanamayanlar
+  `Yetersiz veri` olarak korunur
 - `ma_detail.csv`: tüm zaman dilimi/MA/yön ayrıntıları
 - `market_report.html`: tam okunabilir piyasa raporu
 - `errors.csv`: veri sağlayıcı hataları

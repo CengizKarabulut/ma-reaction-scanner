@@ -18,7 +18,7 @@ def _number(value: object, digits: int = 2) -> str:
 
 _TELEGRAM_TEXT_BUDGET = 4_000
 _FOOTER = [
-    "Uzk% = (MA - fiyat) / fiyat. ATR = volatiliteye gore uzaklik.",
+    "Uzk% = (MA - fiyat) / fiyat. Skor = 0-100 tarihsel MA uyumu.",
     "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
     "Tam rapor CSV eki ve GitHub artifact icindedir.",
 ]
@@ -36,9 +36,9 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
         f"Toplam: <b>{frame['symbol'].nunique()}</b> varlik - her varlik tek satir",
         "",
         "<pre>",
-        f"{'Hisse':<7} {'TF':<4} {'MA':<8} {'Fiyat':>8} {'MA Deg':>8} "
-        f"{'Uzk%':>6} {'ATR':>6} {'Durum':<5}",
-        "-" * 71,
+        f"{'Varlik':<7} {'MA':<8} {'TF':<4} {'Tms':>3} {'Kor%':>5} "
+        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Uzk%':>6} {'Skor':>5} {'Dur':<4}",
+        "-" * 74,
     ]
     has_exclusions = (
         "filter_status" in selected.columns
@@ -49,13 +49,16 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     for index, row in selected.iterrows():
         eligible = str(row.get("filter_status", "Uygun")) == "Uygun"
         table_row = (
-            f"{str(row['symbol']):<7} {str(row.get('best_timeframe','-')):<4} "
-            f"{str(row.get('best_ma','-')):<8} "
-            f"{_number(row.get('current_price')):>8} "
-            f"{_number(row.get('best_ma_value')):>8} "
+            f"{str(row['symbol']):<7} {str(row.get('best_ma','-')):<8} "
+            f"{str(row.get('best_timeframe','-')):<4} "
+            f"{_number(row.get('best_touches'), 0):>3} "
+            f"{_number(row.get('best_side_adherence_pct')):>5} "
+            f"{_number(row.get('best_win_rate_pct')):>5} "
+            f"{_number(row.get('best_median_net_r')):>5} "
+            f"{_number(row.get('best_edge_r')):>5} "
             f"{_number(row.get('best_distance_pct')):>6} "
-            f"{_number(row.get('best_distance_atr')):>6} "
-            f"{'Uygun' if eligible else 'Disi':<5}"
+            f"{_number(row.get('best_compatibility_score')):>5} "
+            f"{'OK' if eligible else 'Disi':<4}"
         )
         if not _fits(lines, [table_row, "</pre>", "", *reason_reserve]):
             break
@@ -93,33 +96,96 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     return "\n".join(lines)
 
 
-def send(summary_path: Path, label: str, top: int) -> None:
+def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
+    lines = [
+        f"<b>{str(label)[:200]}</b>",
+        f"Seçilen sonuçlar: <b>{len(frame)}</b> analiz satırı",
+        "En güçlü satırlar aşağıdadır; tam tablo CSV ve HTML ekindedir.",
+        "",
+        "<pre>",
+        f"{'TF':<4} {'MA':<8} {'Taraf':<7} {'Tms':>3} {'Kor%':>5} "
+        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Skor':>5}",
+        "-" * 59,
+    ]
+    displayed = 0
+    footer = [
+        "</pre>",
+        "",
+        "Kor% = MA'nın beklenen tarafında geçirilen süre.",
+        "Tms = bağımsız temas. MedR/Edge = R cinsinden tepki kalitesi.",
+    ]
+    for _, row in frame.head(max(1, top)).iterrows():
+        table_row = (
+            f"{str(row.get('Zaman Dilimi', '-')):<4} "
+            f"{str(row.get('MA', '-')):<8} "
+            f"{str(row.get('Taraf', '-')):<7} "
+            f"{_number(row.get('Temas'), 0):>3} "
+            f"{_number(row.get('Taraf Koruma %')):>5} "
+            f"{_number(row.get('Kazanma %')):>5} "
+            f"{_number(row.get('Medyan R')):>5} "
+            f"{_number(row.get('Edge R')):>5} "
+            f"{_number(row.get('Uyum Skoru')):>5}"
+        )
+        if len("\n".join([*lines, table_row, *footer])) > _TELEGRAM_TEXT_BUDGET:
+            break
+        lines.append(table_row)
+        displayed += 1
+    lines.extend(footer)
+    if displayed < min(len(frame), max(1, top)):
+        lines.append("Diğer satırlar tam CSV/HTML tablosundadır.")
+    return "\n".join(lines)
+
+
+def send(
+    summary_path: Path,
+    label: str,
+    top: int,
+    detail_path: Path | None = None,
+    report_path: Path | None = None,
+) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
-    frame = pd.read_csv(summary_path)
+    message_path = detail_path or summary_path
+    frame = pd.read_csv(message_path)
+    message = (
+        format_single_detail(frame, label, top)
+        if detail_path is not None
+        else format_summary(frame, label, top)
+    )
     base = f"https://api.telegram.org/bot{token}"
     with httpx.Client(timeout=60.0) as client:
         response = client.post(
             f"{base}/sendMessage",
-            data={"chat_id": chat_id, "text": format_summary(frame, label, top), "parse_mode": "HTML"},
+            data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
         )
         response.raise_for_status()
-        with summary_path.open("rb") as handle:
-            response = client.post(
-                f"{base}/sendDocument",
-                data={"chat_id": chat_id, "caption": f"{label} — tam tekilleştirilmiş rapor"},
-                files={"document": (summary_path.name, handle, "text/csv")},
-            )
-        response.raise_for_status()
-
+        attachments = [message_path]
+        if report_path is not None and report_path.exists():
+            attachments.append(report_path)
+        for attachment in attachments:
+            with attachment.open("rb") as handle:
+                response = client.post(
+                    f"{base}/sendDocument",
+                    data={"chat_id": chat_id, "caption": f"{label} — tam tablo"},
+                    files={"document": (attachment.name, handle)},
+                )
+            response.raise_for_status()
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", required=True)
     parser.add_argument("--label", default="MA Trend ve Tepki")
     parser.add_argument("--top", type=int, default=25)
+    parser.add_argument("--detail")
+    parser.add_argument("--report")
     args = parser.parse_args()
-    send(Path(args.summary), args.label, args.top)
+    send(
+        Path(args.summary),
+        args.label,
+        args.top,
+        detail_path=Path(args.detail) if args.detail else None,
+        report_path=Path(args.report) if args.report else None,
+    )
     return 0
 
 
