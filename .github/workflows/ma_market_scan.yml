@@ -157,7 +157,11 @@ jobs:
         with:
           pattern: ma-shard-*
           path: parts
-      - run: python -m scanner.ma_scan --merge-dir parts --output-dir reports/final
+      - run: >-
+          python -m scanner.ma_scan
+          --merge-dir parts
+          --expected-shards 20
+          --output-dir reports/final
       - name: Telegram tekilleştirilmiş özet ve tam CSV
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

@@ -10,6 +10,7 @@ from scanner.ma_engine import (
     aggregate_trend,
     build_market_summary,
     compute_ma,
+    detect_touches,
     prepare_frame,
     simulate_trade,
     trend_state,
@@ -71,6 +72,44 @@ class MovingAverageEngineTests(unittest.TestCase):
         self.assertEqual(trade.entry_position, position + 1)
         self.assertEqual(trade.entry, float(frame["Open"].iloc[position + 1]))
 
+    def test_stop_gap_fills_at_bar_open(self):
+        index = pd.date_range("2024-01-01", periods=4, freq="D")
+        frame = pd.DataFrame(
+            {
+                "Open": [100.0, 100.0, 95.0, 95.0],
+                "High": [101.0, 101.0, 96.0, 96.0],
+                "Low": [99.0, 99.5, 94.0, 94.0],
+                "Close": [100.0, 100.5, 95.0, 95.0],
+                "ATR": [1.0] * 4,
+            },
+            index=index,
+        )
+        config = ScanConfig(max_holding_bars=3, trailing_stop_atr=10.0)
+        trade = simulate_trade(frame, Touch(0, index[0], 1, 100.0, 1.0), config)
+        self.assertIsNotNone(trade)
+        self.assertEqual(trade.exit_position, 2)
+        self.assertEqual(trade.exit_price, 95.0)
+        self.assertLess(trade.net_r, -1.0)
+
+    def test_crossing_wrong_side_resets_touch_eligibility(self):
+        index = pd.date_range("2024-01-01", periods=10, freq="D")
+        frame = pd.DataFrame(
+            {
+                "Open": [100.0, 102.0, 98.0, 99.8, 98.0, 98.0, 98.0, 98.0, 98.0, 98.0],
+                "High": [100.2, 102.2, 98.4, 100.1, 98.4, 98.4, 98.4, 98.4, 98.4, 98.4],
+                "Low": [99.8, 101.8, 97.6, 99.7, 97.6, 97.6, 97.6, 97.6, 97.6, 97.6],
+                "Close": [100.0, 102.0, 98.0, 99.9, 98.0, 98.0, 98.0, 98.0, 98.0, 98.0],
+                "ATR": [1.0] * 10,
+            },
+            index=index,
+        )
+        ma = pd.Series(100.0, index=index)
+        config = ScanConfig(
+            touch_zone_atr=0.5,
+            separation_atr=1.0,
+            max_holding_bars=2,
+        )
+        self.assertEqual(detect_touches(frame, ma, 1, config), [])
     def test_aggregate_trend_uses_clear_majority(self):
         label, votes = aggregate_trend(["Yükselen"] * 7 + ["Geçiş"] * 3)
         self.assertEqual(label, "Güçlü yükselen")
