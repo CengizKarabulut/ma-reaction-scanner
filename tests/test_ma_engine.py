@@ -96,6 +96,31 @@ class MovingAverageEngineTests(unittest.TestCase):
         self.assertAlmostEqual(trade.mfe_r, 1.0 / initial_risk)
         self.assertAlmostEqual(trade.mae_r, 5.0 / initial_risk)
 
+    def test_negative_commodity_entry_keeps_transaction_cost_positive(self):
+        index = pd.date_range("2020-04-19", periods=2, freq="D")
+        frame = pd.DataFrame(
+            {
+                "Open": [-2.5, -2.0],
+                "High": [-1.5, -1.0],
+                "Low": [-3.0, -2.5],
+                "Close": [-2.5, -1.5],
+                "ATR": [1.0, 1.0],
+            },
+            index=index,
+        )
+        config = ScanConfig(max_holding_bars=1, roundtrip_cost_bps=25.0)
+        trade = simulate_trade(
+            frame,
+            Touch(0, index[0], 1, -2.5, 1.0),
+            config,
+        )
+
+        self.assertIsNotNone(trade)
+        risk = trade.entry - trade.initial_stop
+        gross_r = (trade.exit_price - trade.entry) / risk
+        expected_cost_r = 25.0 / 10_000.0 * abs(trade.entry) / risk
+        self.assertGreater(expected_cost_r, 0.0)
+        self.assertAlmostEqual(trade.net_r, gross_r - expected_cost_r)
     def test_crossing_wrong_side_resets_touch_eligibility(self):
         index = pd.date_range("2024-01-01", periods=10, freq="D")
         frame = pd.DataFrame(
@@ -261,5 +286,14 @@ class MovingAverageEngineTests(unittest.TestCase):
 
         prepared = prepare_frame(frame, allow_non_positive=True)
         self.assertEqual(float(prepared.loc[frame.index[20], "Close"]), -2.5)
+
+    def test_prepare_frame_rejects_zero_even_for_commodity(self):
+        frame = sample_frame(100)
+        frame.loc[frame.index[20], ["Open", "High", "Low", "Close"]] = [
+            0.0, 1.0, -1.0, 0.5
+        ]
+
+        with self.assertRaisesRegex(ValueError, "sıfır"):
+            prepare_frame(frame, allow_non_positive=True)
 if __name__ == "__main__":
     unittest.main()
