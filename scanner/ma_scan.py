@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -59,15 +60,47 @@ def parse_timeframes(value: str) -> tuple[str, ...]:
     return tuple(values)
 
 
-_LEVEL_CONFIG_JSON_KEYS = {
-    "reaction_bars",
-    "hold_bars",
-    "break_atr",
-    "bounce_cap_atr",
-    "cross_cap_per_100",
-    "evidence_target_touches",
-    "neighbor_ratio",
+_LEVEL_CONFIG_JSON_TYPES = {
+    "reaction_bars": int,
+    "hold_bars": int,
+    "break_atr": float,
+    "bounce_cap_atr": float,
+    "cross_cap_per_100": float,
+    "evidence_target_touches": int,
+    "neighbor_ratio": float,
 }
+_LEVEL_CONFIG_JSON_KEYS = set(_LEVEL_CONFIG_JSON_TYPES)
+
+
+def _coerce_level_config_json_value(key: str, value: object) -> int | float:
+    expected_type = _LEVEL_CONFIG_JSON_TYPES[key]
+    if isinstance(value, bool):
+        raise ValueError(f"level_config_json {key} sayisal deger olmali")
+    if expected_type is int:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError as exc:
+                raise ValueError(
+                    f"level_config_json {key} tam sayi olmali"
+                ) from exc
+        raise ValueError(f"level_config_json {key} tam sayi olmali")
+    if isinstance(value, int | float):
+        coerced = float(value)
+    elif isinstance(value, str):
+        try:
+            coerced = float(value.strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"level_config_json {key} sayisal deger olmali"
+            ) from exc
+    else:
+        raise ValueError(f"level_config_json {key} sayisal deger olmali")
+    if not math.isfinite(coerced):
+        raise ValueError(f"level_config_json {key} sonlu sayi olmali")
+    return coerced
 
 
 def parse_level_config_json(value: str | None) -> dict[str, object]:
@@ -85,7 +118,10 @@ def parse_level_config_json(value: str | None) -> dict[str, object]:
     unknown = sorted(set(payload) - _LEVEL_CONFIG_JSON_KEYS)
     if unknown:
         raise ValueError(f"level_config_json bilinmeyen alan: {', '.join(unknown)}")
-    return payload
+    return {
+        str(key): _coerce_level_config_json_value(str(key), value)
+        for key, value in payload.items()
+    }
 
 
 def resolve_instruments(args: argparse.Namespace):
