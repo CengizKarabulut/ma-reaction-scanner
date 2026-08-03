@@ -37,6 +37,24 @@ class ScannerInputTests(unittest.TestCase):
             {"evidence_target_touches": 30, "reaction_bars": 12},
         )
 
+    def test_level_config_json_coerces_numeric_strings(self):
+        self.assertEqual(
+            parse_level_config_json('{"evidence_target_touches":"30","break_atr":"0.75"}'),
+            {"evidence_target_touches": 30, "break_atr": 0.75},
+        )
+
+    def test_level_config_json_rejects_non_integer_int_fields(self):
+        with self.assertRaisesRegex(ValueError, "tam sayi"):
+            parse_level_config_json('{"reaction_bars": 12.5}')
+
+    def test_level_config_json_rejects_boolean_values(self):
+        with self.assertRaisesRegex(ValueError, "sayisal deger"):
+            parse_level_config_json('{"break_atr": true}')
+
+    def test_level_config_json_rejects_non_finite_float_values(self):
+        with self.assertRaisesRegex(ValueError, "sonlu sayi"):
+            parse_level_config_json('{"break_atr": "nan"}')
+
     def test_level_config_json_rejects_unknown_overrides(self):
         with self.assertRaisesRegex(ValueError, "bilinmeyen alan"):
             parse_level_config_json('{"foo": 1}')
