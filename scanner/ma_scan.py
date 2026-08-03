@@ -14,6 +14,8 @@ import pandas as pd
 from .asset_universe import ASSET_CLASSES, build_custom_instruments, list_universes, resolve_universe
 from .ma_data import MarketDataProvider
 from .ma_engine import DEFAULT_PERIODS, MA_TYPES, TIMEFRAMES, ScanConfig, build_market_summary, scan_frame
+from .ma_levels import LevelConfig, finalize_level_frame
+from .ma_relative import BenchmarkCache
 from .stock_metadata import enrich_stock_instruments, format_index_memberships
 
 
@@ -97,10 +99,20 @@ _SINGLE_TABLE_COLUMNS = {
     "trend_state": "Trend",
     "current_price": "Fiyat",
     "current_ma": "MA Değeri",
-    "touches": "Temas",
+    "level_touches": "Temas",
+    "touch_density_per_100": "Temas/100",
+    "cross_count": "Kesişim",
+    "cross_per_100": "Kesişim/100",
+    "hold_rate_pct": "Tutma %",
+    "break_rate_pct": "Kırılma %",
+    "median_bounce_atr": "Sıçrama ATR",
+    "median_penetration_atr": "Sarkma ATR",
     "side_adherence_pct": "Taraf Koruma %",
     "wrong_side_pct": "Yanlış Taraf %",
-    "cross_count": "Kesişim",
+    "level_score": "Seviye Skoru",
+    "level_class": "Seviye",
+    "plateau_ratio": "Plato",
+    "adherence_excess_pct": "Taraf Farkı",
     "win_rate_pct": "Kazanma %",
     "median_net_r": "Medyan R",
     "edge_r": "Edge R",
@@ -109,6 +121,7 @@ _SINGLE_TABLE_COLUMNS = {
     "compatibility_score": "Uyum Skoru",
     "distance_pct": "Uzaklık %",
     "distance_atr": "ATR Uzaklık",
+    "analysis_basis": "Analiz Bazı",
     "filter_status": "Filtre",
     "filter_reasons": "Filtre Nedeni",
 }
@@ -142,61 +155,64 @@ def build_single_stock_table(
     )
     missing_rows = []
     for timeframe, ma_type, period in sorted(requested - present):
-        missing_rows.append(
-            {
-                "timeframe": timeframe,
-                "ma_type": ma_type,
-                "period": period,
-                "ma": f"{ma_type}{period}",
-                "side": "Veri yok",
-                "active_side": False,
-                "trend_state": "Yetersiz veri",
-                "touches": 0,
-                "cross_count": 0,
-                "positive_periods": 0,
-                "compatibility": "Yetersiz veri",
-                "compatibility_score": 0.0,
-                "filter_pass": False,
-                "filter_status": "Yetersiz veri",
-                "filter_reasons": "Seçilen MA için yeterli geçmiş mum yok",
-            }
-        )
+        missing_rows.append({
+            "timeframe": timeframe, "ma_type": ma_type, "period": period,
+            "ma": f"{ma_type}{period}", "side": "Veri yok", "active_side": False,
+            "trend_state": "Yetersiz veri", "touches": 0, "level_touches": 0,
+            "touch_density_per_100": 0.0, "cross_count": 0, "cross_per_100": 0.0,
+            "hold_rate_pct": float("nan"), "break_rate_pct": float("nan"),
+            "median_bounce_atr": float("nan"), "median_penetration_atr": float("nan"),
+            "level_score": 0.0, "level_class": "Yetersiz temas",
+            "plateau_ratio": float("nan"), "adherence_excess_pct": float("nan"),
+            "positive_periods": 0, "compatibility": "Yetersiz veri",
+            "compatibility_score": 0.0, "analysis_basis": "nominal",
+            "filter_pass": False, "filter_status": "Yetersiz veri",
+            "filter_reasons": "Seçilen MA için yeterli geçmiş mum yok",
+        })
     if missing_rows:
         table = pd.concat([table, pd.DataFrame(missing_rows)], ignore_index=True)
     if table.empty:
         return pd.DataFrame(columns=list(_SINGLE_TABLE_COLUMNS.values()))
+    if "level_touches" not in table:
+        table["level_touches"] = table.get("touches", 0)
+    else:
+        table["level_touches"] = pd.to_numeric(table["level_touches"], errors="coerce").fillna(
+            pd.to_numeric(table.get("touches", 0), errors="coerce")
+        )
     for column in _SINGLE_TABLE_COLUMNS:
         if column not in table:
             table[column] = float("nan")
     quality_rank = {
-        "Güçlü uyum": 4,
-        "Uyumlu": 3,
-        "İzleme": 2,
-        "Uyumsuz": 1,
-        "Yetersiz veri": 0,
+        "Güçlü uyum": 4, "Guclu uyum": 4, "Uyumlu": 3,
+        "İzleme": 2, "Izleme": 2, "Uyumsuz": 1, "Yetersiz veri": 0,
+    }
+    level_rank = {
+        "Guclu seviye": 4, "Güçlü seviye": 4, "Seviye": 3,
+        "Zayif seviye": 2, "Zayıf seviye": 2,
+        "Seviye degil": 1, "Seviye değil": 1, "Yetersiz temas": 0,
     }
     filter_pass = table["filter_pass"] if "filter_pass" in table else pd.Series(True, index=table.index)
     active_side = table["active_side"] if "active_side" in table else pd.Series(False, index=table.index)
     table["_filter_rank"] = filter_pass.fillna(False).astype(int)
     table["_active_rank"] = active_side.fillna(False).astype(int)
     table["_quality_rank"] = table["compatibility"].map(quality_rank).fillna(0)
+    table["_level_rank"] = table["level_class"].map(level_rank).fillna(0)
     table["compatibility_score"] = pd.to_numeric(
         table["compatibility_score"], errors="coerce"
     ).fillna(table["_quality_rank"] * 20.0)
+    table["level_score"] = pd.to_numeric(table["level_score"], errors="coerce").fillna(
+        table["compatibility_score"]
+    )
+    table["level_touches"] = pd.to_numeric(table["level_touches"], errors="coerce").fillna(0)
     table["_abs_distance"] = pd.to_numeric(table["distance_atr"], errors="coerce").abs()
     table = table.sort_values(
         [
-            "_filter_rank",
-            "_active_rank",
-            "compatibility_score",
-            "touches",
-            "_quality_rank",
-            "positive_periods",
-            "edge_r",
-            "median_net_r",
-            "_abs_distance",
+            "_filter_rank", "_active_rank", "level_score", "level_touches",
+            "_level_rank", "hold_rate_pct", "median_bounce_atr",
+            "compatibility_score", "_quality_rank", "positive_periods",
+            "edge_r", "median_net_r", "_abs_distance",
         ],
-        ascending=[False, False, False, False, False, False, False, False, True],
+        ascending=[False, False, False, False, False, False, False, False, False, False, False, False, True],
         na_position="last",
     )
     available = [column for column in _SINGLE_TABLE_COLUMNS if column in table]
@@ -204,7 +220,7 @@ def build_single_stock_table(
     if "Güncel Rol" in result:
         result["Güncel Rol"] = result["Güncel Rol"].map(
             {True: "Aktif", False: "Diğer taraf"}
-        )
+        ).fillna(result["Güncel Rol"])
     return result
 
 def write_outputs(
@@ -214,21 +230,32 @@ def write_outputs(
     config_payload: dict[str, object],
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    detail = detail.copy() if detail is not None else pd.DataFrame()
+    level_payload = config_payload.get("level", {})
+    level_config = LevelConfig(**level_payload) if isinstance(level_payload, dict) else LevelConfig()
+    if not detail.empty:
+        detail = finalize_level_frame(detail, level_config)
+    scan_payload = config_payload.get("scan", {}) if isinstance(config_payload.get("scan", {}), dict) else {}
     summary = build_market_summary(
         detail,
-        near_distance_atr=float(config_payload["scan"]["near_distance_atr"]),
+        near_distance_atr=float(scan_payload.get("near_distance_atr", ScanConfig().near_distance_atr)),
+        rank_by=str(config_payload.get("rank_by", "level")),
     )
     detail.to_csv(output_dir / "ma_detail.csv", index=False, encoding="utf-8-sig")
     summary.to_csv(output_dir / "market_summary.csv", index=False, encoding="utf-8-sig")
     market_columns = {
-        "symbol": "Varlık", "best_ma": "MA", "best_timeframe": "Zaman Dilimi",
-        "best_touches": "Temas", "best_side_adherence_pct": "Taraf Koruma %",
+        "symbol": "Varl?k", "best_ma": "MA", "best_timeframe": "Zaman Dilimi",
+        "best_level_touches": "Temas", "best_level_score": "Seviye Skoru",
+        "best_level_class": "Seviye", "best_hold_rate_pct": "Tutma %",
+        "best_median_bounce_atr": "S??rama ATR", "best_touch_density_per_100": "Temas/100",
+        "best_cross_count": "Kesi?im", "best_cross_per_100": "Kesi?im/100",
+        "best_plateau_ratio": "Plato", "best_adherence_excess_pct": "Taraf Fark?",
+        "best_side_adherence_pct": "Taraf Koruma %",
         "best_win_rate_pct": "Kazanma %", "best_median_net_r": "Medyan R",
-        "best_edge_r": "Edge R", "best_distance_pct": "Uzaklık %",
-        "best_compatibility_score": "Uyum Skoru",
-        "best_compatibility": "Uyum", "best_side": "Taraf",
-        "current_price": "Fiyat", "best_ma_value": "MA Değeri",
-        "filter_status": "Filtre", "filter_reasons": "Filtre Nedeni",
+        "best_edge_r": "Edge R", "best_distance_pct": "Uzakl?k %",
+        "best_compatibility_score": "Uyum Skoru", "best_compatibility": "Uyum",
+        "best_side": "Taraf", "current_price": "Fiyat", "best_ma_value": "MA De?eri",
+        "analysis_basis": "Analiz Baz?", "filter_status": "Filtre", "filter_reasons": "Filtre Nedeni",
     }
     market_table = summary[[column for column in market_columns if column in summary]].rename(
         columns=market_columns
@@ -273,7 +300,7 @@ def write_outputs(
         "<li><code>best_compatibility_score</code> 0-100 arası Uyum Skorudur; temas, taraf koruma, kazanma, Medyan R, Edge ve istikrarı birleştirir.</li>"
         "<li><code>filter_status</code> Uygun satirlar once gelir. Filtre disi "
         "hisseler silinmez; neden <code>filter_reasons</code> alanindadir.</li>"
-        "<li>Uyum sinifi gecmis temas istatistigidir; otomatik al-sat emri degildir.</li>"
+        "<li>Seviye/uyum s?n?flar? ge?mi? davran?? ?zetidir; otomatik al-sat emri de?ildir.</li>"
         "</ul></div>"
         + market_table.to_html(
             index=False,
@@ -407,6 +434,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-zero-volume-pct", type=float, default=20.0)
     parser.add_argument("--max-gap-pct", type=float, default=15.0)
     parser.add_argument("--max-abs-edge-r", type=float, default=5.0)
+    parser.add_argument("--reaction-bars", type=int, default=10)
+    parser.add_argument("--hold-bars", type=int, default=5)
+    parser.add_argument("--break-atr", type=float, default=0.50)
+    parser.add_argument("--bounce-cap-atr", type=float, default=2.0)
+    parser.add_argument("--cross-cap-per-100", type=float, default=4.0)
+    parser.add_argument("--evidence-target-touches", type=int, default=20)
+    parser.add_argument("--neighbor-ratio", type=float, default=0.25)
+    parser.add_argument("--relative-to", default="", help="Benchmark symbol, e.g. XU100, for relative MA-DNA analysis")
+    parser.add_argument("--rank-by", choices=["level", "compat"], default="level")
     parser.add_argument("--lookback", type=int, default=0)
     parser.add_argument("--source", choices=["auto", "borsapy", "yfinance"], default="auto")
     parser.add_argument("--prefer-cache", action="store_true")
@@ -461,14 +497,30 @@ def main(argv: list[str] | None = None) -> int:
         max_gap_pct=args.max_gap_pct,
         max_abs_edge_r=args.max_abs_edge_r,
     )
+    level_config = LevelConfig(
+        reaction_bars=args.reaction_bars,
+        hold_bars=args.hold_bars,
+        break_atr=args.break_atr,
+        bounce_cap_atr=args.bounce_cap_atr,
+        cross_cap_per_100=args.cross_cap_per_100,
+        evidence_target_touches=args.evidence_target_touches,
+        neighbor_ratio=args.neighbor_ratio,
+    )
     instruments = resolve_instruments(args)
     attempted_requests = len(instruments) * len(timeframes)
     provider = MarketDataProvider(source=args.source)
+    relative_to = args.relative_to.strip().upper()
+    benchmark_cache = (
+        BenchmarkCache(provider, relative_to, prefer_cache=args.prefer_cache)
+        if relative_to
+        else None
+    )
     details: list[pd.DataFrame] = []
     errors: list[dict[str, str]] = []
     for instrument in instruments:
         for timeframe in timeframes:
             try:
+                benchmark = benchmark_cache.get(timeframe) if benchmark_cache is not None else None
                 fetched = provider.fetch(
                     instrument.symbol,
                     timeframe,
@@ -482,6 +534,9 @@ def main(argv: list[str] | None = None) -> int:
                     symbol=instrument.symbol,
                     timeframe=timeframe,
                     config=config,
+                    level_config=level_config,
+                    benchmark=benchmark,
+                    relative_to=relative_to or None,
                     metadata={
                         **instrument_metadata(instrument),
                         "data_source": fetched.source,
@@ -501,6 +556,9 @@ def main(argv: list[str] | None = None) -> int:
         "universe": args.universe,
         "timeframes": list(timeframes),
         "scan": config.to_dict(),
+        "level": level_config.to_dict(),
+        "relative_to": relative_to,
+        "rank_by": args.rank_by,
         "lookback": args.lookback,
         "source": args.source,
         "shard_index": args.shard_index,

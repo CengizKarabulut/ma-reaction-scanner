@@ -18,9 +18,9 @@ def _number(value: object, digits: int = 2) -> str:
 
 _TELEGRAM_TEXT_BUDGET = 4_000
 _FOOTER = [
-    "Uzk% = (MA - fiyat) / fiyat. Skor = 0-100 tarihsel MA uyumu.",
-    "Fiyat ve MA Deg ayni zaman dilimi ve veri anina aittir.",
-    "Tam rapor CSV eki ve GitHub artifact icindedir.",
+    "Skor = 0-100 gozlemsel seviye gucu; Uyum = eski trade-simulasyon skoru.",
+    "Temas ham bagimsiz ziyaret sayisidir; 1-2 temas guclu seviye sayilmaz.",
+    "Tam rapor CSV/HTML eki ve GitHub artifact icindedir.",
 ]
 
 
@@ -36,9 +36,9 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
         f"Toplam: <b>{frame['symbol'].nunique()}</b> varlik - her varlik tek satir",
         "",
         "<pre>",
-        f"{'Varlik':<7} {'MA':<8} {'TF':<4} {'Tms':>3} {'Kor%':>5} "
-        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Uzk%':>6} {'Skor':>5} {'Dur':<4}",
-        "-" * 74,
+        f"{'Varlik':<7} {'MA':<8} {'TF':<4} {'Tms':>3} {'Skor':>5} "
+        f"{'Tut%':>5} {'Bnc':>5} {'Uzk%':>6} {'Uyum':>5} {'Dur':<4}",
+        "-" * 68,
     ]
     has_exclusions = (
         "filter_status" in selected.columns
@@ -48,14 +48,15 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     displayed_indices: list[object] = []
     for index, row in selected.iterrows():
         eligible = str(row.get("filter_status", "Uygun")) == "Uygun"
+        touches = row.get("best_level_touches", row.get("best_touches"))
+        score = row.get("best_level_score", row.get("best_compatibility_score"))
         table_row = (
             f"{str(row['symbol']):<7} {str(row.get('best_ma','-')):<8} "
             f"{str(row.get('best_timeframe','-')):<4} "
-            f"{_number(row.get('best_touches'), 0):>3} "
-            f"{_number(row.get('best_side_adherence_pct')):>5} "
-            f"{_number(row.get('best_win_rate_pct')):>5} "
-            f"{_number(row.get('best_median_net_r')):>5} "
-            f"{_number(row.get('best_edge_r')):>5} "
+            f"{_number(touches, 0):>3} "
+            f"{_number(score):>5} "
+            f"{_number(row.get('best_hold_rate_pct', row.get('best_side_adherence_pct'))):>5} "
+            f"{_number(row.get('best_median_bounce_atr')):>5} "
             f"{_number(row.get('best_distance_pct')):>6} "
             f"{_number(row.get('best_compatibility_score')):>5} "
             f"{'OK' if eligible else 'Disi':<4}"
@@ -103,27 +104,31 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
         "En güçlü satırlar aşağıdadır; tam tablo CSV ve HTML ekindedir.",
         "",
         "<pre>",
-        f"{'TF':<4} {'MA':<8} {'Taraf':<7} {'Tms':>3} {'Kor%':>5} "
-        f"{'Kaz%':>5} {'MedR':>5} {'Edge':>5} {'Skor':>5}",
-        "-" * 59,
+        f"{'TF':<4} {'MA':<8} {'Taraf':<7} {'Tms':>3} {'Skor':>5} "
+        f"{'Tut%':>5} {'Bnc':>5} {'Uzk%':>6} {'Uyum':>5}",
+        "-" * 62,
     ]
     displayed = 0
     footer = [
         "</pre>",
         "",
-        "Kor% = MA'nın beklenen tarafında geçirilen süre.",
-        "Tms = bağımsız temas. MedR/Edge = R cinsinden tepki kalitesi.",
+        "Tut% (eski Kor%) = kirilmadan tutma; Tms = ham bagimsiz temas.",
+        "Bnc = medyan sicrama ATR. Uyum = eski trade-simulasyon skoru.",
     ]
     for _, row in frame.head(max(1, top)).iterrows():
+        touches = row.get("Temas")
+        score = row.get("Seviye Skoru", row.get("Uyum Skoru"))
+        hold = row.get("Tutma %", row.get("Taraf Koruma %"))
+        bounce = row.get("Sıçrama ATR", row.get("Sicrama ATR"))
         table_row = (
             f"{str(row.get('Zaman Dilimi', '-')):<4} "
             f"{str(row.get('MA', '-')):<8} "
             f"{str(row.get('Taraf', '-')):<7} "
-            f"{_number(row.get('Temas'), 0):>3} "
-            f"{_number(row.get('Taraf Koruma %')):>5} "
-            f"{_number(row.get('Kazanma %')):>5} "
-            f"{_number(row.get('Medyan R')):>5} "
-            f"{_number(row.get('Edge R')):>5} "
+            f"{_number(touches, 0):>3} "
+            f"{_number(score):>5} "
+            f"{_number(hold):>5} "
+            f"{_number(bounce):>5} "
+            f"{_number(row.get('Uzaklık %', row.get('Uzaklik %'))):>6} "
             f"{_number(row.get('Uyum Skoru')):>5}"
         )
         if len("\n".join([*lines, table_row, *footer])) > _TELEGRAM_TEXT_BUDGET:

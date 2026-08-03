@@ -49,6 +49,34 @@ Ana sınıflar: `Güçlü uyum`, `Uyumlu`, `İzleme`, `Uyumsuz`, `Yetersiz veri`
 Bunlar gelecek performans garantisi veya otomatik al/sat emri değildir.
 
 
+## MA DNA / gozlemsel seviye skoru
+
+Bu repo artik iki farkli katmani ayri raporlar:
+
+- **Seviye Skoru (`level_score`)**: hissenin hangi ortalamaya gercekten saygi duydugunu
+  okumak icin ana skor. Ham temas sayisi, temas sonrasi seviyeyi tutma, medyan sicrama
+  ve fiyat tarafinin cok fazla kesilip bicilmemesi birlikte puanlanir.
+- **Uyum Skoru (`compatibility_score`)**: eski islem-simulasyon katmani. Stop, maliyet,
+  trailing stop ve baz giris varsayimlarina baglidir; karsilastirma icin korunur.
+
+Varsayilan siralama `rank_by=level` oldugu icin 1-2 temasli ama fiyata cok yakin
+ortalamalar ana raporu isgal etmez. Bir ortalamanin guclu sayilmasi icin once yeterli
+ham ziyaret/temas, sonra tutma ve tepki aranir; yakinlik tek basina sinyal degildir.
+
+Yeni alanlar:
+
+- `level_touches` / `best_level_touches`: ham bagimsiz seviye temasi.
+- `hold_rate_pct`: temas sonrasi seviyenin kirilmadan kaldigi oran.
+- `median_bounce_atr`: temas sonrasi lehe medyan hareket, ATR cinsinden.
+- `touch_density_per_100`: farkli uzunluktaki ortalamalari karsilastirmak icin 100 bar basina temas.
+- `cross_per_100`: fiyat ortalamayi ne kadar sik kesiyor; yuksekse seviye gurultulu olabilir.
+- `plateau_ratio`: yakin periyotlar da benzer skor veriyor mu? Dusukse tek periyot sansi olabilir.
+- `adherence_excess_pct`: hissenin kendi ortalama taraf-koruma seviyesine gore fark.
+
+Istege bagli `--relative-to XU100` kullanilirsa fiyat serisi once endekse gore normalize edilir.
+Bu, nominal TRY yukselisinden gelen sahte "her ortalama destek calisiyor" etkisini azaltmak icindir.
+
+
 ## Raporu nasil okuyacagim?
 
 Ana tabloda her hisse tek satirdir. En iyi uygun kombinasyon su alanlarla aciklanir:
@@ -102,8 +130,8 @@ Telegram en iyi satırları gönderir ve tam tekilleştirilmiş CSV'yi belge ola
 GitHub artifact içinde:
 
 - `market_summary.csv`: her varlık bir satır, tum teknik alanlarla
-- `market_table.csv`: her varlık bir satır; MA, zaman dilimi, temas, taraf koruma,
-  kazanma, Medyan R, Edge, uzaklik ve Uyum Skoru iceren sade tablo
+- `market_table.csv`: her varlik bir satir; MA, zaman dilimi, ham temas, Seviye Skoru,
+  tutma, sicrama, uzaklik ve eski Uyum Skoru iceren sade tablo
 - `single_stock_table.csv`: secilen tum tek-hisse kombinasyonlari; hesaplanamayanlar
   `Yetersiz veri` olarak korunur
 - `ma_detail.csv`: tüm zaman dilimi/MA/yön ayrıntıları
@@ -125,7 +153,8 @@ python -m scanner.ma_scan \
   --symbol ASELS \
   --timeframes all \
   --ma-types SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA \
-  --periods 5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377
+  --periods 5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377 \
+  --rank-by level
 ```
 
 Özel seçim:
