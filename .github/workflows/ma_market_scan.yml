@@ -91,34 +91,10 @@ on:
         description: Maksimum mutlak aykiri Edge (R)
         required: true
         default: "5"
-      reaction_bars:
-        description: Observation reaction lookahead bars
-        required: true
-        default: "10"
-      hold_bars:
-        description: Observation hold check bars
-        required: true
-        default: "5"
-      break_atr:
-        description: Level break threshold ATR
-        required: true
-        default: "0.50"
-      bounce_cap_atr:
-        description: Bounce score cap ATR
-        required: true
-        default: "2.0"
-      cross_cap_per_100:
-        description: Choppiness cap per 100 bars
-        required: true
-        default: "4.0"
-      evidence_target_touches:
-        description: Touch count for full evidence score
-        required: true
-        default: "20"
-      neighbor_ratio:
-        description: Nearby-period plateau ratio
-        required: true
-        default: "0.25"
+      level_config_json:
+        description: 'MA DNA ileri ayar JSON, orn: {"evidence_target_touches":30}'
+        required: false
+        default: "{}"
       relative_to:
         description: Benchmark-relative MA DNA, e.g. XU100; blank = nominal
         required: false
@@ -179,13 +155,7 @@ jobs:
           MAX_ZERO_VOLUME: ${{ inputs.max_zero_volume_pct || '20' }}
           MAX_GAP: ${{ inputs.max_gap_pct || '15' }}
           MAX_EDGE: ${{ inputs.max_abs_edge_r || '5' }}
-          REACTION_BARS: ${{ inputs.reaction_bars || '10' }}
-          HOLD_BARS: ${{ inputs.hold_bars || '5' }}
-          BREAK_ATR: ${{ inputs.break_atr || '0.50' }}
-          BOUNCE_CAP: ${{ inputs.bounce_cap_atr || '2.0' }}
-          CROSS_CAP: ${{ inputs.cross_cap_per_100 || '4.0' }}
-          EVIDENCE_TOUCHES: ${{ inputs.evidence_target_touches || '20' }}
-          NEIGHBOR_RATIO: ${{ inputs.neighbor_ratio || '0.25' }}
+          LEVEL_CONFIG_JSON: ${{ inputs.level_config_json || '{}' }}
           RELATIVE_TO: ${{ inputs.relative_to || '' }}
           RANK_BY: ${{ inputs.rank_by || 'level' }}
           SOURCE: ${{ inputs.source || 'auto' }}
@@ -214,13 +184,7 @@ jobs:
             --max-zero-volume-pct "$MAX_ZERO_VOLUME" \
             --max-gap-pct "$MAX_GAP" \
             --max-abs-edge-r "$MAX_EDGE" \
-            --reaction-bars "$REACTION_BARS" \
-            --hold-bars "$HOLD_BARS" \
-            --break-atr "$BREAK_ATR" \
-            --bounce-cap-atr "$BOUNCE_CAP" \
-            --cross-cap-per-100 "$CROSS_CAP" \
-            --evidence-target-touches "$EVIDENCE_TOUCHES" \
-            --neighbor-ratio "$NEIGHBOR_RATIO" \
+            --level-config-json "$LEVEL_CONFIG_JSON" \
             --relative-to "$RELATIVE_TO" \
             --rank-by "$RANK_BY" \
             --source "$SOURCE" \
