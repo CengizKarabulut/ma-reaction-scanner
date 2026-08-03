@@ -7,7 +7,9 @@ from unittest.mock import patch
 import pandas as pd
 
 from scanner.ma_engine import MA_TYPES, TIMEFRAMES
+from scanner.ma_levels import LevelConfig
 from scanner.ma_scan import (
+    build_parser,
     build_single_stock_table,
     main,
     merge_outputs,
@@ -42,6 +44,36 @@ class ScannerInputTests(unittest.TestCase):
             parse_level_config_json('{"evidence_target_touches":"30","break_atr":"0.75"}'),
             {"evidence_target_touches": 30, "break_atr": 0.75},
         )
+
+    def test_level_config_json_accepts_calibration_overrides(self):
+        self.assertEqual(
+            parse_level_config_json(
+                '{"cross_damping":"0.5","strong_threshold":60,'
+                '"level_threshold":45,"weak_threshold":30}'
+            ),
+            {
+                "cross_damping": 0.5,
+                "strong_threshold": 60.0,
+                "level_threshold": 45.0,
+                "weak_threshold": 30.0,
+            },
+        )
+
+    def test_cli_level_defaults_follow_level_config(self):
+        args = build_parser().parse_args([])
+        defaults = LevelConfig()
+
+        self.assertEqual(args.reaction_bars, defaults.reaction_bars)
+        self.assertEqual(args.hold_bars, defaults.hold_bars)
+        self.assertEqual(args.break_atr, defaults.break_atr)
+        self.assertEqual(args.bounce_cap_atr, defaults.bounce_cap_atr)
+        self.assertEqual(args.cross_cap_per_100, defaults.cross_cap_per_100)
+        self.assertEqual(args.cross_damping, defaults.cross_damping)
+        self.assertEqual(args.evidence_target_touches, defaults.evidence_target_touches)
+        self.assertEqual(args.neighbor_ratio, defaults.neighbor_ratio)
+        self.assertEqual(args.strong_threshold, defaults.strong_threshold)
+        self.assertEqual(args.level_threshold, defaults.level_threshold)
+        self.assertEqual(args.weak_threshold, defaults.weak_threshold)
 
     def test_level_config_json_rejects_non_integer_int_fields(self):
         with self.assertRaisesRegex(ValueError, "tam sayi"):

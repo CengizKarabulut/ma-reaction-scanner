@@ -66,8 +66,12 @@ _LEVEL_CONFIG_JSON_TYPES = {
     "break_atr": float,
     "bounce_cap_atr": float,
     "cross_cap_per_100": float,
+    "cross_damping": float,
     "evidence_target_touches": int,
     "neighbor_ratio": float,
+    "strong_threshold": float,
+    "level_threshold": float,
+    "weak_threshold": float,
 }
 _LEVEL_CONFIG_JSON_KEYS = set(_LEVEL_CONFIG_JSON_TYPES)
 
@@ -288,6 +292,81 @@ def build_single_stock_table(
         ).fillna(result["Güncel Rol"])
     return result
 
+
+def _market_report_guide_html() -> str:
+    return (
+        "<div class='guide'><h2>Tablo nasil okunur?</h2>"
+        "<p><b>Once seviye katmanini oku:</b> Temas, Kesisim/100, Tutma %, "
+        "Sicrama ATR, Seviye Skoru, Plato ve Taraf Farki; stop, maliyet veya "
+        "islem varsayimi icermez. Uyum Skoru ise eski islem simulasyonu "
+        "katmanidir ve karar destek bilgisi olarak korunur.</p>"
+        "<ul>"
+        "<li><code>best_level_score</code>: MA'nin gecmiste sinir gibi "
+        "davranma gucu. Temas, tutma ve sicrama once hesaplanir; "
+        "<code>best_cross_per_100</code> yuksekse skor carpimla sonumlenir.</li>"
+        "<li><code>best_level_touches</code>: bagimsiz temas sayisi. 1-2 temas "
+        "guclu kanit degildir; varsayilan siralama bunu tek basina odullendirmez.</li>"
+        "<li><code>best_cross_per_100</code>: 100 bar basina MA kesisimi. "
+        "Dusukse MA sinir gibi, yuksekse gurultunun ortasi gibi okunur.</li>"
+        "<li><code>best_hold_rate_pct</code>: temastan sonra fiyatin beklenen "
+        "tarafta kalma orani; destek/direnc davranisinin dogrudan cevabidir.</li>"
+        "<li><code>best_median_bounce_atr</code>: temastan sonraki medyan tepki; "
+        "ATR cinsinden oldugu icin fiyat yuzdesi degildir.</li>"
+        "<li><code>best_plateau_ratio</code>: yakin periyotlar da benzer skor "
+        "veriyor mu? 1'e yakinsa robust, dusukse izole/tesadufi olabilir.</li>"
+        "<li><code>best_adherence_excess_pct</code>: hissenin kendi taraf-koruma "
+        "medyanina gore fark. Mutlak taraf korumadan daha ayirt edicidir.</li>"
+        "<li><code>filter_status</code>: Uygun satirlar once gelir; filtre disi "
+        "hisseler silinmez, neden <code>filter_reasons</code> alanindadir.</li>"
+        "</ul></div>"
+    )
+
+
+def _single_stock_guide_html() -> str:
+    return (
+        "<div class='guide'><h2>Tablo nasil okunur?</h2>"
+        "<p><b>Once sunu bil:</b> tablo iki ayri katman icerir. "
+        "<b>Seviye</b> kolonlari (Temas, Kesisim, Tutma, Sicrama, Seviye Skoru) "
+        "sadece fiyat hareketinin olcumudur; stop, maliyet veya islem varsayimi "
+        "icermez. <b>Islem</b> kolonlari (Medyan R, Edge R, Uyum Skoru) bir "
+        "islem simulasyonundan gelir ve stop/maliyet varsayimlarina duyarlidir. "
+        "MA'yi destek/direnc referansi olarak kullaniyorsan birinci katmani oku.</p>"
+        "<ul>"
+        "<li><b>Guncel Rol</b>: <code>Aktif</code> ise fiyat bugun MA'nin bu "
+        "tarafinda; yani seviye su an gecerli. <code>Diger taraf</code> satirlari "
+        "tarihsel bilgidir, bugun kullanilamaz. <b>Once buna gore filtrele.</b></li>"
+        "<li><b>Temas</b>: birbirinden ayristirilmis tarihsel MA temas sayisi. "
+        "Ham kanit miktari; 5-10 arasi satirlar ince kanittir.</li>"
+        "<li><b>Temas/100</b>: 100 bar basina temas. Kisa periyotlu MA'lar dogal "
+        "olarak daha cok temas alir; periyotlari karsilastirirken bunu kullan.</li>"
+        "<li><b>Kesisim/100</b>: 100 bar basina, fiyatin MA'yi kac kez kestigi. "
+        "Dusukse MA bir sinir; yuksekse MA gurultunun ortasinda duruyor demektir.</li>"
+        "<li><b>Tutma %</b>: temaslardan sonra fiyatin beklenen tarafta kaldigi "
+        "oran. 'Bu bir sinir mi?' sorusunun dogrudan cevabi.</li>"
+        "<li><b>Sicrama ATR</b>: temastan sonra fiyatin MA'dan ATR cinsinden ne "
+        "kadar uzaklastigi. ATR cinsinden oldugu icin hisseler arasi "
+        "karsilastirilabilir; yuzde degildir.</li>"
+        "<li><b>Sarkma ATR</b>: fiyatin MA'nin ters tarafina ne kadar sarktigi. "
+        "Seviyenin ne kadar keskin oldugunu gosterir.</li>"
+        "<li><b>Taraf Koruma %</b> ve <b>Taraf Farki</b>: ilki mutlak orandir ve "
+        "yukselen bir hissede her MA'da yuksek cikabilir. <b>Taraf Farki</b>, ayni "
+        "hissenin kendi medyanindan farktir; asil bilgiyi o tasir.</li>"
+        "<li><b>Seviye Skoru</b> ve <b>Seviye</b>: 0-100 birlesik olcu. Kanit, "
+        "tutma ve sicrama hesaplanir; kesisim yogunlugu yuksekse skor carpimla "
+        "sonumlenir. Bu yuzden cok kesilen kisa MA'lar artik sisirilmez.</li>"
+        "<li><b>Plato</b>: komsu periyotlarin ortalama skoru / bu satirin skoru. "
+        "1'e yakinsa sonuc periyot degisimine dayaniklidir. Dusukse izole tepe "
+        "olabilir. Bos ise taranan listede yeterince yakin komsu yoktur.</li>"
+        "<li><b>Analiz Bazi</b>: <code>nominal</code> ham TL serisi demektir. "
+        "<code>relative:XU100</code> ise endekse gore arindirilmis seridir; MA "
+        "seviyeleri yine bugunku TL cinsinden okunur.</li>"
+        "<li><b>Medyan R / Edge R / Uyum Skoru</b>: islem katmani. Stop mesafesi, "
+        "maliyet ve takip eden stop varsayimlarina dayanir. Seviye kolonlariyla "
+        "celistiginde once seviye kolonlarini dikkate al.</li>"
+        "</ul></div>"
+    )
+
+
 def write_outputs(
     output_dir: Path,
     detail: pd.DataFrame,
@@ -356,17 +435,7 @@ def write_outputs(
         "border:1px solid #dfe3e8;margin:14px 0}.guide code{font-weight:bold}</style>"
         "</head><body><h1>MA Trend ve Tepki - Piyasa Ozeti</h1>"
         f"<p class='meta'>{len(summary)} varlik - her varlik tek satir</p>"
-        "<div class='guide'><h2>Tablo nasil okunur?</h2><ul>"
-        "<li><code>current_price</code> ve <code>best_ma_value</code> ayni zaman "
-        "dilimindeki <code>price_time</code> anina aittir.</li>"
-        "<li><code>best_difference</code> = MA - fiyat (TL).</li>"
-        "<li><code>best_distance_pct</code> gercek yuzde uzakliktir. "
-        "<code>best_distance_atr</code> ATR uzakligidir; yuzde degildir.</li>"
-        "<li><code>best_compatibility_score</code> 0-100 arası Uyum Skorudur; temas, taraf koruma, kazanma, Medyan R, Edge ve istikrarı birleştirir.</li>"
-        "<li><code>filter_status</code> Uygun satirlar once gelir. Filtre disi "
-        "hisseler silinmez; neden <code>filter_reasons</code> alanindadir.</li>"
-        "<li>Seviye/uyum s?n?flar? ge?mi? davran?? ?zetidir; otomatik al-sat emri de?ildir.</li>"
-        "</ul></div>"
+        + _market_report_guide_html()
         + market_table.to_html(
             index=False,
             border=0,
@@ -385,19 +454,10 @@ def write_outputs(
             "border:1px solid #dfe3e8;text-align:left;white-space:nowrap}th{position:sticky;"
             "top:0;background:#172b4d;color:white}tr:nth-child(even){background:#f2f5f8}"
             "h1,h2{color:#172b4d}.guide{background:white;padding:16px;border:1px solid "
-            "#dfe3e8;margin:14px 0}</style></head><body>"
+            "#dfe3e8;margin:14px 0}.guide code{font-weight:bold}</style></head><body>"
             "<h1>Tek Hisse - Seçilen MA Türleri ve Periyotları</h1>"
             f"<p>{len(single_table)} analiz satırı</p>"
-            "<div class='guide'><h2>Tablo nasıl okunur?</h2><ul>"
-            "<li><b>Temas</b>: birbirinden ayrıştırılmış tarihsel MA temas sayısıdır.</li>"
-            "<li><b>Taraf Koruma %</b>: destek için MA üstünde, direnç için MA altında "
-            "kapanan mumların oranıdır.</li>"
-            "<li><b>Yanlış Taraf %</b>: fiyatın beklenen tarafın tersinde kaldığı orandır.</li>"
-            "<li><b>Kesişim</b>: fiyatın MA tarafını kaç kez değiştirdiğini gösterir; "
-            "yüksek değer kararsızlığa işaret edebilir.</li>"
-            "<li><b>Uyum Skoru</b>: temas, taraf koruma, kazanma, Medyan R, Edge ve istikrarın 0-100 birleşimidir.</li>"
-            "<li><b>Medyan R / Edge R</b>: temas sonrası maliyet düzeltilmiş tepki ve "
-            "rastgele giriş bazına göre avantajdır.</li></ul></div>"
+            + _single_stock_guide_html()
             + single_table.to_html(
                 index=False,
                 border=0,
@@ -499,13 +559,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-zero-volume-pct", type=float, default=20.0)
     parser.add_argument("--max-gap-pct", type=float, default=15.0)
     parser.add_argument("--max-abs-edge-r", type=float, default=5.0)
-    parser.add_argument("--reaction-bars", type=int, default=10)
-    parser.add_argument("--hold-bars", type=int, default=5)
-    parser.add_argument("--break-atr", type=float, default=0.50)
-    parser.add_argument("--bounce-cap-atr", type=float, default=2.0)
-    parser.add_argument("--cross-cap-per-100", type=float, default=4.0)
-    parser.add_argument("--evidence-target-touches", type=int, default=20)
-    parser.add_argument("--neighbor-ratio", type=float, default=0.25)
+    level_defaults = LevelConfig()
+    parser.add_argument("--reaction-bars", type=int, default=level_defaults.reaction_bars)
+    parser.add_argument("--hold-bars", type=int, default=level_defaults.hold_bars)
+    parser.add_argument("--break-atr", type=float, default=level_defaults.break_atr)
+    parser.add_argument("--bounce-cap-atr", type=float, default=level_defaults.bounce_cap_atr)
+    parser.add_argument(
+        "--cross-cap-per-100",
+        type=float,
+        default=level_defaults.cross_cap_per_100,
+    )
+    parser.add_argument("--cross-damping", type=float, default=level_defaults.cross_damping)
+    parser.add_argument(
+        "--evidence-target-touches",
+        type=int,
+        default=level_defaults.evidence_target_touches,
+    )
+    parser.add_argument("--neighbor-ratio", type=float, default=level_defaults.neighbor_ratio)
+    parser.add_argument(
+        "--strong-threshold",
+        type=float,
+        default=level_defaults.strong_threshold,
+    )
+    parser.add_argument("--level-threshold", type=float, default=level_defaults.level_threshold)
+    parser.add_argument("--weak-threshold", type=float, default=level_defaults.weak_threshold)
     parser.add_argument(
         "--level-config-json",
         default="",
@@ -576,8 +653,12 @@ def main(argv: list[str] | None = None) -> int:
         "break_atr": args.break_atr,
         "bounce_cap_atr": args.bounce_cap_atr,
         "cross_cap_per_100": args.cross_cap_per_100,
+        "cross_damping": args.cross_damping,
         "evidence_target_touches": args.evidence_target_touches,
         "neighbor_ratio": args.neighbor_ratio,
+        "strong_threshold": args.strong_threshold,
+        "level_threshold": args.level_threshold,
+        "weak_threshold": args.weak_threshold,
     }
     level_config_values.update(parse_level_config_json(args.level_config_json))
     level_config = LevelConfig(**level_config_values)

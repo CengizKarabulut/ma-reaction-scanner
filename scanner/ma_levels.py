@@ -48,10 +48,14 @@ class LevelConfig:
     reaction_bars: int = 10
     hold_bars: int = 5
     break_atr: float = 0.50
-    bounce_cap_atr: float = 2.0
-    cross_cap_per_100: float = 4.0
+    bounce_cap_atr: float = 4.0
+    cross_cap_per_100: float = 8.0
+    cross_damping: float = 0.60
     evidence_target_touches: int = 20
     neighbor_ratio: float = 0.25
+    strong_threshold: float = 50.0
+    level_threshold: float = 38.0
+    weak_threshold: float = 27.0
 
     def __post_init__(self) -> None:
         positive_integers = (
@@ -66,11 +70,18 @@ class LevelConfig:
             self.bounce_cap_atr,
             self.cross_cap_per_100,
             self.neighbor_ratio,
+            self.strong_threshold,
+            self.level_threshold,
+            self.weak_threshold,
         )
         if any(float(value) < 0 for value in non_negative):
             raise ValueError("ATR ve oran esikleri negatif olamaz")
         if self.bounce_cap_atr <= 0 or self.cross_cap_per_100 <= 0:
             raise ValueError("Sicrama ve kesisim tavanlari sifirdan buyuk olmalidir")
+        if not 0.0 <= self.cross_damping <= 1.0:
+            raise ValueError("Kesisim sonumleme katsayisi 0 ile 1 arasinda olmalidir")
+        if not self.strong_threshold >= self.level_threshold >= self.weak_threshold:
+            raise ValueError("Seviye esikleri azalan sirada olmalidir")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -199,16 +210,29 @@ def summarize_outcomes(
 def level_score(metrics: dict[str, float], config: LevelConfig) -> float:
     """Return a transparent 0-100 level-quality score.
 
-    Weights, and why:
+    Quality is the sum of three observations, out of 80:
 
     * ``30`` **hold rate** - the direct answer to "is this a boundary".
     * ``25`` **median bounce** - an average nobody reacts to is not a level.
     * ``25`` **evidence** - how many independent tests there were.
-    * ``20`` **cleanliness** - price slicing through the average again and
-      again means the average sits inside the noise, not at its edge.
 
-    None of these can be improved by changing a stop, a cost assumption or a
-    holding period, which is the whole point.
+    Cleanliness then applies as a *multiplier* rather than a fourth addend.
+
+    The first version of this function added cleanliness as a 20-point term and
+    it did not work.  On a real BIST daily scan (224 rows, one symbol) 87% of
+    rows exceeded the crossing cap, so the term collapsed into a constant -20
+    for almost everything and stopped discriminating.  Short averages then won
+    on the remaining three components - they collect many touches and easily
+    clear a low bounce cap - and a 10-period average that price crosses every
+    third bar was being labelled a strong level while SMA200 ranked below it.
+
+    A multiplier cannot be saturated away: an average price slices through
+    constantly is penalised in proportion, no matter how good its other numbers
+    look.  ``cross_damping`` bounds the penalty so a choppy average is demoted
+    rather than zeroed, because chop alone is not proof of irrelevance.
+
+    None of these inputs can be improved by changing a stop, a cost assumption
+    or a holding period, which is the whole point.
     """
 
     def bounded(value: object, low: float, high: float) -> float:
@@ -230,22 +254,31 @@ def level_score(metrics: dict[str, float], config: LevelConfig) -> float:
         / config.bounce_cap_atr
         * 25.0
     )
+    quality = (evidence + hold + bounce) / 80.0 * 100.0
     cross = bounded(metrics.get("cross_per_100"), 0.0, config.cross_cap_per_100)
-    cleanliness = (1.0 - cross / config.cross_cap_per_100) * 20.0
-    return round(evidence + hold + bounce + cleanliness, 2)
+    cleanliness = 1.0 - config.cross_damping * (cross / config.cross_cap_per_100)
+    return round(quality * cleanliness, 2)
 
 
 def level_class(metrics: dict[str, float], score: float, config: LevelConfig) -> str:
-    """Coarse, human-readable bucket for the level score."""
+    """Coarse, human-readable bucket for the level score.
+
+    The thresholds live on :class:`LevelConfig` because they are calibrated,
+    not derived.  The current defaults come from a single BIST daily scan where
+    the multiplicative score topped out near 56 - a perfect 100 requires a
+    never-crossed average with full touch evidence and a 4-ATR reaction, which
+    does not occur in practice.  Re-check them against a multi-symbol run
+    before treating the labels as absolute.
+    """
 
     touches = int(metrics.get("level_touches", 0) or 0)
     if touches < max(3, config.evidence_target_touches // 4):
         return "Yetersiz temas"
-    if score >= 70.0:
+    if score >= config.strong_threshold:
         return "Guclu seviye"
-    if score >= 55.0:
+    if score >= config.level_threshold:
         return "Seviye"
-    if score >= 40.0:
+    if score >= config.weak_threshold:
         return "Zayif seviye"
     return "Seviye degil"
 

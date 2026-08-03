@@ -129,7 +129,13 @@ class LevelScoreTests(unittest.TestCase):
         self.assertEqual(level_score(metrics, self.config), 0.0)
         self.assertEqual(level_class(metrics, 0.0, self.config), "Yetersiz temas")
 
-    def test_choppy_average_loses_the_cleanliness_component(self):
+    def test_cleanliness_scales_the_score_instead_of_subtracting_from_it(self):
+        config = LevelConfig(
+            evidence_target_touches=20,
+            bounce_cap_atr=2.0,
+            cross_cap_per_100=8.0,
+            cross_damping=0.6,
+        )
         clean = {
             "level_touches": 20,
             "hold_rate_pct": 100.0,
@@ -138,9 +144,62 @@ class LevelScoreTests(unittest.TestCase):
         }
         choppy = dict(clean, cross_per_100=8.0)
 
-        self.assertAlmostEqual(
-            level_score(clean, self.config) - level_score(choppy, self.config), 20.0
+        self.assertEqual(level_score(clean, config), 100.0)
+        # 1 - 0.6 * (8/8) = 0.4 of the clean score, not a flat deduction.
+        self.assertAlmostEqual(level_score(choppy, config), 40.0)
+
+    def test_a_choppy_short_average_cannot_outrank_a_clean_long_one(self):
+        """Regression: the additive cleanliness term let noise win.
+
+        These two rows are taken from a real BIST daily scan.  The first is a
+        10-period average price crosses roughly every third bar; the second is
+        SMA200.  Under the original additive score the choppy average came out
+        ahead (71.4 against 63.2) and was labelled a strong level.
+        """
+        config = LevelConfig()
+        choppy_short = {
+            "level_touches": 21,
+            "hold_rate_pct": 71.43,
+            "median_bounce_atr": 3.25,
+            "cross_per_100": 29.41,
+        }
+        clean_long = {
+            "level_touches": 8,
+            "hold_rate_pct": 62.50,
+            "median_bounce_atr": 1.94,
+            "cross_per_100": 1.96,
+        }
+
+        self.assertLess(
+            level_score(choppy_short, config), level_score(clean_long, config)
         )
+        self.assertNotEqual(
+            level_class(choppy_short, level_score(choppy_short, config), config),
+            "Guclu seviye",
+        )
+
+    def test_class_thresholds_are_configurable(self):
+        metrics = {
+            "level_touches": 20,
+            "hold_rate_pct": 60.0,
+            "median_bounce_atr": 2.0,
+            "cross_per_100": 2.0,
+        }
+        score = level_score(metrics, LevelConfig())
+
+        strict = LevelConfig(strong_threshold=95.0, level_threshold=90.0, weak_threshold=85.0)
+        loose = LevelConfig(strong_threshold=10.0, level_threshold=5.0, weak_threshold=1.0)
+
+        self.assertEqual(level_class(metrics, score, strict), "Seviye degil")
+        self.assertEqual(level_class(metrics, score, loose), "Guclu seviye")
+
+    def test_thresholds_must_be_ordered(self):
+        with self.assertRaises(ValueError):
+            LevelConfig(strong_threshold=10.0, level_threshold=50.0)
+
+    def test_damping_must_be_a_fraction(self):
+        with self.assertRaises(ValueError):
+            LevelConfig(cross_damping=1.5)
 
     def test_density_normalisation_makes_short_and_long_periods_comparable(self):
         short = summarize_outcomes(
