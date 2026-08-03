@@ -222,7 +222,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m scanner.ma_notify --summary reports/final/market_summary.csv --label "Tüm BIST MA Trend ve Tepki" --top 25
+        run: python -m scanner.ma_notify --summary reports/final/market_summary.csv --watchlist reports/final/ma_watchlist.csv --label "Tüm BIST MA Trend ve Tepki" --top 25
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:

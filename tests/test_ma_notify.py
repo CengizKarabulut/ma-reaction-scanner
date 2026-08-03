@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from scanner.ma_notify import format_single_detail, format_summary
+from scanner.ma_notify import format_single_detail, format_summary, format_watchlist_detail
 
 
 class NotificationTests(unittest.TestCase):
@@ -75,6 +75,32 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("SMA233", message)
         self.assertIn("EMA55", message)
         self.assertIn("Kor%", message)
+        self.assertLessEqual(len(message), 4_000)
+
+    def test_watchlist_detail_prefers_compact_zone_block(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "side": "Destek",
+                    "zone_low": 309.0,
+                    "zone_high": 316.89,
+                    "distance_pct": -8.0,
+                    "ma_list": "SMA200, EMA200",
+                    "level_touches": 10,
+                    "hold_rate_pct": 56.0,
+                    "confidence": "Orta",
+                }
+            ]
+        )
+
+        message = format_watchlist_detail(frame, "ASELS", top=20)
+
+        self.assertIn("Izleme seti", message)
+        self.assertIn("SMA200", message)
+        self.assertIn("309.00-316.89", message)
+        self.assertIn("<pre>", message)
         self.assertLessEqual(len(message), 4_000)
 if __name__ == "__main__":
     unittest.main()

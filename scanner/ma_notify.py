@@ -4,11 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import html
 import os
 from pathlib import Path
 
 import httpx
 import pandas as pd
+
+try:
+    from .ma_watchlist import format_watchlist_text
+except ImportError:  # direct script execution
+    from ma_watchlist import format_watchlist_text
 
 
 def _number(value: object, digits: int = 2) -> str:
@@ -141,22 +147,48 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
     return "\n".join(lines)
 
 
+def format_watchlist_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
+    selected = frame.head(max(1, top)) if top > 0 else frame
+    block = format_watchlist_text(selected)
+    return "\n".join(
+        [
+            f"<b>{str(label)[:200]}</b>",
+            "Izleme seti: fiyatin once temas edebilecegi, yeterli gecmis temasi olan MA bolgeleri.",
+            "Siralama skora gore degil, fiyata yakinliga goredir.",
+            "",
+            "<pre>",
+            html.escape(block),
+            "</pre>",
+            "Tam detay CSV/HTML eki ve GitHub artifact icindedir.",
+        ]
+    )
+
+
 def send(
     summary_path: Path,
     label: str,
     top: int,
     detail_path: Path | None = None,
     report_path: Path | None = None,
+    watchlist_path: Path | None = None,
 ) -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
     message_path = detail_path or summary_path
     frame = pd.read_csv(message_path)
-    message = (
-        format_single_detail(frame, label, top)
-        if detail_path is not None
-        else format_summary(frame, label, top)
+    watch_frame = (
+        pd.read_csv(watchlist_path)
+        if watchlist_path is not None and watchlist_path.exists()
+        else None
     )
+    if detail_path is not None and watch_frame is not None:
+        message = format_watchlist_detail(watch_frame, label, top)
+    else:
+        message = (
+            format_single_detail(frame, label, top)
+            if detail_path is not None
+            else format_summary(frame, label, top)
+        )
     base = f"https://api.telegram.org/bot{token}"
     with httpx.Client(timeout=60.0) as client:
         response = client.post(
@@ -165,6 +197,8 @@ def send(
         )
         response.raise_for_status()
         attachments = [message_path]
+        if watchlist_path is not None and watchlist_path.exists():
+            attachments.append(watchlist_path)
         if report_path is not None and report_path.exists():
             attachments.append(report_path)
         for attachment in attachments:
@@ -183,6 +217,7 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=25)
     parser.add_argument("--detail")
     parser.add_argument("--report")
+    parser.add_argument("--watchlist")
     args = parser.parse_args()
     send(
         Path(args.summary),
@@ -190,6 +225,7 @@ def main() -> int:
         args.top,
         detail_path=Path(args.detail) if args.detail else None,
         report_path=Path(args.report) if args.report else None,
+        watchlist_path=Path(args.watchlist) if args.watchlist else None,
     )
     return 0
 

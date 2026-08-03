@@ -82,6 +82,21 @@ GitHub Actions ekraninda ana ayarlar sade tutulur. MA DNA'nin nadir degisen iler
 `{"evidence_target_touches":30,"reaction_bars":12,"cross_damping":0.5}`.
 Komut satirinda eski tek tek parametreler de geriye donuk uyumluluk icin calismaya devam eder.
 
+### Izleme seti
+
+Tam MA DNA tablosu arastirma icindir; tek hissede yuzlerce satir uretebilir.
+`ma_watchlist.csv` ve HTML'deki **Izleme seti** bu tabloyu pratik bolgelere indirir:
+
+- Sadece bugun aktif olan taraf kullanilir: fiyat MA'nin ustundeyse destek, altindaysa direnc.
+- En az temas, seviye skoru, plato ve uzaklik esiklerini gecmeyen satirlar elenir.
+- Birbirine yakin MA'lar ATR mesafesine gore tek bolgeye kumelenir; temaslar toplanmaz, ayni olayi iki kez saymamak icin en yuksek temas sayisi kullanilir.
+- Sira skor sirasi degil, fiyata yakinlik sirasidir: izleme icin once fiyat nereye degecek sorusu onemlidir.
+
+Bu katman otomatik al-sat sinyali degil; grafikte hangi MA bolgelerinin izlenmeye deger oldugunu hizli gosterir.
+Komut satirinda `--watch-min-touches`, `--watch-min-score`, `--watch-cluster-atr`,
+`--watch-max-zones` gibi ayarlar degistirilebilir. Actions ekraninda yeni input eklenmez;
+varsayilan izleme seti otomatik uretilir.
+
 
 ## Raporu nasil okuyacagim?
 
@@ -138,6 +153,8 @@ GitHub artifact içinde:
 - `market_summary.csv`: her varlık bir satır, tum teknik alanlarla
 - `market_table.csv`: her varlik bir satir; MA, zaman dilimi, ham temas, Seviye Skoru,
   tutma, sicrama, uzaklik ve eski Uyum Skoru iceren sade tablo
+- `ma_watchlist.csv`: izlemeye deger aktif MA bolgeleri; ham teknik kolonlarla
+- `watchlist.csv`: ayni izleme setinin okunabilir tablo hali
 - `single_stock_table.csv`: secilen tum tek-hisse kombinasyonlari; hesaplanamayanlar
   `Yetersiz veri` olarak korunur
 - `ma_detail.csv`: tüm zaman dilimi/MA/yön ayrıntıları
