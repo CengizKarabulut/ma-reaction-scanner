@@ -54,8 +54,9 @@ Bunlar gelecek performans garantisi veya otomatik al/sat emri değildir.
 Bu repo artik iki farkli katmani ayri raporlar:
 
 - **Seviye Skoru (`level_score`)**: hissenin hangi ortalamaya gercekten saygi duydugunu
-  okumak icin ana skor. Ham temas sayisi, temas sonrasi seviyeyi tutma, medyan sicrama
-  ve fiyat tarafinin cok fazla kesilip bicilmemesi birlikte puanlanir.
+  okumak icin ana skor. Ham temas sayisi, temas sonrasi seviyeyi tutma ve medyan sicrama
+  once puanlanir; fiyat MA'yi cok sik kesiyorsa skor carpimla sonumlenir. Boylece cok
+  temas alan ama gurultunun ortasinda duran kisa MA'lar yapay olarak sismez.
 - **Uyum Skoru (`compatibility_score`)**: eski islem-simulasyon katmani. Stop, maliyet,
   trailing stop ve baz giris varsayimlarina baglidir; karsilastirma icin korunur.
 
@@ -78,8 +79,8 @@ Bu, nominal TRY yukselisinden gelen sahte "her ortalama destek calisiyor" etkisi
 
 GitHub Actions ekraninda ana ayarlar sade tutulur. MA DNA'nin nadir degisen ileri ayarlari
 `level_config_json` alanindan tek JSON olarak verilebilir; ornek:
-`{"evidence_target_touches":30,"reaction_bars":12}`. Komut satirinda eski tek tek
-parametreler de geriye donuk uyumluluk icin calismaya devam eder.
+`{"evidence_target_touches":30,"reaction_bars":12,"cross_damping":0.5}`.
+Komut satirinda eski tek tek parametreler de geriye donuk uyumluluk icin calismaya devam eder.
 
 
 ## Raporu nasil okuyacagim?
