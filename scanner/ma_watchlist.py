@@ -231,10 +231,10 @@ def _short_text(value: object, max_chars: int | None) -> str:
     text = str(value).strip()
     if max_chars is None or len(text) <= max_chars:
         return text
-    if max_chars <= 3:
-        return "." * max(0, max_chars)
-
     parts = [part.strip() for part in text.split(",") if part.strip()]
+    if max_chars <= 3:
+        return f"... +{len(parts)}" if parts else text[:max(0, max_chars)]
+
     if len(parts) > 1:
         kept: list[str] = []
         for part in parts:

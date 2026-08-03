@@ -129,6 +129,7 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("Telegram limiti", message)
         self.assertIn("... +", message)
         self.assertIn("1d", message)
+        self.assertIn("337.00-337.50", message)
 
 
 if __name__ == "__main__":
