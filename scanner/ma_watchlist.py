@@ -227,6 +227,31 @@ _WATCH_COLUMNS = {
 }
 
 
+def _short_text(value: object, max_chars: int | None) -> str:
+    text = str(value).strip()
+    if max_chars is None or len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return "." * max(0, max_chars)
+
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    if len(parts) > 1:
+        kept: list[str] = []
+        for part in parts:
+            omitted = len(parts) - len(kept) - 1
+            suffix = f", ... +{omitted}" if omitted > 0 else ""
+            candidate = ", ".join([*kept, part]) + suffix
+            if len(candidate) > max_chars:
+                break
+            kept.append(part)
+        if kept:
+            omitted = len(parts) - len(kept)
+            suffix = f", ... +{omitted}" if omitted > 0 else ""
+            return ", ".join(kept) + suffix
+
+    return text[: max_chars - 3].rstrip() + "..."
+
+
 def format_watchlist_text(
     watchlist: pd.DataFrame,
     *,
@@ -234,6 +259,8 @@ def format_watchlist_text(
     price: float | None = None,
     timeframe: str = "",
     trend: str = "",
+    include_row_timeframe: bool = True,
+    max_ma_list_chars: int | None = None,
 ) -> str:
     """Render the watch set as a fixed-width block for Telegram or a terminal."""
 
@@ -257,13 +284,25 @@ def format_watchlist_text(
         lines.append(f"{side.upper()}")
         for _, row in rows.iterrows():
             low, high = float(row["zone_low"]), float(row["zone_high"])
-            band = f"{low:,.2f}" if abs(high - low) < 0.005 else f"{low:,.2f}-{high:,.2f}"
+            band = (
+                f"{low:,.2f}"
+                if abs(high - low) < 0.005
+                else f"{low:,.2f}-{high:,.2f}"
+            )
+            row_timeframe = str(row.get("timeframe", "")).strip()
+            timeframe_part = (
+                f"{row_timeframe:<4} "
+                if include_row_timeframe and row_timeframe
+                else ""
+            )
             lines.append(
-                f"  {band:>17}  {float(row['distance_pct']):+6.1f}%  "
+                f"  {timeframe_part}{band:>17}  {float(row['distance_pct']):+6.1f}%  "
                 f"{str(row['confidence']):<6} {int(row['level_touches']):>3} temas  "
                 f"tutma %{float(row['hold_rate_pct']):.0f}"
             )
-            lines.append(f"                     {row['ma_list']}")
+            lines.append(
+                f"                     {_short_text(row['ma_list'], max_ma_list_chars)}"
+            )
     return "\n".join(lines)
 
 
