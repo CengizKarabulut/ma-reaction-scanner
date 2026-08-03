@@ -166,6 +166,7 @@ jobs:
           --summary reports/single/market_summary.csv
           --detail reports/single/single_stock_table.csv
           --report reports/single/single_stock_report.html
+          --watchlist reports/single/ma_watchlist.csv
           --label "Tek Hisse MA Trend ve Tepki · ${{ inputs.symbol }}"
           --top 20
         continue-on-error: true

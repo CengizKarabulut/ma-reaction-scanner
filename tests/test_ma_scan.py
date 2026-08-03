@@ -8,6 +8,7 @@ import pandas as pd
 
 from scanner.ma_engine import MA_TYPES, TIMEFRAMES
 from scanner.ma_levels import LevelConfig
+from scanner.ma_watchlist import WatchlistConfig
 from scanner.ma_scan import (
     build_parser,
     build_single_stock_table,
@@ -74,6 +75,18 @@ class ScannerInputTests(unittest.TestCase):
         self.assertEqual(args.strong_threshold, defaults.strong_threshold)
         self.assertEqual(args.level_threshold, defaults.level_threshold)
         self.assertEqual(args.weak_threshold, defaults.weak_threshold)
+
+    def test_cli_watchlist_defaults_follow_config(self):
+        args = build_parser().parse_args([])
+        defaults = WatchlistConfig()
+
+        self.assertEqual(args.watch_cluster_atr, defaults.cluster_atr)
+        self.assertEqual(args.watch_min_touches, defaults.min_touches)
+        self.assertEqual(args.watch_min_score, defaults.min_level_score)
+        self.assertEqual(args.watch_min_plateau, defaults.min_plateau_ratio)
+        self.assertEqual(args.watch_max_zones, defaults.max_zones_per_side)
+        self.assertEqual(args.watch_max_distance_atr, defaults.max_distance_atr)
+        self.assertFalse(args.watch_require_positive_adherence)
 
     def test_level_config_json_rejects_non_integer_int_fields(self):
         with self.assertRaisesRegex(ValueError, "tam sayi"):
@@ -157,15 +170,18 @@ class ScannerInputTests(unittest.TestCase):
                 patch("scanner.ma_scan.scan_frame", return_value=pd.DataFrame()),
             ):
                 provider_class.return_value.fetch.return_value = fetched
+                output = Path(temporary) / "output"
                 code = main(
                     [
                         "--timeframes",
                         "1d",
                         "--output-dir",
-                        str(Path(temporary) / "output"),
+                        str(output),
                     ]
                 )
-        self.assertEqual(code, 0)
+                self.assertEqual(code, 0)
+                self.assertTrue((output / "ma_watchlist.csv").exists())
+                self.assertTrue((output / "watchlist.csv").exists())
 
     def test_single_stock_table_keeps_each_selected_ma_side(self):
         detail = pd.DataFrame(

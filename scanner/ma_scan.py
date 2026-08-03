@@ -17,6 +17,7 @@ from .ma_data import MarketDataProvider
 from .ma_engine import DEFAULT_PERIODS, MA_TYPES, TIMEFRAMES, ScanConfig, build_market_summary, scan_frame
 from .ma_levels import LevelConfig, finalize_level_frame
 from .ma_relative import BenchmarkCache
+from .ma_watchlist import WatchlistConfig, build_watchlist, watchlist_table
 from .stock_metadata import enrich_stock_instruments, format_index_memberships
 
 
@@ -322,6 +323,64 @@ def _market_report_guide_html() -> str:
     )
 
 
+def _watchlist_config_from_payload(config_payload: dict[str, object]) -> WatchlistConfig:
+    watch_payload = config_payload.get("watchlist", {})
+    return (
+        WatchlistConfig(**watch_payload)
+        if isinstance(watch_payload, dict)
+        else WatchlistConfig()
+    )
+
+
+def _watchlist_empty_table() -> pd.DataFrame:
+    return watchlist_table(build_watchlist(pd.DataFrame(), WatchlistConfig()))
+
+
+def _market_watchlist_preview(watchlist: pd.DataFrame) -> pd.DataFrame:
+    if watchlist is None or watchlist.empty:
+        return _watchlist_empty_table()
+    keys = [column for column in ("symbol", "asset_class") if column in watchlist.columns]
+    if not keys:
+        keys = ["symbol"] if "symbol" in watchlist.columns else []
+    if not keys:
+        preview = watchlist.copy()
+    else:
+        preview = (
+            watchlist.assign(
+                _abs=pd.to_numeric(watchlist["distance_atr"], errors="coerce").abs()
+            )
+            .sort_values(keys + ["_abs"], na_position="last")
+            .groupby(keys, sort=False, dropna=False)
+            .head(1)
+            .drop(columns=["_abs"])
+        )
+    return watchlist_table(preview)
+
+
+def _watchlist_html_section(title: str, table: pd.DataFrame, *, empty_note: str) -> str:
+    intro = (
+        "<p class='meta'>Fiyatin bugun ilgili tarafinda olan, yeterli temasi bulunan "
+        "ve periyot degisimine dayanikli MA bolgeleri. Birbirine yakin ortalamalar "
+        "tek bolge sayilir; izleme sirasi skora gore degil, fiyata yakinliga goredir.</p>"
+    )
+    if table is None or table.empty:
+        return (
+            f"<h2>{title}</h2>"
+            + intro
+            + f"<p class='meta'><b>{empty_note}</b></p>"
+        )
+    return (
+        f"<h2>{title}</h2>"
+        + intro
+        + table.to_html(
+            index=False,
+            border=0,
+            escape=True,
+            float_format=lambda value: f"{value:,.2f}",
+        )
+    )
+
+
 def _single_stock_guide_html() -> str:
     return (
         "<div class='guide'><h2>Tablo nasil okunur?</h2>"
@@ -379,6 +438,11 @@ def write_outputs(
     level_config = LevelConfig(**level_payload) if isinstance(level_payload, dict) else LevelConfig()
     if not detail.empty:
         detail = finalize_level_frame(detail, level_config)
+    watch_config = _watchlist_config_from_payload(config_payload)
+    watchlist = build_watchlist(detail, watch_config)
+    watchlist.to_csv(output_dir / "ma_watchlist.csv", index=False, encoding="utf-8-sig")
+    watch_table = watchlist_table(watchlist)
+    watch_table.to_csv(output_dir / "watchlist.csv", index=False, encoding="utf-8-sig")
     scan_payload = config_payload.get("scan", {}) if isinstance(config_payload.get("scan", {}), dict) else {}
     summary = build_market_summary(
         detail,
@@ -435,6 +499,11 @@ def write_outputs(
         "border:1px solid #dfe3e8;margin:14px 0}.guide code{font-weight:bold}</style>"
         "</head><body><h1>MA Trend ve Tepki - Piyasa Ozeti</h1>"
         f"<p class='meta'>{len(summary)} varlik - her varlik tek satir</p>"
+        + _watchlist_html_section(
+            "Izleme seti - sembol basina en yakin bolge",
+            _market_watchlist_preview(watchlist),
+            empty_note="Izleme esiklerini gecen bolge yok.",
+        )
         + _market_report_guide_html()
         + market_table.to_html(
             index=False,
@@ -457,6 +526,11 @@ def write_outputs(
             "#dfe3e8;margin:14px 0}.guide code{font-weight:bold}</style></head><body>"
             "<h1>Tek Hisse - Seçilen MA Türleri ve Periyotları</h1>"
             f"<p>{len(single_table)} analiz satırı</p>"
+            + _watchlist_html_section(
+                "Izleme seti",
+                watch_table,
+                empty_note="Bu kosuda izleme esiklerini gecen aktif MA bolgesi yok.",
+            )
             + _single_stock_guide_html()
             + single_table.to_html(
                 index=False,
@@ -583,6 +657,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--level-threshold", type=float, default=level_defaults.level_threshold)
     parser.add_argument("--weak-threshold", type=float, default=level_defaults.weak_threshold)
+    watch_defaults = WatchlistConfig()
+    parser.add_argument("--watch-cluster-atr", type=float, default=watch_defaults.cluster_atr)
+    parser.add_argument("--watch-min-touches", type=int, default=watch_defaults.min_touches)
+    parser.add_argument("--watch-min-score", type=float, default=watch_defaults.min_level_score)
+    parser.add_argument("--watch-min-plateau", type=float, default=watch_defaults.min_plateau_ratio)
+    parser.add_argument("--watch-max-zones", type=int, default=watch_defaults.max_zones_per_side)
+    parser.add_argument("--watch-max-distance-atr", type=float, default=watch_defaults.max_distance_atr)
+    parser.add_argument("--watch-require-positive-adherence", action="store_true")
     parser.add_argument(
         "--level-config-json",
         default="",
@@ -662,6 +744,15 @@ def main(argv: list[str] | None = None) -> int:
     }
     level_config_values.update(parse_level_config_json(args.level_config_json))
     level_config = LevelConfig(**level_config_values)
+    watch_config = WatchlistConfig(
+        cluster_atr=args.watch_cluster_atr,
+        min_touches=args.watch_min_touches,
+        min_level_score=args.watch_min_score,
+        min_plateau_ratio=args.watch_min_plateau,
+        require_positive_adherence=args.watch_require_positive_adherence,
+        max_zones_per_side=args.watch_max_zones,
+        max_distance_atr=args.watch_max_distance_atr,
+    )
     instruments = resolve_instruments(args)
     attempted_requests = len(instruments) * len(timeframes)
     provider = MarketDataProvider(source=args.source)
@@ -713,6 +804,7 @@ def main(argv: list[str] | None = None) -> int:
         "timeframes": list(timeframes),
         "scan": config.to_dict(),
         "level": level_config.to_dict(),
+        "watchlist": watch_config.to_dict(),
         "relative_to": relative_to,
         "rank_by": args.rank_by,
         "lookback": args.lookback,
