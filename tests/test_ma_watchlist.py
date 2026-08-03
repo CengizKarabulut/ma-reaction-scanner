@@ -163,6 +163,40 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("SMA200", text)
         self.assertIn("EMA200", text)
 
+    def test_rendered_rows_include_timeframe_for_multi_timeframe_scans(self):
+        watch = pd.DataFrame(
+            [
+                {
+                    "side": "Destek",
+                    "timeframe": "1d",
+                    "zone_low": 309.0,
+                    "zone_high": 316.89,
+                    "distance_pct": -8.0,
+                    "confidence": "Orta",
+                    "level_touches": 10,
+                    "hold_rate_pct": 56.0,
+                    "ma_list": "SMA200, EMA200",
+                },
+                {
+                    "side": "Destek",
+                    "timeframe": "4h",
+                    "zone_low": 330.0,
+                    "zone_high": 331.0,
+                    "distance_pct": -1.0,
+                    "confidence": "Guclu",
+                    "level_touches": 18,
+                    "hold_rate_pct": 72.0,
+                    "ma_list": "HMA55",
+                },
+            ]
+        )
+
+        text = format_watchlist_text(watch)
+
+        self.assertIn("1d", text)
+        self.assertIn("4h", text)
+        self.assertIn("HMA55", text)
+
     def test_missing_columns_return_an_empty_shaped_frame(self):
         watch = build_watchlist(pd.DataFrame({"symbol": ["X"]}), WatchlistConfig())
 

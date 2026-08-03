@@ -102,5 +102,34 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("309.00-316.89", message)
         self.assertIn("<pre>", message)
         self.assertLessEqual(len(message), 4_000)
+
+    def test_watchlist_detail_enforces_budget_with_long_ma_lists(self):
+        long_ma_list = ", ".join(f"MA{index}" for index in range(300))
+        frame = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d" if index % 2 == 0 else "4h",
+                    "side": "Destek" if index % 3 else "Direnc",
+                    "zone_low": 300.0 + index,
+                    "zone_high": 300.5 + index,
+                    "distance_pct": float(index) / 10.0,
+                    "ma_list": long_ma_list,
+                    "level_touches": 10 + index,
+                    "hold_rate_pct": 55.0,
+                    "confidence": "Orta",
+                }
+                for index in range(80)
+            ]
+        )
+
+        message = format_watchlist_detail(frame, "ASELS", top=0)
+
+        self.assertLessEqual(len(message), 4_000)
+        self.assertIn("Telegram limiti", message)
+        self.assertIn("... +", message)
+        self.assertIn("1d", message)
+
+
 if __name__ == "__main__":
     unittest.main()

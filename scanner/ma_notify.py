@@ -147,21 +147,77 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
     return "\n".join(lines)
 
 
+def _watchlist_detail_message(label: str, block: str, *, omitted: int = 0) -> str:
+    lines = [
+        f"<b>{str(label)[:200]}</b>",
+        "Izleme seti: fiyatin once temas edebilecegi, yeterli gecmis temasi olan MA bolgeleri.",
+        "Siralama skora gore degil, fiyata yakinliga goredir.",
+        "",
+        "<pre>",
+        block,
+        "</pre>",
+    ]
+    footer = "Tam detay CSV/HTML eki ve GitHub artifact icindedir."
+    if omitted > 0:
+        note = (
+            f"Telegram limiti nedeniyle {omitted} bolge daha mesajda kisaltildi; "
+            "tam liste ekte."
+        )
+        if len("\n".join([*lines, note, footer])) <= _TELEGRAM_TEXT_BUDGET:
+            lines.append(note)
+    lines.append(footer)
+    return "\n".join(lines)
+
+
+def _watchlist_block(
+    records: list[dict[str, object]], max_ma_list_chars: int | None
+) -> str:
+    return html.escape(
+        format_watchlist_text(
+            pd.DataFrame.from_records(records),
+            max_ma_list_chars=max_ma_list_chars,
+        )
+    )
+
+
 def format_watchlist_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
     selected = frame.head(max(1, top)) if top > 0 else frame
-    block = format_watchlist_text(selected)
-    return "\n".join(
-        [
-            f"<b>{str(label)[:200]}</b>",
-            "Izleme seti: fiyatin once temas edebilecegi, yeterli gecmis temasi olan MA bolgeleri.",
-            "Siralama skora gore degil, fiyata yakinliga goredir.",
-            "",
-            "<pre>",
-            html.escape(block),
-            "</pre>",
-            "Tam detay CSV/HTML eki ve GitHub artifact icindedir.",
-        ]
+    if selected is None or selected.empty:
+        block = html.escape(format_watchlist_text(pd.DataFrame()))
+        return _watchlist_detail_message(label, block)
+
+    best_records: list[dict[str, object]] = []
+    best_limit: int | None = 180
+    for ma_list_limit in (180, 120, 80, 40, 0):
+        records: list[dict[str, object]] = []
+        for _, row in selected.iterrows():
+            candidate = [*records, row.to_dict()]
+            block = _watchlist_block(candidate, ma_list_limit)
+            if len(_watchlist_detail_message(label, block)) > _TELEGRAM_TEXT_BUDGET:
+                break
+            records = candidate
+        if records:
+            best_records = records
+            best_limit = ma_list_limit
+            break
+
+    if best_records:
+        omitted = len(selected) - len(best_records)
+        while best_records:
+            block = _watchlist_block(best_records, best_limit)
+            message = _watchlist_detail_message(label, block, omitted=omitted)
+            if len(message) <= _TELEGRAM_TEXT_BUDGET and (
+                omitted == 0 or "Telegram limiti" in message
+            ):
+                return message
+            best_records = best_records[:-1]
+            omitted = len(selected) - len(best_records)
+
+    fallback = html.escape(
+        "Izleme seti uretildi; Telegram metin limiti nedeniyle tablo kisaltildi.\n"
+        "Tam liste CSV/HTML eki ve GitHub artifact icindedir."
     )
+    return _watchlist_detail_message(label, fallback, omitted=len(selected))
 
 
 def send(
