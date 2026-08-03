@@ -192,26 +192,28 @@ def format_watchlist_detail(frame: pd.DataFrame, label: str, top: int = 20) -> s
         records: list[dict[str, object]] = []
         for _, row in selected.iterrows():
             candidate = [*records, row.to_dict()]
+            omitted = len(selected) - len(candidate)
             block = _watchlist_block(candidate, ma_list_limit)
-            if len(_watchlist_detail_message(label, block)) > _TELEGRAM_TEXT_BUDGET:
+            message = _watchlist_detail_message(label, block, omitted=omitted)
+            if len(message) > _TELEGRAM_TEXT_BUDGET:
+                break
+            if omitted > 0 and "Telegram limiti" not in message:
                 break
             records = candidate
-        if records:
+        if len(records) > len(best_records) or (
+            len(records) == len(best_records)
+            and records
+            and ma_list_limit > (best_limit if best_limit is not None else -1)
+        ):
             best_records = records
             best_limit = ma_list_limit
-            break
 
     if best_records:
         omitted = len(selected) - len(best_records)
-        while best_records:
-            block = _watchlist_block(best_records, best_limit)
-            message = _watchlist_detail_message(label, block, omitted=omitted)
-            if len(message) <= _TELEGRAM_TEXT_BUDGET and (
-                omitted == 0 or "Telegram limiti" in message
-            ):
-                return message
-            best_records = best_records[:-1]
-            omitted = len(selected) - len(best_records)
+        block = _watchlist_block(best_records, best_limit)
+        message = _watchlist_detail_message(label, block, omitted=omitted)
+        if len(message) <= _TELEGRAM_TEXT_BUDGET:
+            return message
 
     fallback = html.escape(
         "Izleme seti uretildi; Telegram metin limiti nedeniyle tablo kisaltildi.\n"
