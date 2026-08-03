@@ -87,6 +87,44 @@ on:
         description: Maksimum mutlak aykiri Edge (R)
         required: true
         default: "5"
+      reaction_bars:
+        description: Observation reaction lookahead bars
+        required: true
+        default: "10"
+      hold_bars:
+        description: Observation hold check bars
+        required: true
+        default: "5"
+      break_atr:
+        description: Level break threshold ATR
+        required: true
+        default: "0.50"
+      bounce_cap_atr:
+        description: Bounce score cap ATR
+        required: true
+        default: "2.0"
+      cross_cap_per_100:
+        description: Choppiness cap per 100 bars
+        required: true
+        default: "4.0"
+      evidence_target_touches:
+        description: Touch count for full evidence score
+        required: true
+        default: "20"
+      neighbor_ratio:
+        description: Nearby-period plateau ratio
+        required: true
+        default: "0.25"
+      relative_to:
+        description: Benchmark-relative MA DNA, e.g. XU100; blank = nominal
+        required: false
+        default: ""
+      rank_by:
+        description: Main ranking mode
+        required: true
+        default: level
+        type: choice
+        options: [level, compat]
       source:
         description: Veri kaynağı
         required: true
@@ -136,6 +174,15 @@ jobs:
             --max-zero-volume-pct "${{ inputs.max_zero_volume_pct }}" \
             --max-gap-pct "${{ inputs.max_gap_pct }}" \
             --max-abs-edge-r "${{ inputs.max_abs_edge_r }}" \
+            --reaction-bars "${{ inputs.reaction_bars }}" \
+            --hold-bars "${{ inputs.hold_bars }}" \
+            --break-atr "${{ inputs.break_atr }}" \
+            --bounce-cap-atr "${{ inputs.bounce_cap_atr }}" \
+            --cross-cap-per-100 "${{ inputs.cross_cap_per_100 }}" \
+            --evidence-target-touches "${{ inputs.evidence_target_touches }}" \
+            --neighbor-ratio "${{ inputs.neighbor_ratio }}" \
+            --relative-to "${{ inputs.relative_to }}" \
+            --rank-by "${{ inputs.rank_by }}" \
             --source "${{ inputs.source }}" \
             --output-dir reports/single
       - name: Telegram

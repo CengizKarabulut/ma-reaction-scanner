@@ -8,10 +8,14 @@ separate. A current nearby level cannot improve weak historical evidence.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+
+
+if TYPE_CHECKING:
+    from .ma_levels import LevelConfig
 
 
 MA_TYPES: tuple[str, ...] = ("SMA", "EMA", "WMA", "VWMA", "KAMA", "ALMA", "HMA")
@@ -544,22 +548,51 @@ def scan_frame(
     symbol: str,
     timeframe: str,
     config: ScanConfig,
+    level_config: LevelConfig | None = None,
+    benchmark: pd.DataFrame | None = None,
+    relative_to: str | None = None,
     metadata: dict[str, object] | None = None,
 ) -> pd.DataFrame:
+    try:
+        from .ma_levels import LevelConfig, level_class, level_score, summarize_outcomes, touch_outcomes
+    except ImportError:  # direct script execution
+        from ma_levels import LevelConfig, level_class, level_score, summarize_outcomes, touch_outcomes
+
     metadata = metadata or {}
-    df = prepare_frame(
+    level_config = level_config or LevelConfig()
+    allow_non_positive = metadata.get("asset_class") == "commodity"
+    nominal_df = prepare_frame(
         frame,
         config.atr_period,
-        allow_non_positive=metadata.get("asset_class") == "commodity",
+        allow_non_positive=allow_non_positive,
     )
-    current_price, current_atr = float(df["Close"].iloc[-1]), float(df["ATR"].iloc[-1])
+    df = nominal_df
+    analysis_basis = "nominal"
+    if benchmark is not None:
+        try:
+            from .ma_relative import to_relative
+        except ImportError:  # direct script execution
+            from ma_relative import to_relative
+
+        relative_frame = to_relative(
+            frame,
+            benchmark,
+            allow_non_positive=allow_non_positive,
+        )
+        df = prepare_frame(
+            relative_frame,
+            config.atr_period,
+            allow_non_positive=allow_non_positive,
+        )
+        analysis_basis = f"relative:{str(relative_to or 'benchmark').upper()}"
+    current_price, current_atr = float(nominal_df["Close"].iloc[-1]), float(df["ATR"].iloc[-1])
     latest_time = pd.Timestamp(df.index[-1])
     if latest_time.tzinfo is None:
         latest_time = latest_time.tz_localize("Europe/Istanbul")
     else:
         latest_time = latest_time.tz_convert("Europe/Istanbul")
     price_time = latest_time.isoformat()
-    quality_metrics = market_quality_metrics(df, timeframe, config)
+    quality_metrics = market_quality_metrics(nominal_df, timeframe, config)
     baselines = {side: _random_baseline(df, side, config) for side in (1, -1)}
     rows: list[dict[str, object]] = []
     for ma_type in config.ma_types:
@@ -580,11 +613,22 @@ def scan_frame(
             below_ma_pct = float(100.0 * (relative < 0).mean()) if not relative.empty else np.nan
             signs = np.sign(relative).replace(0, np.nan).ffill()
             cross_count = int((signs.diff().abs() == 2).sum())
+            valid_bars = int(np.isfinite(ma.to_numpy(dtype=float)).sum())
             for side in (1, -1):
+                touches_found = detect_touches(df, ma, side, config)
                 trades = [
-                    trade for touch in detect_touches(df, ma, side, config)
+                    trade for touch in touches_found
                     if (trade := simulate_trade(df, touch, config)) is not None
                 ]
+                outcomes = touch_outcomes(df, touches_found, side, level_config)
+                level_metrics = summarize_outcomes(
+                    outcomes,
+                    valid_bars=valid_bars,
+                    cross_count=cross_count,
+                    config=level_config,
+                )
+                obs_level_score = level_score(level_metrics, level_config)
+                obs_level_class = level_class(level_metrics, obs_level_score, level_config)
                 values = np.asarray([trade.net_r for trade in trades], dtype=float)
                 count = len(trades)
                 median_r = float(np.median(values)) if count else np.nan
@@ -645,6 +689,16 @@ def scan_frame(
                     "price_position": price_position,
                     "slope_atr": slope_atr,
                     "touches": count,
+                    "level_touches": int(level_metrics.get("level_touches", 0)),
+                    "touch_density_per_100": level_metrics.get("touch_density_per_100", np.nan),
+                    "cross_per_100": level_metrics.get("cross_per_100", np.nan),
+                    "median_bounce_atr": level_metrics.get("median_bounce_atr", np.nan),
+                    "median_penetration_atr": level_metrics.get("median_penetration_atr", np.nan),
+                    "hold_rate_pct": level_metrics.get("hold_rate_pct", np.nan),
+                    "break_rate_pct": level_metrics.get("break_rate_pct", np.nan),
+                    "level_score": obs_level_score,
+                    "level_class": obs_level_class,
+                    "analysis_basis": analysis_basis,
                     "win_rate_pct": win_rate,
                     "median_net_r": median_r,
                     "mean_net_r": mean_r,
@@ -691,9 +745,22 @@ def aggregate_trend(states: Iterable[str]) -> tuple[str, str]:
     return label, f"{rising}↑ {falling}↓ / {len(usable)}"
 
 
-def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -> pd.DataFrame:
+def build_market_summary(
+    detail: pd.DataFrame,
+    near_distance_atr: float = 1.0,
+    *,
+    rank_by: str = "level",
+) -> pd.DataFrame:
     if detail is None or detail.empty:
         return pd.DataFrame()
+    rank_mode = "compat" if str(rank_by).lower() == "compat" else "level"
+    level_rank = {
+        "Guclu seviye": 4, "Güçlü seviye": 4,
+        "Seviye": 3,
+        "Zayif seviye": 2, "Zayıf seviye": 2,
+        "Seviye degil": 1, "Seviye değil": 1,
+        "Yetersiz temas": 0,
+    }
     records: list[dict[str, object]] = []
     identity = ["asset_class", "symbol"] if "asset_class" in detail else ["symbol"]
     for key, symbol_rows in detail.groupby(identity, sort=False, dropna=False):
@@ -726,20 +793,44 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
         active["_quality_rank"] = active["compatibility"].map(_QUALITY_RANK).fillna(0)
         if "compatibility_score" not in active:
             active["compatibility_score"] = active["_quality_rank"] * 20.0
-        active["_abs_distance"] = pd.to_numeric(active["distance_atr"], errors="coerce").abs()
-        active = active.sort_values(
-            [
-                "compatibility_score",
-                "touches",
-                "_quality_rank",
-                "positive_periods",
-                "edge_r",
-                "median_net_r",
-                "_abs_distance",
-            ],
-            ascending=[False, False, False, False, False, False, True],
-            na_position="last",
+        active["compatibility_score"] = pd.to_numeric(
+            active["compatibility_score"], errors="coerce"
+        ).fillna(active["_quality_rank"] * 20.0)
+        if "level_score" not in active:
+            active["level_score"] = np.nan
+        active["level_score"] = pd.to_numeric(active["level_score"], errors="coerce").fillna(
+            active["compatibility_score"]
         )
+        if "level_class" not in active:
+            active["level_class"] = "Yetersiz temas"
+        active["_level_rank"] = active["level_class"].map(level_rank).fillna(0)
+        if "level_touches" not in active:
+            active["level_touches"] = active.get("touches", 0)
+        active["level_touches"] = pd.to_numeric(active["level_touches"], errors="coerce").fillna(
+            pd.to_numeric(active.get("touches", 0), errors="coerce")
+        ).fillna(0)
+        for column in (
+            "hold_rate_pct", "median_bounce_atr", "touch_density_per_100",
+            "cross_per_100", "plateau_ratio", "adherence_excess_pct",
+        ):
+            if column not in active:
+                active[column] = np.nan
+            active[column] = pd.to_numeric(active[column], errors="coerce")
+        active["_abs_distance"] = pd.to_numeric(active["distance_atr"], errors="coerce").abs()
+        if rank_mode == "compat":
+            sort_columns = [
+                "compatibility_score", "touches", "_quality_rank", "positive_periods",
+                "edge_r", "median_net_r", "level_score", "level_touches", "_abs_distance",
+            ]
+            ascending = [False, False, False, False, False, False, False, False, True]
+        else:
+            sort_columns = [
+                "level_score", "level_touches", "_level_rank", "hold_rate_pct",
+                "median_bounce_atr", "touch_density_per_100", "_quality_rank",
+                "compatibility_score", "_abs_distance",
+            ]
+            ascending = [False, False, False, False, False, False, False, False, True]
+        active = active.sort_values(sort_columns, ascending=ascending, na_position="last")
         best = active.iloc[0]
         support, resistance = active[active["side"] == "Destek"], active[active["side"] == "Direnç"]
         record.update({
@@ -753,8 +844,19 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
             "best_distance_pct": best.get("distance_pct", np.nan),
             "best_side": best["side"],
             "best_compatibility": best["compatibility"],
-            "best_touches": int(best["touches"]),
+            "best_touches": int(best.get("touches", 0) or 0),
+            "best_level_touches": int(best.get("level_touches", 0) or 0),
+            "best_cross_count": int(best.get("cross_count", 0) or 0),
             "best_side_adherence_pct": best.get("side_adherence_pct", np.nan),
+            "best_level_score": best.get("level_score", np.nan),
+            "best_level_class": best.get("level_class", ""),
+            "best_hold_rate_pct": best.get("hold_rate_pct", np.nan),
+            "best_median_bounce_atr": best.get("median_bounce_atr", np.nan),
+            "best_touch_density_per_100": best.get("touch_density_per_100", np.nan),
+            "best_cross_per_100": best.get("cross_per_100", np.nan),
+            "best_plateau_ratio": best.get("plateau_ratio", np.nan),
+            "best_adherence_excess_pct": best.get("adherence_excess_pct", np.nan),
+            "analysis_basis": best.get("analysis_basis", "nominal"),
             "best_compatibility_score": best.get("compatibility_score", np.nan),
             "best_win_rate_pct": best["win_rate_pct"],
             "best_median_net_r": best["median_net_r"],
@@ -776,18 +878,25 @@ def build_market_summary(detail: pd.DataFrame, near_distance_atr: float = 1.0) -
             ),
         })
         distance = abs(float(best["distance_atr"])) if np.isfinite(best["distance_atr"]) else np.inf
-        compatible = best["compatibility"] in {"Güçlü uyum", "Uyumlu"}
+        level_ok = str(best.get("level_class", "")) in {"Guclu seviye", "Güçlü seviye", "Seviye"}
+        compat_ok = str(best.get("compatibility", "")) in {"Güçlü uyum", "Guclu uyum", "Uyumlu"}
+        compatible = level_ok if rank_mode == "level" else compat_ok
         if compatible and distance <= near_distance_atr:
             record["setup"] = "Desteğe yakın" if best["side"] == "Destek" else "Dirence yakın"
         elif compatible:
-            record["setup"] = "Uyumlu MA uzakta"
-        elif best["compatibility"] == "İzleme":
+            record["setup"] = "Güçlü seviye uzakta" if rank_mode == "level" else "Uyumlu MA uzakta"
+        elif str(best.get("level_class", "")) in {"Zayif seviye", "Zayıf seviye"} or best["compatibility"] == "İzleme":
             record["setup"] = "İzleme"
         else:
             record["setup"] = "Kurulum yok"
         record["_sort_filter"] = int(bool(best.get("filter_pass", True)))
-        record["_sort_score"] = float(best.get("compatibility_score", 0.0))
-        record["_sort_quality"] = int(_QUALITY_RANK.get(str(best["compatibility"]), 0))
+        score_field = "compatibility_score" if rank_mode == "compat" else "level_score"
+        record["_sort_score"] = float(best.get(score_field, 0.0) or 0.0)
+        record["_sort_quality"] = int(
+            _QUALITY_RANK.get(str(best["compatibility"]), 0)
+            if rank_mode == "compat"
+            else level_rank.get(str(best.get("level_class", "")), 0)
+        )
         record["_sort_stability"] = int(best["positive_periods"])
         record["_sort_edge"] = float(best["edge_r"]) if np.isfinite(best["edge_r"]) else -999.0
         record["_sort_distance"] = distance

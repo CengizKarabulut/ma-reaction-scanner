@@ -243,6 +243,42 @@ class MovingAverageEngineTests(unittest.TestCase):
         self.assertEqual(summary.iloc[0]["best_ma"], "EMA20")
         self.assertEqual(summary.iloc[0]["filter_status"], "Uygun")
 
+    def test_market_summary_prefers_level_score_unless_compat_requested(self):
+        rows = pd.DataFrame(
+            [
+                {
+                    "symbol": "TEST", "timeframe": "1d", "ma_type": "SMA", "period": 20,
+                    "ma": "SMA20", "side": "Destek", "active_side": True,
+                    "trend_state": "Yukselen", "compatibility": "G??l? uyum",
+                    "compatibility_score": 95.0, "level_score": 35.0,
+                    "level_touches": 12, "level_class": "Zayif seviye",
+                    "hold_rate_pct": 50.0, "median_bounce_atr": 0.2,
+                    "positive_periods": 3, "edge_r": 1.0, "median_net_r": 0.5,
+                    "distance_atr": 0.2, "distance_pct": 0.3, "touches": 20,
+                    "win_rate_pct": 70.0, "current_price": 10.0, "current_ma": 10.03,
+                    "distance_value": 0.03, "filter_pass": True, "filter_status": "Uygun",
+                },
+                {
+                    "symbol": "TEST", "timeframe": "1d", "ma_type": "EMA", "period": 55,
+                    "ma": "EMA55", "side": "Destek", "active_side": True,
+                    "trend_state": "Yukselen", "compatibility": "?zleme",
+                    "compatibility_score": 30.0, "level_score": 82.0,
+                    "level_touches": 28, "level_class": "Guclu seviye",
+                    "hold_rate_pct": 82.0, "median_bounce_atr": 1.1,
+                    "positive_periods": 1, "edge_r": 0.1, "median_net_r": 0.1,
+                    "distance_atr": 0.3, "distance_pct": 0.4, "touches": 10,
+                    "win_rate_pct": 55.0, "current_price": 10.0, "current_ma": 10.04,
+                    "distance_value": 0.04, "filter_pass": True, "filter_status": "Uygun",
+                },
+            ]
+        )
+
+        level_summary = build_market_summary(rows)
+        compat_summary = build_market_summary(rows, rank_by="compat")
+
+        self.assertEqual(level_summary.iloc[0]["best_ma"], "EMA55")
+        self.assertEqual(compat_summary.iloc[0]["best_ma"], "SMA20")
+
     def test_try_filters_are_not_applied_to_global_stocks(self):
         config = ScanConfig(
             min_price=100.0,
