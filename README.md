@@ -76,6 +76,11 @@ Yeni alanlar:
 Istege bagli `--relative-to XU100` kullanilirsa fiyat serisi once endekse gore normalize edilir.
 Bu, nominal TRY yukselisinden gelen sahte "her ortalama destek calisiyor" etkisini azaltmak icindir.
 
+GitHub Actions ekraninda ana ayarlar sade tutulur. MA DNA'nin nadir degisen ileri ayarlari
+`level_config_json` alanindan tek JSON olarak verilebilir; ornek:
+`{"evidence_target_touches":30,"reaction_bars":12}`. Komut satirinda eski tek tek
+parametreler de geriye donuk uyumluluk icin calismaya devam eder.
+
 
 ## Raporu nasil okuyacagim?
 

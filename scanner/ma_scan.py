@@ -59,6 +59,35 @@ def parse_timeframes(value: str) -> tuple[str, ...]:
     return tuple(values)
 
 
+_LEVEL_CONFIG_JSON_KEYS = {
+    "reaction_bars",
+    "hold_bars",
+    "break_atr",
+    "bounce_cap_atr",
+    "cross_cap_per_100",
+    "evidence_target_touches",
+    "neighbor_ratio",
+}
+
+
+def parse_level_config_json(value: str | None) -> dict[str, object]:
+    """Parse optional LevelConfig overrides from a compact JSON workflow input."""
+
+    text = (value or "").strip()
+    if not text or text == "{}":
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"level_config_json gecersiz JSON: {exc.msg}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("level_config_json bir JSON obje olmali")
+    unknown = sorted(set(payload) - _LEVEL_CONFIG_JSON_KEYS)
+    if unknown:
+        raise ValueError(f"level_config_json bilinmeyen alan: {', '.join(unknown)}")
+    return payload
+
+
 def resolve_instruments(args: argparse.Namespace):
     if args.universe == "custom":
         instruments = build_custom_instruments(
@@ -441,6 +470,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cross-cap-per-100", type=float, default=4.0)
     parser.add_argument("--evidence-target-touches", type=int, default=20)
     parser.add_argument("--neighbor-ratio", type=float, default=0.25)
+    parser.add_argument(
+        "--level-config-json",
+        default="",
+        help=(
+            "Optional JSON overrides for MA-DNA level settings, e.g. "
+            '{"evidence_target_touches": 30}'
+        ),
+    )
     parser.add_argument("--relative-to", default="", help="Benchmark symbol, e.g. XU100, for relative MA-DNA analysis")
     parser.add_argument("--rank-by", choices=["level", "compat"], default="level")
     parser.add_argument("--lookback", type=int, default=0)
@@ -497,15 +534,17 @@ def main(argv: list[str] | None = None) -> int:
         max_gap_pct=args.max_gap_pct,
         max_abs_edge_r=args.max_abs_edge_r,
     )
-    level_config = LevelConfig(
-        reaction_bars=args.reaction_bars,
-        hold_bars=args.hold_bars,
-        break_atr=args.break_atr,
-        bounce_cap_atr=args.bounce_cap_atr,
-        cross_cap_per_100=args.cross_cap_per_100,
-        evidence_target_touches=args.evidence_target_touches,
-        neighbor_ratio=args.neighbor_ratio,
-    )
+    level_config_values: dict[str, object] = {
+        "reaction_bars": args.reaction_bars,
+        "hold_bars": args.hold_bars,
+        "break_atr": args.break_atr,
+        "bounce_cap_atr": args.bounce_cap_atr,
+        "cross_cap_per_100": args.cross_cap_per_100,
+        "evidence_target_touches": args.evidence_target_touches,
+        "neighbor_ratio": args.neighbor_ratio,
+    }
+    level_config_values.update(parse_level_config_json(args.level_config_json))
+    level_config = LevelConfig(**level_config_values)
     instruments = resolve_instruments(args)
     attempted_requests = len(instruments) * len(timeframes)
     provider = MarketDataProvider(source=args.source)
