@@ -2,7 +2,12 @@ import unittest
 
 import pandas as pd
 
-from scanner.ma_notify import format_single_detail, format_summary, format_watchlist_detail
+from scanner.ma_notify import (
+    build_notification_image,
+    format_single_detail,
+    format_summary,
+    format_watchlist_detail,
+)
 
 
 class NotificationTests(unittest.TestCase):
@@ -130,6 +135,33 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("... +", message)
         self.assertIn("1d", message)
         self.assertIn("337.00-337.50", message)
+
+
+    def test_watchlist_notification_image_is_png(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "side": "Destek",
+                    "zone_low": 309.0,
+                    "zone_high": 316.89,
+                    "distance_pct": -8.0,
+                    "ma_list": "SMA200, EMA200, VWMA200, HMA200, ALMA200",
+                    "level_touches": 10,
+                    "hold_rate_pct": 56.0,
+                    "confidence": "Orta",
+                }
+            ]
+        )
+
+        payload = build_notification_image(frame, "ASELS", top=20, watch_frame=frame)
+
+        self.assertIsNotNone(payload)
+        image_bytes, kind = payload
+        self.assertEqual(kind, "watchlist")
+        self.assertTrue(image_bytes.startswith(b"\x89PNG"))
+        self.assertGreater(len(image_bytes), 1_000)
 
 
 if __name__ == "__main__":
