@@ -148,8 +148,8 @@ class NotificationTests(unittest.TestCase):
                     "Temas": 18,
                     "Seviye Skoru": 72.4,
                     "Tutma %": 81.5,
-                    "Uzakl?k %": 2.35,
-                    "G?ncel Rol": "Aktif",
+                    "Uzaklık %": 2.35,
+                    "Güncel Rol": "Aktif",
                 }
             ]
         )
