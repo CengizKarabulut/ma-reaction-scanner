@@ -32,4 +32,4 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
-      - run: python -m py_compile scanner/ma_engine.py scanner/ma_scan.py scanner/ma_notify.py scanner/ma_levels.py scanner/ma_relative.py scanner/ma_watchlist.py
+      - run: python -m py_compile scanner/ma_engine.py scanner/ma_scan.py scanner/ma_notify.py scanner/ma_levels.py scanner/ma_relative.py scanner/ma_watchlist.py scanner/telegram_table_image.py

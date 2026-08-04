@@ -147,7 +147,7 @@ Altyapı iş akışları:
 - **MA Trend ve Tepki Testleri**
 - **BIST Veri Güncelleyici (Endeks Listeleri)**
 
-Telegram en iyi satırları gönderir ve tam tekilleştirilmiş CSV'yi belge olarak ekler.
+Telegram once okunabilir PNG tablo gorseli gonderir; gorsel uretilemezse eski metin tablosuna duser. Tam CSV/HTML dosyalari yine belge olarak eklenir.
 GitHub artifact içinde:
 
 - `market_summary.csv`: her varlık bir satır, tum teknik alanlarla
