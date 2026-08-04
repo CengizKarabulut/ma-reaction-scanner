@@ -271,6 +271,20 @@ def _first_value(row: pd.Series, *keys: str, default: object = "-") -> object:
     return default
 
 
+_DETAIL_DISTANCE_HEADERS = (
+    "Uzaklık %",
+    "Uzaklik %",
+    "Uzakl?k %",
+    "Uzakl??k %",
+)
+_DETAIL_ROLE_HEADERS = (
+    "Güncel Rol",
+    "Guncel Rol",
+    "G?ncel Rol",
+    "G??ncel Rol",
+)
+
+
 def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
     selected = frame.head(_image_limit(top)).copy()
     include_symbol = "symbol" in selected.columns and selected["symbol"].nunique(dropna=True) > 1
@@ -321,24 +335,11 @@ def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]
             "score": _fmt(row.get("Seviye Skoru", row.get("Uyum Skoru")), 1),
             "hold": _fmt(row.get("Tutma %", row.get("Taraf Koruma %")), 0, "%"),
             "distance": _fmt(
-                _first_value(
-                    row,
-                    "Uzakl?k %",
-                    "Uzaklik %",
-                    "Uzakl?k %",
-                    "Uzakl??k %",
-                    default=None,
-                ),
+                _first_value(row, *_DETAIL_DISTANCE_HEADERS, default=None),
                 1,
                 "%",
             ),
-            "role": _first_value(
-                row,
-                "G?ncel Rol",
-                "Guncel Rol",
-                "G?ncel Rol",
-                "G??ncel Rol",
-            ),
+            "role": _first_value(row, *_DETAIL_ROLE_HEADERS),
         })
     return rows
 
