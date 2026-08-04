@@ -3,6 +3,7 @@ import unittest
 import pandas as pd
 
 from scanner.ma_notify import (
+    _single_image_rows,
     build_notification_image,
     format_single_detail,
     format_summary,
@@ -136,6 +137,27 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("1d", message)
         self.assertIn("337.00-337.50", message)
 
+
+    def test_single_image_rows_use_emitted_unicode_headers(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    "Zaman Dilimi": "1d",
+                    "MA": "SMA233",
+                    "Taraf": "Destek",
+                    "Temas": 18,
+                    "Seviye Skoru": 72.4,
+                    "Tutma %": 81.5,
+                    "Uzakl?k %": 2.35,
+                    "G?ncel Rol": "Aktif",
+                }
+            ]
+        )
+
+        rows = _single_image_rows(frame, top=20)
+
+        self.assertEqual(rows[0]["distance"], "2.4%")
+        self.assertEqual(rows[0]["role"], "Aktif")
 
     def test_watchlist_notification_image_is_png(self):
         frame = pd.DataFrame(

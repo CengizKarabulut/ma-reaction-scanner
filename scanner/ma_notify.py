@@ -309,7 +309,7 @@ def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple
     return render_table_png(rows, columns, title=str(label)[:80], subtitle=subtitle, badge=badge), "watchlist"
 
 
-def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
+def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]:
     selected = frame.head(_image_limit(top)).copy()
     rows = []
     for _, row in selected.iterrows():
@@ -321,12 +321,30 @@ def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[by
             "score": _fmt(row.get("Seviye Skoru", row.get("Uyum Skoru")), 1),
             "hold": _fmt(row.get("Tutma %", row.get("Taraf Koruma %")), 0, "%"),
             "distance": _fmt(
-                _first_value(row, "Uzaklik %", "Uzakl?k %", "Uzakl??k %", default=None),
+                _first_value(
+                    row,
+                    "Uzakl?k %",
+                    "Uzaklik %",
+                    "Uzakl?k %",
+                    "Uzakl??k %",
+                    default=None,
+                ),
                 1,
                 "%",
             ),
-            "role": _first_value(row, "Guncel Rol", "G?ncel Rol", "G??ncel Rol"),
+            "role": _first_value(
+                row,
+                "G?ncel Rol",
+                "Guncel Rol",
+                "G?ncel Rol",
+                "G??ncel Rol",
+            ),
         })
+    return rows
+
+
+def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
+    rows = _single_image_rows(frame, top)
     columns = [
         TableColumn("timeframe", "TF", 64, "center"),
         TableColumn("ma", "MA", 115),
@@ -337,8 +355,8 @@ def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[by
         TableColumn("distance", "Uzak", 82, "right"),
         TableColumn("role", "Rol", 145),
     ]
-    omitted = max(0, len(frame) - len(selected))
-    badge = f"{len(selected)} satir" + (f" | +{omitted}" if omitted else "")
+    omitted = max(0, len(frame) - len(rows))
+    badge = f"{len(rows)} satir" + (f" | +{omitted}" if omitted else "")
     subtitle = "En guclu MA satirlari - izleme seti varsa once o gosterilir"
     return render_table_png(rows, columns, title=str(label)[:80], subtitle=subtitle, badge=badge), "detail"
 
