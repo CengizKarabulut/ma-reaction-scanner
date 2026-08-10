@@ -186,6 +186,7 @@ class ScannerInputTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertTrue((output / "ma_watchlist.csv").exists())
                 self.assertTrue((output / "watchlist.csv").exists())
+                self.assertTrue((output / "level_score_calibration.csv").exists())
 
     def test_single_stock_table_keeps_each_selected_ma_side(self):
         detail = pd.DataFrame(

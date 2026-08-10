@@ -77,6 +77,17 @@ Yeni alanlar:
 Istege bagli `--relative-to XU100` kullanilirsa fiyat serisi once endekse gore normalize edilir.
 Bu, nominal TRY yukselisinden gelen sahte "her ortalama destek calisiyor" etkisini azaltmak icindir.
 
+### Level Score kalibrasyon tanisi
+
+Her kosuda ek olarak `level_score_calibration.csv` uretilir. Bu dosya `level_score`
+bucket'larini destek/direnc ayrimiyla ozetler: satir sayisi, medyan temas, medyan
+tutma, medyan sicrama ve benzeri gozlemsel alanlar.
+
+Bu raporun `analysis_scope` alani simdilik `in_sample_aggregate` degerindedir.
+Yani skorun uretildigi ayni aggregate satirlari ozetler; out-of-sample basari
+kan?t? veya gelecek performans garantisi degildir. Amaci, sonraki walk-forward
+kalibrasyonuna temel olacak seffaf bir tani tablosu saglamaktir.
+
 GitHub Actions ekraninda ana ayarlar sade tutulur. MA DNA'nin nadir degisen ileri ayarlari
 `level_config_json` alanindan tek JSON olarak verilebilir; ornek:
 `{"evidence_target_touches":30,"reaction_bars":12,"cross_damping":0.5}`.
