@@ -83,6 +83,45 @@ class ClusteringTests(unittest.TestCase):
         self.assertEqual(zone["ma_families"], 3)
         self.assertEqual(zone["confidence"], "Guclu")
 
+    def test_chained_distances_do_not_create_overwide_zone(self):
+        frame = pd.DataFrame(
+            [
+                row("SMA5", "SMA", 300.0, 0.00),
+                row("EMA8", "EMA", 304.0, 0.40),
+                row("WMA13", "WMA", 308.0, 0.80),
+                row("VWMA21", "VWMA", 312.0, 1.20),
+            ]
+        )
+
+        watch = build_watchlist(
+            frame, WatchlistConfig(cluster_atr=0.50, max_zones_per_side=10)
+        )
+
+        self.assertEqual(len(watch), 2)
+        self.assertTrue((watch["zone_width_atr"] <= 0.50 + 1e-9).all())
+        self.assertEqual(watch["zone_member_count"].tolist(), [2, 2])
+
+    def test_zone_score_distribution_is_visible_separately_from_best_member(self):
+        frame = pd.DataFrame(
+            [
+                row("SMA200", "SMA", 309.00, -1.20, level_score=53.9),
+                row("VWMA200", "VWMA", 309.46, -1.18, level_score=41.0),
+                row("EMA200", "EMA", 316.89, -0.90, level_score=39.0),
+            ]
+        )
+
+        watch = build_watchlist(frame, WatchlistConfig(cluster_atr=0.50))
+        zone = watch.iloc[0]
+
+        self.assertEqual(zone["best_ma"], "SMA200")
+        self.assertAlmostEqual(float(zone["level_score"]), 53.9)
+        self.assertAlmostEqual(float(zone["best_level_score"]), 53.9)
+        self.assertAlmostEqual(float(zone["median_level_score"]), 41.0)
+        self.assertAlmostEqual(float(zone["zone_score"]), 41.0)
+        self.assertAlmostEqual(float(zone["score_dispersion"]), 14.9)
+        self.assertEqual(int(zone["zone_member_count"]), 3)
+        self.assertEqual(zone["zone_quality"], zone["confidence"])
+
     def test_distant_averages_stay_separate(self):
         frame = pd.DataFrame(
             [
@@ -175,6 +214,7 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("309.00-316.89", text)
         self.assertIn("SMA200", text)
         self.assertIn("EMA200", text)
+        self.assertIn("hedef fiyat", text)
 
     def test_rendered_rows_include_timeframe_for_multi_timeframe_scans(self):
         watch = pd.DataFrame(
@@ -215,6 +255,8 @@ class RenderingTests(unittest.TestCase):
 
         self.assertEqual(len(watch), 0)
         self.assertIn("confidence", watch.columns)
+        self.assertIn("zone_quality", watch.columns)
+        self.assertIn("zone_width_atr", watch.columns)
 
 
 if __name__ == "__main__":

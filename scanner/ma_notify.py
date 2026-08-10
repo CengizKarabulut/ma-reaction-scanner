@@ -225,7 +225,7 @@ def _watchlist_detail_message(label: str, block: str, *, omitted: int = 0) -> st
     lines = [
         f"<b>{str(label)[:200]}</b>",
         "Izleme seti: fiyatin once temas edebilecegi, yeterli gecmis temasi olan MA bolgeleri.",
-        "Siralama skora gore degil, fiyata yakinliga goredir.",
+        "Bu hedef fiyat veya al/sat sinyali degildir; siralama fiyata yakinliga goredir.",
         "",
         "<pre>",
         block,
@@ -394,7 +394,8 @@ def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple
             "distance": _fmt(row.get("distance_pct"), 1, "%"),
             "touches": _fmt_int(row.get("level_touches")),
             "hold": _fmt(row.get("hold_rate_pct"), 0, "%"),
-            "confidence": row.get("confidence", "-"),
+            "zone_quality": row.get("zone_quality", row.get("confidence", "-")),
+            "width": _fmt(row.get("zone_width_atr"), 2),
             "ma_list": _short_ma_list(row.get("ma_list")),
         }
         if include_symbol:
@@ -412,8 +413,9 @@ def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple
         TableColumn("distance", "Uzak", 78, "right"),
         TableColumn("touches", "Temas", 78, "right"),
         TableColumn("hold", "Tut", 70, "right"),
-        TableColumn("confidence", "Guc", 80),
-        TableColumn("ma_list", "Ortalamalar", 430 if include_symbol else 520),
+        TableColumn("zone_quality", "Kalite", 80),
+        TableColumn("width", "Gen ATR", 82, "right"),
+        TableColumn("ma_list", "Ortalamalar", 348 if include_symbol else 438),
     ])
     omitted = max(0, len(frame) - len(selected))
     badge = f"{len(selected)} satir" + (f" | +{omitted}" if omitted else "")

@@ -361,7 +361,9 @@ def _watchlist_html_section(title: str, table: pd.DataFrame, *, empty_note: str)
     intro = (
         "<p class='meta'>Fiyatin bugun ilgili tarafinda olan, yeterli temasi bulunan "
         "ve periyot degisimine dayanikli MA bolgeleri. Birbirine yakin ortalamalar "
-        "tek bolge sayilir; izleme sirasi skora gore degil, fiyata yakinliga goredir.</p>"
+        "toplam ATR genisligi sinirlanarak tek bolge sayilir; izleme sirasi skora "
+        "gore degil, fiyata yakinliga goredir. Bu tablo hedef fiyat veya al/sat "
+        "sinyali degil, izlenebilir MA bolgesi listesidir.</p>"
     )
     if table is None or table.empty:
         return (

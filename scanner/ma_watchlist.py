@@ -102,18 +102,25 @@ def apply_quality_gate(frame: pd.DataFrame, config: WatchlistConfig) -> pd.DataF
 
 
 def _cluster_positions(distances: np.ndarray, cluster_atr: float) -> np.ndarray:
-    """Assign cluster ids to ATR distances sorted ascending."""
+    """Assign cluster ids to sorted ATR distances with a bounded total span."""
 
     labels = np.zeros(len(distances), dtype=int)
+    if len(distances) == 0:
+        return labels
     current = 0
+    cluster_start = float(distances[0])
     for index in range(1, len(distances)):
-        if distances[index] - distances[index - 1] > cluster_atr:
+        candidate = float(distances[index])
+        if candidate - cluster_start > cluster_atr:
             current += 1
+            cluster_start = candidate
         labels[index] = current
     return labels
 
 
-def _confidence(ma_families: int, best_score: float, touches: float) -> str:
+def _zone_quality(ma_families: int, best_score: float, touches: float) -> str:
+    """Heuristic evidence class, not a statistical success probability."""
+
     if ma_families >= 3 and best_score >= 45.0 and touches >= 8:
         return "Guclu"
     if ma_families >= 2 or best_score >= 45.0:
@@ -143,10 +150,16 @@ def build_watchlist(
         return pd.DataFrame(
             columns=[
                 "symbol", "timeframe", "side", "current_price",
-                "zone_low", "zone_high", "zone_mid",
+                "zone_low", "zone_high", "zone_mid", "zone_width_atr",
                 "distance_pct", "distance_atr", "ma_list", "ma_families",
-                "level_touches", "hold_rate_pct", "median_bounce_atr",
-                "level_score", "plateau_ratio", "confidence", "analysis_basis",
+                "unique_periods", "zone_member_count", "best_ma", "best_ma_type",
+                "best_ma_period", "best_ma_value", "level_touches",
+                "hold_rate_pct", "median_bounce_atr", "level_score",
+                "best_level_score", "median_level_score", "mean_level_score",
+                "min_level_score", "score_dispersion", "zone_score",
+                "plateau_ratio", "zone_quality", "confidence",
+                "family_count_component", "score_component",
+                "touch_evidence_component", "analysis_basis",
             ]
         )
 
@@ -168,9 +181,32 @@ def build_watchlist(
             if ma_values.empty:
                 continue
             names = [str(name) for name in zone.get("ma", pd.Series(dtype=str)).tolist()]
-            families = {str(item) for item in zone.get("ma_type", pd.Series(dtype=str)).tolist()}
+            family_values = [
+                str(item)
+                for item in zone.get("ma_type", pd.Series(dtype=str)).dropna().tolist()
+                if str(item).strip()
+            ]
+            families = set(family_values)
+            period_values = _numeric(zone, "period").dropna()
+            unique_periods = {int(value) for value in period_values if np.isfinite(value)}
             touches = float(_numeric(zone, "level_touches").max())
-            best_score = float(_numeric(zone, "level_score").max())
+            scores = _numeric(zone, "level_score").dropna()
+            best_score = float(scores.max()) if not scores.empty else float("nan")
+            median_score = float(scores.median()) if not scores.empty else float("nan")
+            mean_score = float(scores.mean()) if not scores.empty else float("nan")
+            min_score = float(scores.min()) if not scores.empty else float("nan")
+            score_dispersion = (
+                float(scores.max() - scores.min()) if not scores.empty else float("nan")
+            )
+            best_index = scores.idxmax() if not scores.empty else zone.index[0]
+            best_row = zone.loc[best_index]
+            distance_values = _numeric(zone, "distance_atr").dropna()
+            zone_width_atr = (
+                float(distance_values.max() - distance_values.min())
+                if not distance_values.empty
+                else float("nan")
+            )
+            quality = _zone_quality(len(families), best_score, touches)
             records.append(
                 {
                     **context,
@@ -178,16 +214,33 @@ def build_watchlist(
                     "zone_low": float(ma_values.min()),
                     "zone_high": float(ma_values.max()),
                     "zone_mid": float(ma_values.median()),
+                    "zone_width_atr": zone_width_atr,
                     "distance_pct": float(_numeric(zone, "distance_pct").median()),
                     "distance_atr": float(_numeric(zone, "distance_atr").median()),
                     "ma_list": ", ".join(names),
                     "ma_families": len(families),
+                    "unique_periods": len(unique_periods),
+                    "zone_member_count": int(len(zone)),
+                    "best_ma": str(best_row.get("ma", "")),
+                    "best_ma_type": str(best_row.get("ma_type", "")),
+                    "best_ma_period": int(best_row.get("period")) if pd.notna(best_row.get("period")) else np.nan,
+                    "best_ma_value": float(best_row.get("current_ma", np.nan)),
                     "level_touches": touches,
                     "hold_rate_pct": float(_numeric(zone, "hold_rate_pct").median()),
                     "median_bounce_atr": float(_numeric(zone, "median_bounce_atr").median()),
-                    "level_score": best_score,
+                    "level_score": best_score,  # Backward-compatible alias: best member score.
+                    "best_level_score": best_score,
+                    "median_level_score": median_score,
+                    "mean_level_score": mean_score,
+                    "min_level_score": min_score,
+                    "score_dispersion": score_dispersion,
+                    "zone_score": median_score,
                     "plateau_ratio": float(_numeric(zone, "plateau_ratio").min()),
-                    "confidence": _confidence(len(families), best_score, touches),
+                    "zone_quality": quality,
+                    "confidence": quality,  # Backward-compatible alias, not probability.
+                    "family_count_component": len(families),
+                    "score_component": best_score,
+                    "touch_evidence_component": touches,
                     "analysis_basis": str(zone.get("analysis_basis", pd.Series(["nominal"])).iloc[0]),
                 }
             )
@@ -216,16 +269,33 @@ _WATCH_COLUMNS = {
     "zone_low": "Bolge Alt",
     "zone_high": "Bolge Ust",
     "zone_mid": "Bolge Orta",
+    "zone_width_atr": "Bolge Genisligi ATR",
     "distance_pct": "Uzaklik %",
     "distance_atr": "Uzak ATR",
     "ma_list": "Ortalamalar",
     "ma_families": "MA Ailesi",
+    "unique_periods": "Benzersiz Periyot",
+    "zone_member_count": "Bolge Uye Sayisi",
+    "best_ma": "En Iyi MA",
+    "best_ma_type": "En Iyi MA Tipi",
+    "best_ma_period": "En Iyi Periyot",
+    "best_ma_value": "En Iyi MA Degeri",
     "level_touches": "Temas",
     "hold_rate_pct": "Tutma %",
     "median_bounce_atr": "Sicrama ATR",
     "level_score": "Skor",
+    "best_level_score": "En Iyi Skor",
+    "median_level_score": "Medyan Skor",
+    "mean_level_score": "Ortalama Skor",
+    "min_level_score": "Min Skor",
+    "score_dispersion": "Skor Farki",
+    "zone_score": "Bolge Skoru",
     "plateau_ratio": "Plato",
-    "confidence": "Guven",
+    "zone_quality": "Bolge Kalitesi",
+    "confidence": "Guven Eski",
+    "family_count_component": "Aile Bileseni",
+    "score_component": "Skor Bileseni",
+    "touch_evidence_component": "Temas Bileseni",
     "analysis_basis": "Analiz Bazi",
 }
 
@@ -273,6 +343,7 @@ def format_watchlist_text(
         lines.append(f"Fiyat: {price:,.2f}")
     if trend:
         lines.append(f"Trend: {trend}")
+    lines.append("Not: Bu hedef fiyat veya al/sat sinyali degil; izlenebilir MA bolgesidir.")
     if watchlist is None or len(watchlist) == 0:
         lines.append("")
         lines.append("Esikleri gecen seviye yok. Kaliteli seviye bulunamamasi da bir")
@@ -300,7 +371,8 @@ def format_watchlist_text(
             )
             lines.append(
                 f"  {timeframe_part}{band:>17}  {float(row['distance_pct']):+6.1f}%  "
-                f"{str(row['confidence']):<6} {int(row['level_touches']):>3} temas  "
+                f"{str(row.get('zone_quality', row.get('confidence', '-'))):<6} "
+                f"{int(row['level_touches']):>3} temas  "
                 f"tutma %{float(row['hold_rate_pct']):.0f}"
             )
             lines.append(
