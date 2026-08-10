@@ -138,6 +138,10 @@ class ScannerInputTests(unittest.TestCase):
             "invalid_configuration",
         )
         self.assertEqual(classify_scan_error(RuntimeError("offline")), "provider_error")
+        self.assertEqual(
+            classify_scan_error(RuntimeError("borsapy: OHLC fiyatlari sonlu olmalidir")),
+            "data_validation",
+        )
         self.assertEqual(classify_scan_error(Exception("boom")), "unexpected_error")
 
     def test_main_fails_when_every_request_errors(self):
@@ -314,6 +318,48 @@ class ScannerInputTests(unittest.TestCase):
         self.assertEqual(payload["data_coverage"]["error_rows"], 1)
         self.assertEqual(payload["data_coverage"]["symbols_with_rows"], ["ASELS", "THYAO"])
         self.assertEqual(payload["data_coverage"]["symbols_with_errors"], ["KCHOL"])
+
+    def test_merged_run_config_supplements_partial_shard_manifests_from_detail(self):
+        detail = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "asset_class": "stock",
+                    "market": "BIST",
+                    "timeframe": "1d",
+                    "data_source": "cache",
+                    "analysis_basis": "nominal",
+                    "price_time": "2026-07-10T18:00:00",
+                },
+                {
+                    "symbol": "THYAO",
+                    "asset_class": "stock",
+                    "market": "BIST",
+                    "timeframe": "1d",
+                    "data_source": "cache",
+                    "analysis_basis": "nominal",
+                    "price_time": "2026-07-10T18:05:00",
+                },
+            ]
+        )
+        configs = [
+            {
+                "shard_index": 0,
+                "shard_count": 2,
+                "instruments": [
+                    {"symbol": "ASELS", "asset_class": "stock", "market": "BIST"}
+                ],
+            },
+            {"shard_index": 1, "shard_count": 2},
+        ]
+
+        payload = merged_run_config_payload(configs, detail, pd.DataFrame(), merged_shards=2)
+
+        self.assertEqual(payload["instrument_count"], 2)
+        self.assertEqual(
+            [item["symbol"] for item in payload["instruments"]],
+            ["ASELS", "THYAO"],
+        )
 
     def test_single_stock_table_keeps_each_selected_ma_side(self):
         detail = pd.DataFrame(
