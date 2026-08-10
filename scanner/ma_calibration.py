@@ -80,7 +80,11 @@ def score_bucket_summary(
         "median_hold_rate_pct",
         "median_break_rate_pct",
         "median_bounce_atr",
+        "median_bounce_p75_atr",
+        "median_reaction_1atr_rate_pct",
+        "median_reaction_2atr_rate_pct",
         "median_penetration_atr",
+        "median_penetration_p75_atr",
         "row_share_median_bounce_ge_1atr_pct",
         "row_share_median_bounce_ge_2atr_pct",
     ]
@@ -121,7 +125,11 @@ def score_bucket_summary(
                 "median_hold_rate_pct": float(_numeric(group, "hold_rate_pct").median()),
                 "median_break_rate_pct": float(_numeric(group, "break_rate_pct").median()),
                 "median_bounce_atr": float(bounces.median()),
+                "median_bounce_p75_atr": float(_numeric(group, "bounce_p75_atr").median()),
+                "median_reaction_1atr_rate_pct": float(_numeric(group, "reaction_1atr_rate_pct").median()),
+                "median_reaction_2atr_rate_pct": float(_numeric(group, "reaction_2atr_rate_pct").median()),
                 "median_penetration_atr": float(_numeric(group, "median_penetration_atr").median()),
+                "median_penetration_p75_atr": float(_numeric(group, "penetration_p75_atr").median()),
                 "row_share_median_bounce_ge_1atr_pct": float(100.0 * (bounces >= 1.0).mean()),
                 "row_share_median_bounce_ge_2atr_pct": float(100.0 * (bounces >= 2.0).mean()),
             }

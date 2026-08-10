@@ -69,6 +69,9 @@ Yeni alanlar:
 - `level_touches` / `best_level_touches`: ham bagimsiz seviye temasi.
 - `hold_rate_pct`: temas sonrasi seviyenin kirilmadan kaldigi oran.
 - `median_bounce_atr`: temas sonrasi lehe medyan hareket, ATR cinsinden.
+- `bounce_p25_atr` / `bounce_p75_atr` / `bounce_mean_atr`: tepkinin dagilimi; tek medyan sayinin arkasindaki zayif/guclu kuyrugu gosterir.
+- `reaction_1atr_rate_pct` / `reaction_2atr_rate_pct`: temaslarin yuzde kaci en az 1 ATR / 2 ATR lehe tepki uretmis.
+- `median_penetration_atr` / `penetration_p75_atr`: temas sonrasi seviyenin ters yonde ne kadar ihlal edildigi.
 - `touch_density_per_100`: farkli uzunluktaki ortalamalari karsilastirmak icin 100 bar basina temas.
 - `cross_per_100`: fiyat ortalamayi ne kadar sik kesiyor; yuksekse seviye gurultulu olabilir.
 - `plateau_ratio`: yakin periyotlar da benzer skor veriyor mu? Dusukse tek periyot sansi olabilir.
@@ -81,7 +84,8 @@ Bu, nominal TRY yukselisinden gelen sahte "her ortalama destek calisiyor" etkisi
 
 Her kosuda ek olarak `level_score_calibration.csv` uretilir. Bu dosya `level_score`
 bucket'larini destek/direnc ayrimiyla ozetler: satir sayisi, medyan temas, medyan
-tutma, medyan sicrama ve benzeri gozlemsel alanlar.
+tutma, medyan sicrama, 1/2 ATR tepki oranlari ve seviye ihlal dagilimi gibi
+gozlemsel alanlar.
 
 Bu raporun `analysis_scope` alani simdilik `in_sample_aggregate` degerindedir.
 Yani skorun uretildigi ayni aggregate satirlari ozetler; out-of-sample basari
