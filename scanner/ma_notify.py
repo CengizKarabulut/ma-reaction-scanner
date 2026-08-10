@@ -240,6 +240,14 @@ def _fmt(value: object, digits: int = 2, suffix: str = "") -> str:
     return "-" if number is None else f"{number:.{digits}f}{suffix}"
 
 
+def _fmt_price_like(value: object) -> str:
+    number = _safe_number(value)
+    if number is None:
+        return "-"
+    digits = 4 if abs(number) < 10 else 3 if abs(number) < 100 else 2
+    return f"{number:.{digits}f}"
+
+
 def _fmt_int(value: object) -> str:
     number = _safe_number(value)
     return "-" if number is None else str(int(round(number)))
@@ -282,6 +290,23 @@ _DETAIL_ROLE_HEADERS = (
     "Guncel Rol",
     "G?ncel Rol",
     "G??ncel Rol",
+)
+
+
+_DETAIL_PRICE_HEADERS = (
+    "Fiyat",
+    "current_price",
+    "price",
+)
+_DETAIL_LEVEL_HEADERS = (
+    "MA Değeri",
+    "MA Deđeri",
+    "MA Degeri",
+    "MA De?eri",
+    "MA DeÄŸeri",
+    "current_ma",
+    "current_ma_value",
+    "ma_value",
 )
 
 
@@ -330,6 +355,8 @@ def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]
         rows.append({
             "timeframe": row.get("Zaman Dilimi", row.get("timeframe", "-")),
             "ma": row.get("MA", "-"),
+            "price": _fmt_price_like(_first_value(row, *_DETAIL_PRICE_HEADERS, default=None)),
+            "level": _fmt_price_like(_first_value(row, *_DETAIL_LEVEL_HEADERS, default=None)),
             "side": row.get("Taraf", "-"),
             "touches": _fmt_int(row.get("Temas", row.get("level_touches"))),
             "score": _fmt(row.get("Seviye Skoru", row.get("Uyum Skoru")), 1),
@@ -347,14 +374,16 @@ def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]
 def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
     rows = _single_image_rows(frame, top)
     columns = [
-        TableColumn("timeframe", "TF", 64, "center"),
-        TableColumn("ma", "MA", 115),
-        TableColumn("side", "Taraf", 95),
-        TableColumn("touches", "Temas", 85, "right"),
-        TableColumn("score", "Skor", 82, "right"),
-        TableColumn("hold", "Tut", 78, "right"),
-        TableColumn("distance", "Uzak", 82, "right"),
-        TableColumn("role", "Rol", 145),
+        TableColumn("timeframe", "TF", 54, "center"),
+        TableColumn("ma", "MA", 130),
+        TableColumn("price", "Fiyat", 96, "right"),
+        TableColumn("level", "Seviye", 108, "right"),
+        TableColumn("side", "Taraf", 92),
+        TableColumn("touches", "Temas", 72, "right"),
+        TableColumn("score", "Skor", 76, "right"),
+        TableColumn("hold", "Tut", 68, "right"),
+        TableColumn("distance", "Uzak", 76, "right"),
+        TableColumn("role", "Rol", 118),
     ]
     omitted = max(0, len(frame) - len(rows))
     badge = f"{len(rows)} satir" + (f" | +{omitted}" if omitted else "")

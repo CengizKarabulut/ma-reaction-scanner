@@ -144,6 +144,8 @@ class NotificationTests(unittest.TestCase):
                 {
                     "Zaman Dilimi": "1d",
                     "MA": "SMA233",
+                    "Fiyat": 351.5,
+                    "MA Değeri": 343.12,
                     "Taraf": "Destek",
                     "Temas": 18,
                     "Seviye Skoru": 72.4,
@@ -156,6 +158,8 @@ class NotificationTests(unittest.TestCase):
 
         rows = _single_image_rows(frame, top=20)
 
+        self.assertEqual(rows[0]["price"], "351.50")
+        self.assertEqual(rows[0]["level"], "343.12")
         self.assertEqual(rows[0]["distance"], "2.4%")
         self.assertEqual(rows[0]["role"], "Aktif")
 
