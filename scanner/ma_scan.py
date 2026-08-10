@@ -17,6 +17,7 @@ from .ma_data import MarketDataProvider
 from .ma_engine import DEFAULT_PERIODS, MA_TYPES, TIMEFRAMES, ScanConfig, build_market_summary, scan_frame
 from .ma_levels import LevelConfig, finalize_level_frame
 from .ma_relative import BenchmarkCache
+from .ma_calibration import score_bucket_summary
 from .ma_watchlist import WatchlistConfig, build_watchlist, watchlist_table
 from .stock_metadata import enrich_stock_instruments, format_index_memberships
 
@@ -451,8 +452,10 @@ def write_outputs(
         near_distance_atr=float(scan_payload.get("near_distance_atr", ScanConfig().near_distance_atr)),
         rank_by=str(config_payload.get("rank_by", "level")),
     )
+    calibration = score_bucket_summary(detail)
     detail.to_csv(output_dir / "ma_detail.csv", index=False, encoding="utf-8-sig")
     summary.to_csv(output_dir / "market_summary.csv", index=False, encoding="utf-8-sig")
+    calibration.to_csv(output_dir / "level_score_calibration.csv", index=False, encoding="utf-8-sig")
     market_columns = {
         "symbol": "Varl?k", "best_ma": "MA", "best_timeframe": "Zaman Dilimi",
         "best_level_touches": "Temas", "best_level_score": "Seviye Skoru",
