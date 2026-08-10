@@ -13,6 +13,7 @@ from scanner.ma_watchlist import WatchlistConfig
 from scanner.ma_scan import (
     build_parser,
     build_single_stock_table,
+    classify_scan_error,
     data_coverage_summary,
     main,
     merge_outputs,
@@ -127,6 +128,18 @@ class ScannerInputTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Missing shards"):
                 merge_outputs(root, root / "output", expected_shards=2)
 
+    def test_classify_scan_error_reports_actionable_buckets(self):
+        self.assertEqual(
+            classify_scan_error(ValueError("OHLC fiyatlari sonlu olmalidir")),
+            "data_validation",
+        )
+        self.assertEqual(
+            classify_scan_error(ValueError("level_config_json foo bilinmeyen alan")),
+            "invalid_configuration",
+        )
+        self.assertEqual(classify_scan_error(RuntimeError("offline")), "provider_error")
+        self.assertEqual(classify_scan_error(Exception("boom")), "unexpected_error")
+
     def test_main_fails_when_every_request_errors(self):
         instrument = SimpleNamespace(
             symbol="ASELS",
@@ -139,6 +152,7 @@ class ScannerInputTests(unittest.TestCase):
             index_memberships=(),
         )
         with TemporaryDirectory() as temporary:
+            output = Path(temporary) / "output"
             with (
                 patch("scanner.ma_scan.resolve_instruments", return_value=[instrument]),
                 patch("scanner.ma_scan.MarketDataProvider") as provider_class,
@@ -149,9 +163,12 @@ class ScannerInputTests(unittest.TestCase):
                         "--timeframes",
                         "1d",
                         "--output-dir",
-                        str(Path(temporary) / "output"),
+                        str(output),
                     ]
                 )
+            errors = pd.read_csv(output / "errors.csv")
+            self.assertEqual(errors.loc[0, "error_type"], "provider_error")
+            self.assertEqual(errors.loc[0, "error"], "offline")
         self.assertEqual(code, 1)
 
     def test_main_accepts_valid_empty_analysis(self):

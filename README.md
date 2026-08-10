@@ -194,7 +194,7 @@ GitHub artifact içinde:
   `Yetersiz veri` olarak korunur
 - `ma_detail.csv`: tüm zaman dilimi/MA/yön ayrıntıları
 - `market_report.html`: tam okunabilir piyasa raporu
-- `errors.csv`: veri sağlayıcı hataları
+- `errors.csv`: veri saglayici, veri dogrulama ve beklenmeyen hatalar; `error_type` sinifi ile
 - `run_config.json`: kosunun butun ayarlari, commit SHA, taranan sembol manifesti ve veri kapsam ozeti
 
 bulunur.

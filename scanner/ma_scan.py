@@ -132,6 +132,31 @@ def parse_level_config_json(value: str | None) -> dict[str, object]:
     }
 
 
+def classify_scan_error(exc: Exception) -> str:
+    """Classify per-symbol scan failures for auditable `errors.csv` output."""
+
+    message = str(exc).lower()
+    if isinstance(exc, pd.errors.EmptyDataError):
+        return "data_error"
+    if isinstance(exc, ValueError):
+        config_tokens = (
+            "level_config_json", "bilinmeyen ma", "zaman dilimi",
+            "periyot", "shard", "unsupported",
+        )
+        data_tokens = (
+            "ohlc", "volume", "hacim", "fiyat", "verisi", "temizleme",
+            "pozitif", "sifir", "s?f?r", "sonlu", "siralamasi", "s?ralamas?",
+        )
+        if any(token in message for token in config_tokens):
+            return "invalid_configuration"
+        if any(token in message for token in data_tokens):
+            return "data_validation"
+        return "value_error"
+    if isinstance(exc, ConnectionError | TimeoutError | RuntimeError):
+        return "provider_error"
+    return "unexpected_error"
+
+
 def resolve_instruments(args: argparse.Namespace):
     if args.universe == "custom":
         instruments = build_custom_instruments(
@@ -943,10 +968,19 @@ def main(argv: list[str] | None = None) -> int:
                     details.append(result)
                 print(f"OK {instrument.symbol} {timeframe}: {len(result)} satır")
             except Exception as exc:
-                errors.append({"symbol": instrument.symbol, "timeframe": timeframe, "error": str(exc)})
-                print(f"ERROR {instrument.symbol} {timeframe}: {exc}", file=sys.stderr)
+                error_type = classify_scan_error(exc)
+                errors.append({
+                    "symbol": instrument.symbol,
+                    "timeframe": timeframe,
+                    "error_type": error_type,
+                    "error": str(exc),
+                })
+                print(
+                    f"ERROR {instrument.symbol} {timeframe} [{error_type}]: {exc}",
+                    file=sys.stderr,
+                )
     detail = pd.concat(details, ignore_index=True) if details else pd.DataFrame()
-    error_frame = pd.DataFrame(errors, columns=["symbol", "timeframe", "error"])
+    error_frame = pd.DataFrame(errors, columns=["symbol", "timeframe", "error_type", "error"])
     payload = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "universe": args.universe,
