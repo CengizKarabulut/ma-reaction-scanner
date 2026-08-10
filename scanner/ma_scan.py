@@ -136,21 +136,21 @@ def classify_scan_error(exc: Exception) -> str:
     """Classify per-symbol scan failures for auditable `errors.csv` output."""
 
     message = str(exc).lower()
+    config_tokens = (
+        "level_config_json", "bilinmeyen ma", "zaman dilimi",
+        "periyot", "shard", "unsupported",
+    )
+    data_tokens = (
+        "ohlc", "volume", "hacim", "fiyat", "verisi", "temizleme",
+        "pozitif", "sifir", "s?f?r", "sonlu", "siralamasi", "s?ralamas?",
+    )
     if isinstance(exc, pd.errors.EmptyDataError):
         return "data_error"
+    if any(token in message for token in data_tokens):
+        return "data_validation"
+    if any(token in message for token in config_tokens):
+        return "invalid_configuration"
     if isinstance(exc, ValueError):
-        config_tokens = (
-            "level_config_json", "bilinmeyen ma", "zaman dilimi",
-            "periyot", "shard", "unsupported",
-        )
-        data_tokens = (
-            "ohlc", "volume", "hacim", "fiyat", "verisi", "temizleme",
-            "pozitif", "sifir", "s?f?r", "sonlu", "siralamasi", "s?ralamas?",
-        )
-        if any(token in message for token in config_tokens):
-            return "invalid_configuration"
-        if any(token in message for token in data_tokens):
-            return "data_validation"
         return "value_error"
     if isinstance(exc, ConnectionError | TimeoutError | RuntimeError):
         return "provider_error"
@@ -277,8 +277,9 @@ def _manifest_from_detail(detail: pd.DataFrame) -> list[dict[str, object]]:
         "sector", "industry", "index_memberships",
     ]
     available = [field for field in fields if field in detail.columns]
+    identity = [field for field in ("asset_class", "market", "symbol") if field in available]
     records: list[dict[str, object]] = []
-    for _, group in detail.groupby(available[:1], sort=True, dropna=False):
+    for _, group in detail.groupby(identity or ["symbol"], sort=True, dropna=False):
         first = group.iloc[0]
         records.append({field: first.get(field, "") for field in available})
     return records
@@ -311,11 +312,22 @@ def merged_run_config_payload(
             key = _instrument_key(item)
             if key[2]:
                 instruments.setdefault(key, dict(item))
-    if not instruments:
-        for item in _manifest_from_detail(detail):
-            key = _instrument_key(item)
-            if key[2]:
-                instruments.setdefault(key, item)
+    symbol_to_key = {key[2]: key for key in instruments if key[2]}
+    for item in _manifest_from_detail(detail):
+        symbol = str(item.get("symbol", ""))
+        if not symbol:
+            continue
+        existing_key = symbol_to_key.get(symbol)
+        if existing_key is not None:
+            existing = instruments[existing_key]
+            for field, value in item.items():
+                current = existing.get(field, "")
+                if (current is None or str(current).strip() == "") and pd.notna(value):
+                    existing[field] = value
+            continue
+        key = _instrument_key(item)
+        instruments[key] = item
+        symbol_to_key[symbol] = key
 
     shas = sorted(
         {str(config.get("git_commit_sha", "")).strip() for config in ordered_configs}
@@ -326,7 +338,7 @@ def merged_run_config_payload(
         payload["git_commit_shas"] = shas
     payload["shard_index"] = None
     payload["merged_shards"] = int(merged_shards)
-    payload["instruments"] = list(instruments.values())
+    payload["instruments"] = [instruments[key] for key in sorted(instruments)]
     payload["instrument_count"] = len(instruments)
     payload["data_coverage"] = data_coverage_summary(detail, errors)
     return payload
