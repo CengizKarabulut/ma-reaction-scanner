@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -24,6 +25,7 @@ class NotificationTests(unittest.TestCase):
                     "best_distance_pct": 2.0,
                     "best_distance_atr": 1.5,
                     "best_touches": 18,
+                    "best_level_touches": 18,
                     "best_side_adherence_pct": 81.5,
                     "best_win_rate_pct": 64.0,
                     "best_median_net_r": 0.8,
@@ -138,6 +140,24 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("337.00-337.50", message)
 
 
+    def test_thin_touch_rows_are_not_promoted_in_single_image_or_text(self):
+        frame = pd.DataFrame(
+            [
+                {"Zaman Dilimi": "1d", "MA": "ALMA55", "Taraf": "Direnc", "Temas": 1,
+                 "Seviye Skoru": 99.0, "Tutma %": 100.0, "Uzaklik %": 1.0},
+                {"Zaman Dilimi": "1d", "MA": "SMA55", "Taraf": "Destek", "Temas": 5,
+                 "Seviye Skoru": 40.0, "Tutma %": 60.0, "Uzaklik %": -1.0},
+            ]
+        )
+
+        rows = _single_image_rows(frame, top=20)
+        message = format_single_detail(frame, "TEST", top=20)
+
+        self.assertEqual([row["ma"] for row in rows], ["SMA55"])
+        self.assertNotIn("ALMA55", message)
+        self.assertIn("SMA55", message)
+
+
     def test_single_image_rows_use_emitted_unicode_headers(self):
         frame = pd.DataFrame(
             [
@@ -163,13 +183,14 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(rows[0]["distance"], "2.4%")
         self.assertEqual(rows[0]["role"], "Aktif")
 
-    def test_watchlist_notification_image_is_png(self):
+    def test_watchlist_notification_image_includes_price_column(self):
         frame = pd.DataFrame(
             [
                 {
                     "symbol": "ASELS",
                     "timeframe": "1d",
                     "side": "Destek",
+                    "current_price": 336.25,
                     "zone_low": 309.0,
                     "zone_high": 316.89,
                     "distance_pct": -8.0,
@@ -180,14 +201,22 @@ class NotificationTests(unittest.TestCase):
                 }
             ]
         )
+        captured = {}
 
-        payload = build_notification_image(frame, "ASELS", top=20, watch_frame=frame)
+        def fake_render(rows, columns, **kwargs):
+            captured["rows"] = rows
+            captured["columns"] = columns
+            return b"\x89PNG\r\n\x1a\n" + b"x" * 100
+
+        with patch("scanner.ma_notify.render_table_png", side_effect=fake_render):
+            payload = build_notification_image(frame, "ASELS", top=20, watch_frame=frame)
 
         self.assertIsNotNone(payload)
         image_bytes, kind = payload
         self.assertEqual(kind, "watchlist")
         self.assertTrue(image_bytes.startswith(b"\x89PNG"))
-        self.assertGreater(len(image_bytes), 1_000)
+        self.assertIn("price", [column.key for column in captured["columns"]])
+        self.assertEqual(captured["rows"][0]["price"], "336.25")
 
 
 if __name__ == "__main__":
