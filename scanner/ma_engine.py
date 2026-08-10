@@ -149,6 +149,12 @@ def normalize_ohlcv(
     if out.empty:
         raise ValueError("Temizleme sonrası OHLCV verisi boş")
     prices = out[["Open", "High", "Low", "Close"]]
+    if not np.isfinite(prices.to_numpy(dtype=float)).all():
+        raise ValueError("OHLC fiyatlari sonlu olmalidir")
+    if not np.isfinite(out["Volume"].to_numpy(dtype=float)).all():
+        raise ValueError("Volume sonlu olmalidir")
+    if (out["Volume"] < 0).any():
+        raise ValueError("Volume negatif olamaz")
     if (prices == 0).any().any():
         raise ValueError("OHLC fiyatları sıfır olamaz")
     if not allow_non_positive and (prices < 0).any().any():

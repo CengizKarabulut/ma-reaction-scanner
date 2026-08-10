@@ -229,6 +229,84 @@ def data_coverage_summary(detail: pd.DataFrame, errors: pd.DataFrame) -> dict[st
     return summary
 
 
+def _shard_sort_key(payload: dict[str, object]) -> tuple[int, str]:
+    try:
+        return int(payload.get("shard_index", 10**9)), str(payload.get("shard_index", ""))
+    except (TypeError, ValueError):
+        return 10**9, str(payload.get("shard_index", ""))
+
+
+def _instrument_key(payload: dict[str, object]) -> tuple[str, str, str]:
+    return (
+        str(payload.get("asset_class", "")),
+        str(payload.get("market", "")),
+        str(payload.get("symbol", "")),
+    )
+
+
+def _manifest_from_detail(detail: pd.DataFrame) -> list[dict[str, object]]:
+    if detail is None or detail.empty or "symbol" not in detail.columns:
+        return []
+    fields = [
+        "symbol", "asset_class", "asset_label", "display_name", "market",
+        "sector", "industry", "index_memberships",
+    ]
+    available = [field for field in fields if field in detail.columns]
+    records: list[dict[str, object]] = []
+    for _, group in detail.groupby(available[:1], sort=True, dropna=False):
+        first = group.iloc[0]
+        records.append({field: first.get(field, "") for field in available})
+    return records
+
+
+def merged_run_config_payload(
+    configs: list[dict[str, object]],
+    detail: pd.DataFrame,
+    errors: pd.DataFrame,
+    *,
+    merged_shards: int,
+) -> dict[str, object]:
+    """Return a run_config for merged shard artifacts.
+
+    Full-market Actions create one config per shard.  The final artifact must
+    describe the merged universe, not whichever shard config happened to be
+    discovered first on disk.
+    """
+
+    ordered_configs = sorted(configs, key=_shard_sort_key)
+    payload = dict(ordered_configs[0]) if ordered_configs else {"scan": ScanConfig().to_dict()}
+    instruments: dict[tuple[str, str, str], dict[str, object]] = {}
+    for config in ordered_configs:
+        manifest = config.get("instruments", [])
+        if not isinstance(manifest, list):
+            continue
+        for item in manifest:
+            if not isinstance(item, dict):
+                continue
+            key = _instrument_key(item)
+            if key[2]:
+                instruments.setdefault(key, dict(item))
+    if not instruments:
+        for item in _manifest_from_detail(detail):
+            key = _instrument_key(item)
+            if key[2]:
+                instruments.setdefault(key, item)
+
+    shas = sorted(
+        {str(config.get("git_commit_sha", "")).strip() for config in ordered_configs}
+        - {""}
+    )
+    if shas:
+        payload["git_commit_sha"] = shas[0] if len(shas) == 1 else "mixed"
+        payload["git_commit_shas"] = shas
+    payload["shard_index"] = None
+    payload["merged_shards"] = int(merged_shards)
+    payload["instruments"] = list(instruments.values())
+    payload["instrument_count"] = len(instruments)
+    payload["data_coverage"] = data_coverage_summary(detail, errors)
+    return payload
+
+
 _SINGLE_TABLE_COLUMNS = {
     "timeframe": "Zaman Dilimi",
     "ma_type": "MA Türü",
@@ -624,9 +702,9 @@ def merge_outputs(
     output_dir: Path,
     expected_shards: int = 0,
 ) -> int:
-    detail_paths = list(merge_dir.rglob("ma_detail.csv"))
-    error_paths = list(merge_dir.rglob("errors.csv"))
-    config_paths = list(merge_dir.rglob("run_config.json"))
+    detail_paths = sorted(merge_dir.rglob("ma_detail.csv"))
+    error_paths = sorted(merge_dir.rglob("errors.csv"))
+    config_paths = sorted(merge_dir.rglob("run_config.json"))
     if not detail_paths:
         raise RuntimeError(f"Birleştirilecek ma_detail.csv bulunamadı: {merge_dir}")
     if expected_shards and len(detail_paths) != expected_shards:
@@ -666,12 +744,9 @@ def merge_outputs(
         if error_frames
         else pd.DataFrame(columns=["symbol", "timeframe", "error"])
     )
-    config_payload = (
-        json.loads(config_paths[0].read_text(encoding="utf-8-sig"))
-        if config_paths
-        else {"scan": ScanConfig().to_dict()}
+    config_payload = merged_run_config_payload(
+        configs, detail, errors, merged_shards=len(detail_paths)
     )
-    config_payload["merged_shards"] = len(detail_paths)
     write_outputs(output_dir, detail, errors, config_payload)
     print(f"Birleştirildi: {len(detail_paths)} parça")
     return 0

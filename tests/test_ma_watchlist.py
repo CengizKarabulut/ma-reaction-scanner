@@ -101,6 +101,29 @@ class ClusteringTests(unittest.TestCase):
         self.assertTrue((watch["zone_width_atr"] <= 0.50 + 1e-9).all())
         self.assertEqual(watch["zone_member_count"].tolist(), [2, 2])
 
+    def test_bounded_clusters_are_anchored_nearest_to_price_on_both_sides(self):
+        frame = pd.DataFrame(
+            [
+                row("SMA10", "SMA", 335.0, -0.10, side="Destek"),
+                row("SMA20", "SMA", 331.0, -0.50, side="Destek"),
+                row("SMA30", "SMA", 327.0, -0.90, side="Destek"),
+                row("EMA10", "EMA", 337.0, 0.10, side="Diren?"),
+                row("EMA20", "EMA", 341.0, 0.50, side="Diren?"),
+                row("EMA30", "EMA", 345.0, 0.90, side="Diren?"),
+            ]
+        )
+
+        watch = build_watchlist(
+            frame, WatchlistConfig(cluster_atr=0.50, max_zones_per_side=10)
+        )
+
+        support = watch[watch["side"] == "Destek"].sort_values("distance_atr", key=lambda s: s.abs())
+        resistance = watch[watch["side"] == "Diren?"].sort_values("distance_atr", key=lambda s: s.abs())
+        self.assertEqual(support.iloc[0]["ma_list"], "SMA10, SMA20")
+        self.assertEqual(resistance.iloc[0]["ma_list"], "EMA10, EMA20")
+        self.assertEqual(int(support.iloc[0]["zone_member_count"]), 2)
+        self.assertEqual(int(resistance.iloc[0]["zone_member_count"]), 2)
+
     def test_zone_score_distribution_is_visible_separately_from_best_member(self):
         frame = pd.DataFrame(
             [

@@ -16,6 +16,7 @@ from scanner.ma_scan import (
     data_coverage_summary,
     main,
     merge_outputs,
+    merged_run_config_payload,
     parse_level_config_json,
     parse_ma_types,
     parse_periods,
@@ -229,6 +230,73 @@ class ScannerInputTests(unittest.TestCase):
         self.assertEqual(summary["data_sources"], ["borsapy", "cache"])
         self.assertEqual(summary["analysis_bases"], ["nominal", "relative:XU100"])
         self.assertEqual(summary["data_end_time"], "2026-07-10T18:00:00+00:00")
+
+    def test_merged_run_config_aggregates_shard_metadata(self):
+        detail = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "asset_class": "stock",
+                    "timeframe": "1d",
+                    "data_source": "cache",
+                    "analysis_basis": "nominal",
+                    "price_time": "2026-07-10T18:00:00",
+                },
+                {
+                    "symbol": "THYAO",
+                    "asset_class": "stock",
+                    "timeframe": "1d",
+                    "data_source": "borsapy",
+                    "analysis_basis": "nominal",
+                    "price_time": "2026-07-10T18:05:00",
+                },
+            ]
+        )
+        errors = pd.DataFrame([{"symbol": "KCHOL", "timeframe": "1d", "error": "offline"}])
+        configs = [
+            {
+                "universe": "bist_all_stocks",
+                "timeframes": ["1d"],
+                "scan": {"periods": [20]},
+                "shard_index": 1,
+                "shard_count": 2,
+                "instrument_count": 1,
+                "instruments": [
+                    {"symbol": "THYAO", "asset_class": "stock", "market": "BIST"}
+                ],
+                "git_commit_sha": "abc",
+                "data_coverage": {"rows": 1},
+            },
+            {
+                "universe": "bist_all_stocks",
+                "timeframes": ["1d"],
+                "scan": {"periods": [20]},
+                "shard_index": 0,
+                "shard_count": 2,
+                "instrument_count": 1,
+                "instruments": [
+                    {"symbol": "ASELS", "asset_class": "stock", "market": "BIST"}
+                ],
+                "git_commit_sha": "abc",
+                "data_coverage": {"rows": 1},
+            },
+        ]
+
+        payload = merged_run_config_payload(configs, detail, errors, merged_shards=2)
+
+        self.assertIsNone(payload["shard_index"])
+        self.assertEqual(payload["merged_shards"], 2)
+        self.assertEqual(payload["instrument_count"], 2)
+        self.assertEqual(
+            [item["symbol"] for item in payload["instruments"]],
+            ["ASELS", "THYAO"],
+        )
+        self.assertEqual(payload["git_commit_sha"], "abc")
+        self.assertEqual(payload["git_commit_shas"], ["abc"])
+        self.assertEqual(payload["data_coverage"]["rows"], 2)
+        self.assertEqual(payload["data_coverage"]["error_rows"], 1)
+        self.assertEqual(payload["data_coverage"]["symbols_with_rows"], ["ASELS", "THYAO"])
+        self.assertEqual(payload["data_coverage"]["symbols_with_errors"], ["KCHOL"])
 
     def test_single_stock_table_keeps_each_selected_ma_side(self):
         detail = pd.DataFrame(

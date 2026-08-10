@@ -331,5 +331,21 @@ class MovingAverageEngineTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "sıfır"):
             prepare_frame(frame, allow_non_positive=True)
+
+    def test_prepare_frame_rejects_non_finite_ohlc(self):
+        frame = sample_frame(100)
+        frame.loc[frame.index[20], "High"] = np.inf
+
+        with self.assertRaisesRegex(ValueError, "sonlu"):
+            prepare_frame(frame)
+
+    def test_prepare_frame_rejects_negative_volume(self):
+        frame = sample_frame(100)
+        frame.loc[frame.index[20], "Volume"] = -1.0
+
+        with self.assertRaisesRegex(ValueError, "Volume negatif"):
+            prepare_frame(frame)
+
+
 if __name__ == "__main__":
     unittest.main()

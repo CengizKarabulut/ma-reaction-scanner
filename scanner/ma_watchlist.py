@@ -172,8 +172,13 @@ def build_watchlist(
     for key, group in kept.groupby(group_keys, sort=False, dropna=False):
         key = key if isinstance(key, tuple) else (key,)
         context = dict(zip(group_keys, key))
-        ordered = group.assign(_d=_numeric(group, "distance_atr")).sort_values("_d")
-        labels = _cluster_positions(ordered["_d"].to_numpy(dtype=float), config.cluster_atr)
+        ordered = group.assign(
+            _d=_numeric(group, "distance_atr"),
+            _abs_distance=_numeric(group, "distance_atr").abs(),
+        ).sort_values(["_abs_distance", "_d"])
+        labels = _cluster_positions(
+            ordered["_abs_distance"].to_numpy(dtype=float), config.cluster_atr
+        )
         ordered = ordered.assign(_cluster=labels)
 
         for _, zone in ordered.groupby("_cluster", sort=True):
