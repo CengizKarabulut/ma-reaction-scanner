@@ -158,6 +158,29 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("SMA55", message)
 
 
+    def test_single_image_uses_best_repeated_weak_bucket_when_no_strong_rows(self):
+        frame = pd.DataFrame(
+            [
+                {"Zaman Dilimi": "1d", "MA": "ALMA55", "Taraf": "Direnc", "Temas": 1,
+                 "Seviye Skoru": 99.0, "Tutma %": 100.0, "Uzaklik %": 1.0},
+                {"Zaman Dilimi": "1d", "MA": "SMA55", "Taraf": "Destek", "Temas": 2,
+                 "Seviye Skoru": 40.0, "Tutma %": 60.0, "Uzaklik %": -1.0},
+                {"Zaman Dilimi": "1d", "MA": "SMA13", "Taraf": "Destek", "Temas": 3,
+                 "Seviye Skoru": 23.5, "Tutma %": 66.7, "Uzaklik %": -11.4},
+            ]
+        )
+
+        rows = _single_image_rows(frame, top=20)
+        message = format_single_detail(frame, "TEST", top=20)
+
+        self.assertEqual([row["ma"] for row in rows], ["SMA13"])
+        self.assertEqual(rows[0]["role"], "Ham<5")
+        self.assertNotIn("ALMA55", message)
+        self.assertNotIn("SMA55", message)
+        self.assertIn("SMA13", message)
+        self.assertIn("zayif/ham", message)
+
+
     def test_single_image_rows_use_emitted_unicode_headers(self):
         frame = pd.DataFrame(
             [

@@ -27,6 +27,7 @@ def _number(value: object, digits: int = 2) -> str:
 _TELEGRAM_TEXT_BUDGET = 4_000
 _IMAGE_ROW_LIMIT = 30
 _MIN_DISPLAY_TOUCHES = 5
+_MIN_WEAK_DISPLAY_TOUCHES = 2
 _FOOTER = [
     "Skor = 0-100 gozlemsel seviye gucu; Uyum = eski trade-simulasyon skoru.",
     "Telegram tablolarinda varsayilan olarak 5+ temasli satirlar one cikarilir.",
@@ -46,6 +47,13 @@ def _displayable_by_touches(
 ) -> pd.DataFrame:
     if frame is None or frame.empty:
         return frame
+    touches, found = _touch_values(frame, *touch_columns)
+    if not found:
+        return frame
+    return frame[touches >= min_touches].copy()
+
+
+def _touch_values(frame: pd.DataFrame, *touch_columns: str) -> tuple[pd.Series, bool]:
     touches = pd.Series(0.0, index=frame.index)
     found = False
     for column in touch_columns:
@@ -53,24 +61,51 @@ def _displayable_by_touches(
             values = pd.to_numeric(frame[column], errors="coerce").fillna(0)
             touches = touches.where(touches > 0, values)
             found = True
+    return touches, found
+
+
+def _display_frame_by_touch_strength(
+    frame: pd.DataFrame,
+    *touch_columns: str,
+    min_touches: int = _MIN_DISPLAY_TOUCHES,
+) -> tuple[pd.DataFrame, bool]:
+    """Return strong rows, or the best repeated weak-touch bucket if none exist."""
+
+    if frame is None or frame.empty:
+        return frame, False
+    touches, found = _touch_values(frame, *touch_columns)
     if not found:
-        return frame
-    return frame[touches >= min_touches].copy()
+        return frame, False
+    strong = frame[touches >= min_touches].copy()
+    if not strong.empty:
+        return strong, False
+    max_touch = int(touches.max()) if len(touches) else 0
+    if max_touch < _MIN_WEAK_DISPLAY_TOUCHES:
+        return frame.iloc[0:0].copy(), True
+    return frame[touches >= max_touch].copy(), True
 
 
 def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
-    display_frame = _displayable_by_touches(frame, "best_level_touches", "best_touches")
+    display_frame, weak_fallback = _display_frame_by_touch_strength(
+        frame, "best_level_touches", "best_touches"
+    )
     selected = display_frame.head(max(1, top))
     safe_label = str(label)[:200]
     lines = [
         f"<b>{safe_label}</b>",
         f"Toplam: <b>{frame['symbol'].nunique()}</b> varlik - her varlik tek satir",
+    ]
+    if weak_fallback:
+        lines.append(
+            "5+ temasli guclu satir yok; asagida yalnizca en yuksek tekrarli zayif/ham adaylar var."
+        )
+    lines.extend([
         "",
         "<pre>",
         f"{'Varlik':<7} {'MA':<8} {'TF':<4} {'Tms':>3} {'Skor':>5} "
         f"{'Tut%':>5} {'Bnc':>5} {'Uzk%':>6} {'Uyum':>5} {'Dur':<4}",
         "-" * 68,
-    ]
+    ])
     has_exclusions = (
         "filter_status" in selected.columns
         and bool((selected["filter_status"] != "Uygun").any())
@@ -90,7 +125,7 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
             f"{_number(row.get('best_median_bounce_atr')):>5} "
             f"{_number(row.get('best_distance_pct')):>6} "
             f"{_number(row.get('best_compatibility_score')):>5} "
-            f"{'OK' if eligible else 'Disi':<4}"
+            f"{'Ham' if weak_fallback else 'OK' if eligible else 'Disi':<4}"
         )
         if not _fits(lines, [table_row, "</pre>", "", *reason_reserve]):
             break
@@ -146,7 +181,12 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
         "Tut% (eski Kor%) = kirilmadan tutma; Tms = ham bagimsiz temas.",
         "Bnc = medyan sicrama ATR. Uyum = eski trade-simulasyon skoru.",
     ]
-    display_frame = _displayable_by_touches(frame, "Temas", "level_touches")
+    display_frame, weak_fallback = _display_frame_by_touch_strength(frame, "Temas", "level_touches")
+    if weak_fallback:
+        lines[2] = (
+            "5+ temasli guclu satir yok; asagida sadece en yuksek tekrarli "
+            "zayif/ham adaylar gosterilir. Tek temasli satirlar gizlidir."
+        )
     for _, row in display_frame.head(max(1, top)).iterrows():
         touches = row.get("Temas")
         score = row.get("Seviye Skoru", row.get("Uyum Skoru"))
@@ -169,7 +209,13 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
         displayed += 1
     lines.extend(footer)
     if display_frame.empty and len(frame) > 0:
-        lines.append("5+ temasli satir yok; zayif temaslar sadece CSV/HTML tablosundadir.")
+        lines.append(
+            "5+ temasli satir yok; bu kosuda tekrarlayan guclu MA seviyesi bulunmadi."
+        )
+    elif weak_fallback:
+        lines.append(
+            "Bu tablo zayif/ham adaydir: 5+ temas yok, tek temasli satirlar saklandi."
+        )
     elif displayed < min(len(display_frame), max(1, top)):
         lines.append("Diger 5+ temasli satirlar tam CSV/HTML tablosundadir.")
     return "\n".join(lines)
@@ -375,10 +421,19 @@ def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple
     return render_table_png(rows, columns, title=str(label)[:80], subtitle=subtitle, badge=badge), "watchlist"
 
 
-def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]:
-    selected = _displayable_by_touches(frame, "Temas", "level_touches").head(_image_limit(top)).copy()
+def _single_image_selection(frame: pd.DataFrame, top: int) -> tuple[pd.DataFrame, bool]:
+    selected, weak_fallback = _display_frame_by_touch_strength(frame, "Temas", "level_touches")
+    return selected.head(_image_limit(top)).copy(), weak_fallback
+
+
+def _single_rows_from_frame(
+    selected: pd.DataFrame, *, weak_fallback: bool = False
+) -> list[dict[str, object]]:
     rows = []
     for _, row in selected.iterrows():
+        role = _first_value(row, *_DETAIL_ROLE_HEADERS)
+        if weak_fallback:
+            role = "Ham<5"
         rows.append({
             "timeframe": row.get("Zaman Dilimi", row.get("timeframe", "-")),
             "ma": row.get("MA", "-"),
@@ -393,13 +448,19 @@ def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]
                 1,
                 "%",
             ),
-            "role": _first_value(row, *_DETAIL_ROLE_HEADERS),
+            "role": role,
         })
     return rows
 
 
+def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]:
+    selected, weak_fallback = _single_image_selection(frame, top)
+    return _single_rows_from_frame(selected, weak_fallback=weak_fallback)
+
+
 def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
-    rows = _single_image_rows(frame, top)
+    selected, weak_fallback = _single_image_selection(frame, top)
+    rows = _single_rows_from_frame(selected, weak_fallback=weak_fallback)
     columns = [
         TableColumn("timeframe", "TF", 54, "center"),
         TableColumn("ma", "MA", 130),
@@ -414,12 +475,21 @@ def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[by
     ]
     omitted = max(0, len(frame) - len(rows))
     badge = f"{len(rows)} satir" + (f" | +{omitted}" if omitted else "")
-    subtitle = "En guclu MA satirlari - izleme seti varsa once o gosterilir"
+    subtitle = (
+        "5+ temas yok - en yuksek tekrarli zayif adaylar (tek temas gizli)"
+        if weak_fallback and rows
+        else "5+ temas yok - tekrarlayan guclu MA bulunmadi"
+        if weak_fallback
+        else "En guclu MA satirlari - izleme seti varsa once o gosterilir"
+    )
     return render_table_png(rows, columns, title=str(label)[:80], subtitle=subtitle, badge=badge), "detail"
 
 
 def _summary_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
-    selected = _displayable_by_touches(frame, "best_level_touches", "best_touches").head(_image_limit(top)).copy()
+    selected, weak_fallback = _display_frame_by_touch_strength(
+        frame, "best_level_touches", "best_touches"
+    )
+    selected = selected.head(_image_limit(top)).copy()
     rows = []
     for _, row in selected.iterrows():
         rows.append({
@@ -430,7 +500,7 @@ def _summary_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[b
             "score": _fmt(row.get("best_level_score", row.get("best_compatibility_score")), 1),
             "hold": _fmt(row.get("best_hold_rate_pct", row.get("best_side_adherence_pct")), 0, "%"),
             "distance": _fmt(row.get("best_distance_pct"), 1, "%"),
-            "status": row.get("filter_status", "Uygun"),
+            "status": "Ham<5" if weak_fallback else row.get("filter_status", "Uygun"),
         })
     columns = [
         TableColumn("symbol", "Varlik", 105),
@@ -444,7 +514,13 @@ def _summary_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[b
     ]
     omitted = max(0, len(frame) - len(selected))
     badge = f"{len(selected)} satir" + (f" | +{omitted}" if omitted else "")
-    subtitle = "Her varlik icin en iyi MA DNA satiri - tam liste CSV/HTML ekte"
+    subtitle = (
+        "5+ temas yok - en yuksek tekrarli zayif adaylar; tam CSV/HTML ekte"
+        if weak_fallback and rows
+        else "5+ temas yok - tekrarlayan guclu MA bulunmadi; tam CSV/HTML ekte"
+        if weak_fallback
+        else "Her varlik icin en iyi MA DNA satiri - tam liste CSV/HTML ekte"
+    )
     return render_table_png(rows, columns, title=str(label)[:80], subtitle=subtitle, badge=badge), "summary"
 
 
@@ -495,7 +571,7 @@ def send(
         if watchlist_path is not None and watchlist_path.exists()
         else None
     )
-    if detail_path is not None and watch_frame is not None:
+    if detail_path is not None and watch_frame is not None and not watch_frame.empty:
         message = format_watchlist_detail(watch_frame, label, top)
     else:
         message = (
