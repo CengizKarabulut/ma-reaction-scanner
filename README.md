@@ -161,6 +161,13 @@ Actions ekranindan hem CLI'dan degistirilebilir:
 - `max_gap_pct`: Yakin donem maksimum gap (varsayilan %15).
 - `max_abs_edge_r`: Siralamayi bozabilecek aykiri mutlak Edge siniri (varsayilan 5R).
 
+### Veri hijyeni
+
+Tarama oncesi OHLCV verisi normalize edilir. Eksik OHLC kolonlari, sifir veya
+sonsuz fiyatlar, gecersiz High/Low siralamasi ve negatif/sonsuz hacim acik hata
+olarak reddedilir. Coklu sembol taramasinda bu hata tum kosuyu sessizce bozmaz;
+problemli sembol `errors.csv` icinde gorunur.
+
 ## GitHub Actions
 
 Kullanıcıya açık iki analiz vardır:
