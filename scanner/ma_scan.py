@@ -7,7 +7,9 @@ import argparse
 from datetime import datetime, timezone
 import json
 import math
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pandas as pd
@@ -158,6 +160,73 @@ def instrument_metadata(instrument) -> dict[str, object]:
         "industry": instrument.industry,
         "index_memberships": format_index_memberships(instrument.index_memberships),
     }
+
+
+def instrument_manifest(instruments) -> list[dict[str, object]]:
+    """Return the concrete symbol list used by this run.
+
+    ``universe`` names can change over time, especially for BIST index and
+    sector lists.  Persisting the expanded instrument list makes old artifacts
+    auditable without guessing which symbols were actually scanned.
+    """
+
+    return [
+        {"symbol": instrument.symbol, **instrument_metadata(instrument)}
+        for instrument in instruments
+    ]
+
+
+def current_git_commit_sha() -> str:
+    """Best-effort commit SHA for reproducible artifacts."""
+
+    env_sha = os.environ.get("GITHUB_SHA", "").strip()
+    if env_sha:
+        return env_sha
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return ""
+    return result.stdout.strip()
+
+
+def data_coverage_summary(detail: pd.DataFrame, errors: pd.DataFrame) -> dict[str, object]:
+    """Summarize what data actually made it into the generated artifacts."""
+
+    detail = detail if detail is not None else pd.DataFrame()
+    errors = errors if errors is not None else pd.DataFrame()
+    summary: dict[str, object] = {
+        "rows": int(len(detail)),
+        "error_rows": int(len(errors)),
+        "symbols_with_rows": [],
+        "symbols_with_errors": [],
+        "timeframes_with_rows": [],
+        "data_sources": [],
+        "analysis_bases": [],
+        "data_end_time": "",
+    }
+    if not detail.empty:
+        if "symbol" in detail.columns:
+            summary["symbols_with_rows"] = sorted(str(item) for item in detail["symbol"].dropna().unique())
+        if "timeframe" in detail.columns:
+            summary["timeframes_with_rows"] = sorted(str(item) for item in detail["timeframe"].dropna().unique())
+        if "data_source" in detail.columns:
+            summary["data_sources"] = sorted(str(item) for item in detail["data_source"].dropna().unique())
+        if "analysis_basis" in detail.columns:
+            summary["analysis_bases"] = sorted(str(item) for item in detail["analysis_basis"].dropna().unique())
+        if "price_time" in detail.columns:
+            timestamps = pd.to_datetime(detail["price_time"], errors="coerce", utc=True)
+            if timestamps.notna().any():
+                summary["data_end_time"] = timestamps.max().isoformat()
+    if not errors.empty and "symbol" in errors.columns:
+        summary["symbols_with_errors"] = sorted(str(item) for item in errors["symbol"].dropna().unique())
+    return summary
 
 
 _SINGLE_TABLE_COLUMNS = {
@@ -817,6 +886,9 @@ def main(argv: list[str] | None = None) -> int:
         "shard_index": args.shard_index,
         "shard_count": args.shard_count,
         "instrument_count": len(instruments),
+        "instruments": instrument_manifest(instruments),
+        "git_commit_sha": current_git_commit_sha(),
+        "data_coverage": data_coverage_summary(detail, error_frame),
     }
     write_outputs(output_dir, detail, error_frame, payload)
     print(f"Çıktılar: {output_dir.resolve()}")

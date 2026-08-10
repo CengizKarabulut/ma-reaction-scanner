@@ -188,7 +188,7 @@ GitHub artifact içinde:
 - `ma_detail.csv`: tüm zaman dilimi/MA/yön ayrıntıları
 - `market_report.html`: tam okunabilir piyasa raporu
 - `errors.csv`: veri sağlayıcı hataları
-- `run_config.json`: koşunun bütün ayarları
+- `run_config.json`: kosunun butun ayarlari, commit SHA, taranan sembol manifesti ve veri kapsam ozeti
 
 bulunur.
 
