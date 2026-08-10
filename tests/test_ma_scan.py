@@ -28,6 +28,10 @@ class ScannerInputTests(unittest.TestCase):
     def test_custom_timeframes_preserve_user_selection(self):
         self.assertEqual(parse_timeframes("15m,1h,4h,1d"), ("15m", "1h", "4h", "1d"))
 
+    def test_daily_timeframe_preset_is_single_daily_bar(self):
+        self.assertEqual(parse_timeframes("daily"), ("1d",))
+        self.assertEqual(parse_timeframes("1d"), ("1d",))
+
     def test_all_ma_types_are_accepted(self):
         self.assertEqual(parse_ma_types(",".join(MA_TYPES)), MA_TYPES)
 

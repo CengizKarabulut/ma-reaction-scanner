@@ -8,9 +8,9 @@ on:
       timeframe_preset:
         description: Zaman dilimi paketi
         required: true
-        default: all
+        default: daily
         type: choice
-        options: [all, intraday, swing, daily, custom]
+        options: [daily, 1d, all, intraday, swing, custom]
       custom_timeframes:
         description: "custom için: 5m,15m,30m,1h,4h,1d,1wk,1mo"
         required: false
@@ -134,7 +134,7 @@ jobs:
       - name: Parçalı tüm BIST taraması
         shell: bash
         env:
-          PRESET: ${{ inputs.timeframe_preset || 'all' }}
+          PRESET: ${{ inputs.timeframe_preset || 'daily' }}
           CUSTOM_TF: ${{ inputs.custom_timeframes || '' }}
           MA_TYPES: ${{ inputs.ma_types || 'SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA' }}
           PERIODS: ${{ inputs.periods || '5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377' }}
@@ -161,7 +161,8 @@ jobs:
           SOURCE: ${{ inputs.source || 'auto' }}
         run: |
           TIMEFRAMES="$PRESET"
-          if [ "$PRESET" = "custom" ]; then TIMEFRAMES="$CUSTOM_TF"; fi
+          if [ -n "$CUSTOM_TF" ]; then TIMEFRAMES="$CUSTOM_TF"; fi
+          if [ "$PRESET" = "custom" ]; then TIMEFRAMES="${CUSTOM_TF:-1d}"; fi
           python -m scanner.ma_scan \
             --universe bist_all_stocks \
             --timeframes "$TIMEFRAMES" \

@@ -19,6 +19,7 @@ def row(ma, ma_type, current_ma, distance_atr, **kwargs):
         "ma_type": ma_type,
         "period": int("".join(c for c in ma if c.isdigit()) or 0),
         "current_ma": current_ma,
+        "current_price": 336.25,
         "distance_atr": distance_atr,
         "distance_pct": distance_atr * 2.0,
         "active_side": True,
@@ -106,6 +107,18 @@ class ClusteringTests(unittest.TestCase):
 
         # The same swings produced both counts; adding them would double count.
         self.assertEqual(float(watch.iloc[0]["level_touches"]), 12.0)
+
+    def test_current_price_is_preserved_for_watchlist_images(self):
+        frame = pd.DataFrame(
+            [
+                row("SMA200", "SMA", 309.0, -1.00, current_price=336.25),
+                row("EMA200", "EMA", 309.5, -0.98, current_price=336.25),
+            ]
+        )
+
+        watch = build_watchlist(frame, WatchlistConfig(cluster_atr=0.50))
+
+        self.assertAlmostEqual(float(watch.iloc[0]["current_price"]), 336.25)
 
     def test_zones_are_ordered_by_proximity_not_by_score(self):
         frame = pd.DataFrame(

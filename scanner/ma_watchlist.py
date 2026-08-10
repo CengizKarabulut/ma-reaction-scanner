@@ -142,7 +142,8 @@ def build_watchlist(
     if frame is None or len(frame) == 0 or missing:
         return pd.DataFrame(
             columns=[
-                "symbol", "timeframe", "side", "zone_low", "zone_high", "zone_mid",
+                "symbol", "timeframe", "side", "current_price",
+                "zone_low", "zone_high", "zone_mid",
                 "distance_pct", "distance_atr", "ma_list", "ma_families",
                 "level_touches", "hold_rate_pct", "median_bounce_atr",
                 "level_score", "plateau_ratio", "confidence", "analysis_basis",
@@ -173,6 +174,7 @@ def build_watchlist(
             records.append(
                 {
                     **context,
+                    "current_price": float(_numeric(zone, "current_price").median()),
                     "zone_low": float(ma_values.min()),
                     "zone_high": float(ma_values.max()),
                     "zone_mid": float(ma_values.median()),
@@ -210,6 +212,7 @@ _WATCH_COLUMNS = {
     "symbol": "Varlik",
     "timeframe": "Zaman Dilimi",
     "side": "Taraf",
+    "current_price": "Fiyat",
     "zone_low": "Bolge Alt",
     "zone_high": "Bolge Ust",
     "zone_mid": "Bolge Orta",

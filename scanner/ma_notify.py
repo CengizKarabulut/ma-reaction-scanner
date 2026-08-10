@@ -26,8 +26,10 @@ def _number(value: object, digits: int = 2) -> str:
 
 _TELEGRAM_TEXT_BUDGET = 4_000
 _IMAGE_ROW_LIMIT = 30
+_MIN_DISPLAY_TOUCHES = 5
 _FOOTER = [
     "Skor = 0-100 gozlemsel seviye gucu; Uyum = eski trade-simulasyon skoru.",
+    "Telegram tablolarinda varsayilan olarak 5+ temasli satirlar one cikarilir.",
     "Temas ham bagimsiz ziyaret sayisidir; 1-2 temas guclu seviye sayilmaz.",
     "Tam rapor CSV/HTML eki ve GitHub artifact icindedir.",
 ]
@@ -37,8 +39,28 @@ def _fits(lines: list[str], additions: list[str]) -> bool:
     return len("\n".join([*lines, *additions, *_FOOTER])) <= _TELEGRAM_TEXT_BUDGET
 
 
+def _displayable_by_touches(
+    frame: pd.DataFrame,
+    *touch_columns: str,
+    min_touches: int = _MIN_DISPLAY_TOUCHES,
+) -> pd.DataFrame:
+    if frame is None or frame.empty:
+        return frame
+    touches = pd.Series(0.0, index=frame.index)
+    found = False
+    for column in touch_columns:
+        if column in frame.columns:
+            values = pd.to_numeric(frame[column], errors="coerce").fillna(0)
+            touches = touches.where(touches > 0, values)
+            found = True
+    if not found:
+        return frame
+    return frame[touches >= min_touches].copy()
+
+
 def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
-    selected = frame.head(max(1, top))
+    display_frame = _displayable_by_touches(frame, "best_level_touches", "best_touches")
+    selected = display_frame.head(max(1, top))
     safe_label = str(label)[:200]
     lines = [
         f"<b>{safe_label}</b>",
@@ -124,7 +146,8 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
         "Tut% (eski Kor%) = kirilmadan tutma; Tms = ham bagimsiz temas.",
         "Bnc = medyan sicrama ATR. Uyum = eski trade-simulasyon skoru.",
     ]
-    for _, row in frame.head(max(1, top)).iterrows():
+    display_frame = _displayable_by_touches(frame, "Temas", "level_touches")
+    for _, row in display_frame.head(max(1, top)).iterrows():
         touches = row.get("Temas")
         score = row.get("Seviye Skoru", row.get("Uyum Skoru"))
         hold = row.get("Tutma %", row.get("Taraf Koruma %"))
@@ -145,8 +168,10 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
         lines.append(table_row)
         displayed += 1
     lines.extend(footer)
-    if displayed < min(len(frame), max(1, top)):
-        lines.append("Diğer satırlar tam CSV/HTML tablosundadır.")
+    if display_frame.empty and len(frame) > 0:
+        lines.append("5+ temasli satir yok; zayif temaslar sadece CSV/HTML tablosundadir.")
+    elif displayed < min(len(display_frame), max(1, top)):
+        lines.append("Diger 5+ temasli satirlar tam CSV/HTML tablosundadir.")
     return "\n".join(lines)
 
 
@@ -318,6 +343,7 @@ def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple
         payload = {
             "timeframe": row.get("timeframe", "-"),
             "side": row.get("side", "-"),
+            "price": _fmt_price_like(_first_value(row, "current_price", "Fiyat", default=None)),
             "zone": _zone_band(row),
             "distance": _fmt(row.get("distance_pct"), 1, "%"),
             "touches": _fmt_int(row.get("level_touches")),
@@ -334,13 +360,14 @@ def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple
         columns.append(TableColumn("symbol", "Varlik", 105))
     columns.extend([
         TableColumn("timeframe", "TF", 62, "center"),
-        TableColumn("side", "Taraf", 92),
+        TableColumn("side", "Taraf", 88),
+        TableColumn("price", "Fiyat", 96, "right"),
         TableColumn("zone", "Bolge", 205),
-        TableColumn("distance", "Uzak", 82, "right"),
+        TableColumn("distance", "Uzak", 78, "right"),
         TableColumn("touches", "Temas", 78, "right"),
         TableColumn("hold", "Tut", 70, "right"),
         TableColumn("confidence", "Guc", 80),
-        TableColumn("ma_list", "Ortalamalar", 470 if include_symbol else 560),
+        TableColumn("ma_list", "Ortalamalar", 430 if include_symbol else 520),
     ])
     omitted = max(0, len(frame) - len(selected))
     badge = f"{len(selected)} satir" + (f" | +{omitted}" if omitted else "")
@@ -349,7 +376,7 @@ def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple
 
 
 def _single_image_rows(frame: pd.DataFrame, top: int) -> list[dict[str, object]]:
-    selected = frame.head(_image_limit(top)).copy()
+    selected = _displayable_by_touches(frame, "Temas", "level_touches").head(_image_limit(top)).copy()
     rows = []
     for _, row in selected.iterrows():
         rows.append({
@@ -392,7 +419,7 @@ def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[by
 
 
 def _summary_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
-    selected = frame.head(_image_limit(top)).copy()
+    selected = _displayable_by_touches(frame, "best_level_touches", "best_touches").head(_image_limit(top)).copy()
     rows = []
     for _, row in selected.iterrows():
         rows.append({

@@ -8,9 +8,9 @@ on:
         required: true
         default: ASELS
       timeframes:
-        description: "all veya CSV: 5m,15m,30m,1h,4h,1d,1wk,1mo"
+        description: "daily/1d/all veya CSV: 5m,15m,30m,1h,4h,1d,1wk,1mo"
         required: true
-        default: all
+        default: 1d
       ma_types:
         description: Seçilecek MA türleri
         required: true
