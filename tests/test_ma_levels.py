@@ -6,6 +6,7 @@ import pandas as pd
 from scanner.ma_engine import Touch
 from scanner.ma_levels import (
     LevelConfig,
+    TouchOutcome,
     add_adherence_excess,
     add_plateau_scores,
     level_class,
@@ -143,8 +144,37 @@ class LevelScoreTests(unittest.TestCase):
         metrics = summarize_outcomes([], valid_bars=500, cross_count=0, config=self.config)
 
         self.assertEqual(metrics["level_touches"], 0)
+        self.assertTrue(np.isnan(metrics["bounce_p25_atr"]))
+        self.assertTrue(np.isnan(metrics["reaction_1atr_rate_pct"]))
+        self.assertTrue(np.isnan(metrics["penetration_p75_atr"]))
         self.assertEqual(level_score(metrics, self.config), 0.0)
         self.assertEqual(level_class(metrics, 0.0, self.config), "Yetersiz temas")
+
+    def test_summarize_outcomes_reports_reaction_distribution(self):
+        metrics = summarize_outcomes(
+            [
+                TouchOutcome(position=1, bounce_atr=0.5, penetration_atr=0.1, held=True),
+                TouchOutcome(position=2, bounce_atr=1.5, penetration_atr=0.2, held=False),
+                TouchOutcome(position=3, bounce_atr=2.5, penetration_atr=0.3, held=True),
+            ],
+            valid_bars=300,
+            cross_count=6,
+            config=self.config,
+        )
+
+        self.assertEqual(metrics["level_touches"], 3)
+        self.assertAlmostEqual(metrics["touch_density_per_100"], 1.0)
+        self.assertAlmostEqual(metrics["cross_per_100"], 2.0)
+        self.assertAlmostEqual(metrics["median_bounce_atr"], 1.5)
+        self.assertAlmostEqual(metrics["bounce_p25_atr"], 1.0)
+        self.assertAlmostEqual(metrics["bounce_p75_atr"], 2.0)
+        self.assertAlmostEqual(metrics["bounce_mean_atr"], 1.5)
+        self.assertAlmostEqual(metrics["reaction_1atr_rate_pct"], 100.0 * 2 / 3)
+        self.assertAlmostEqual(metrics["reaction_2atr_rate_pct"], 100.0 / 3)
+        self.assertAlmostEqual(metrics["median_penetration_atr"], 0.2)
+        self.assertAlmostEqual(metrics["penetration_p75_atr"], 0.25)
+        self.assertAlmostEqual(metrics["penetration_mean_atr"], 0.2)
+        self.assertAlmostEqual(metrics["hold_rate_pct"], 100.0 * 2 / 3)
 
     def test_cleanliness_scales_the_score_instead_of_subtracting_from_it(self):
         config = LevelConfig(

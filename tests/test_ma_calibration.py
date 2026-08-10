@@ -16,7 +16,11 @@ class CalibrationSummaryTests(unittest.TestCase):
                     "hold_rate_pct": 55.0,
                     "break_rate_pct": 45.0,
                     "median_bounce_atr": 0.8,
+                    "bounce_p75_atr": 1.0,
+                    "reaction_1atr_rate_pct": 25.0,
+                    "reaction_2atr_rate_pct": 0.0,
                     "median_penetration_atr": 0.2,
+                    "penetration_p75_atr": 0.3,
                 },
                 {
                     "side": "Destek",
@@ -25,7 +29,11 @@ class CalibrationSummaryTests(unittest.TestCase):
                     "hold_rate_pct": 70.0,
                     "break_rate_pct": 30.0,
                     "median_bounce_atr": 1.4,
+                    "bounce_p75_atr": 1.8,
+                    "reaction_1atr_rate_pct": 75.0,
+                    "reaction_2atr_rate_pct": 20.0,
                     "median_penetration_atr": 0.1,
+                    "penetration_p75_atr": 0.2,
                 },
                 {
                     "side": "Direnc",
@@ -34,7 +42,11 @@ class CalibrationSummaryTests(unittest.TestCase):
                     "hold_rate_pct": 65.0,
                     "break_rate_pct": 35.0,
                     "median_bounce_atr": 2.5,
+                    "bounce_p75_atr": 3.0,
+                    "reaction_1atr_rate_pct": 80.0,
+                    "reaction_2atr_rate_pct": 60.0,
                     "median_penetration_atr": 0.4,
+                    "penetration_p75_atr": 0.6,
                 },
             ]
         )
@@ -46,6 +58,10 @@ class CalibrationSummaryTests(unittest.TestCase):
         self.assertIn("Direnc", set(summary["side"]))
         strong = summary[(summary["side"] == "Direnc") & (summary["score_bucket"] == "50-55")]
         self.assertEqual(int(strong.iloc[0]["row_count"]), 1)
+        self.assertEqual(float(strong.iloc[0]["median_bounce_p75_atr"]), 3.0)
+        self.assertEqual(float(strong.iloc[0]["median_reaction_1atr_rate_pct"]), 80.0)
+        self.assertEqual(float(strong.iloc[0]["median_reaction_2atr_rate_pct"]), 60.0)
+        self.assertEqual(float(strong.iloc[0]["median_penetration_p75_atr"]), 0.6)
         self.assertEqual(float(strong.iloc[0]["row_share_median_bounce_ge_2atr_pct"]), 100.0)
 
     def test_empty_or_missing_score_returns_shaped_frame(self):
