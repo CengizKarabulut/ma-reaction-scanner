@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from scanner.ma_watchlist import WatchlistConfig
 from scanner.ma_scan import (
     build_parser,
     build_single_stock_table,
+    data_coverage_summary,
     main,
     merge_outputs,
     parse_level_config_json,
@@ -172,6 +174,7 @@ class ScannerInputTests(unittest.TestCase):
                 patch("scanner.ma_scan.resolve_instruments", return_value=[instrument]),
                 patch("scanner.ma_scan.MarketDataProvider") as provider_class,
                 patch("scanner.ma_scan.scan_frame", return_value=pd.DataFrame()),
+                patch("scanner.ma_scan.current_git_commit_sha", return_value="testsha"),
             ):
                 provider_class.return_value.fetch.return_value = fetched
                 output = Path(temporary) / "output"
@@ -187,6 +190,45 @@ class ScannerInputTests(unittest.TestCase):
                 self.assertTrue((output / "ma_watchlist.csv").exists())
                 self.assertTrue((output / "watchlist.csv").exists())
                 self.assertTrue((output / "level_score_calibration.csv").exists())
+                run_config = json.loads((output / "run_config.json").read_text(encoding="utf-8"))
+                self.assertEqual(run_config["git_commit_sha"], "testsha")
+                self.assertEqual(run_config["instrument_count"], 1)
+                self.assertEqual(run_config["instruments"][0]["symbol"], "ASELS")
+                self.assertEqual(run_config["instruments"][0]["asset_class"], "stock")
+                self.assertEqual(run_config["data_coverage"]["rows"], 0)
+                self.assertEqual(run_config["data_coverage"]["error_rows"], 0)
+
+    def test_data_coverage_summary_is_auditable(self):
+        detail = pd.DataFrame(
+            [
+                {
+                    "symbol": "ASELS",
+                    "timeframe": "1d",
+                    "data_source": "cache",
+                    "analysis_basis": "nominal",
+                    "price_time": "2026-07-10T18:00:00",
+                },
+                {
+                    "symbol": "THYAO",
+                    "timeframe": "4h",
+                    "data_source": "borsapy",
+                    "analysis_basis": "relative:XU100",
+                    "price_time": "2026-07-10T15:00:00",
+                },
+            ]
+        )
+        errors = pd.DataFrame([{"symbol": "KCHOL", "timeframe": "1d", "error": "offline"}])
+
+        summary = data_coverage_summary(detail, errors)
+
+        self.assertEqual(summary["rows"], 2)
+        self.assertEqual(summary["error_rows"], 1)
+        self.assertEqual(summary["symbols_with_rows"], ["ASELS", "THYAO"])
+        self.assertEqual(summary["symbols_with_errors"], ["KCHOL"])
+        self.assertEqual(summary["timeframes_with_rows"], ["1d", "4h"])
+        self.assertEqual(summary["data_sources"], ["borsapy", "cache"])
+        self.assertEqual(summary["analysis_bases"], ["nominal", "relative:XU100"])
+        self.assertEqual(summary["data_end_time"], "2026-07-10T18:00:00+00:00")
 
     def test_single_stock_table_keeps_each_selected_ma_side(self):
         detail = pd.DataFrame(
