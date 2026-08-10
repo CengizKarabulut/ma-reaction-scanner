@@ -81,7 +81,7 @@ def _color_for(key: str, value: object) -> tuple[int, int, int]:
             return _GREEN
         if "diren" in text:
             return _RED
-    if key in {"confidence", "guven", "class"}:
+    if key in {"confidence", "guven", "class", "zone_quality"}:
         if "guclu" in text or "g??" in text:
             return _GREEN
         if "zay" in text:

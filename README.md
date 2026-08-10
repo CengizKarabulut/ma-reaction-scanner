@@ -90,9 +90,22 @@ Tam MA DNA tablosu arastirma icindir; tek hissede yuzlerce satir uretebilir.
 - Sadece bugun aktif olan taraf kullanilir: fiyat MA'nin ustundeyse destek, altindaysa direnc.
 - En az temas, seviye skoru, plato ve uzaklik esiklerini gecmeyen satirlar elenir.
 - Birbirine yakin MA'lar ATR mesafesine gore tek bolgeye kumelenir; temaslar toplanmaz, ayni olayi iki kez saymamak icin en yuksek temas sayisi kullanilir.
+- Kumeleme toplam bolge genisligini de sinirlar. Yani 0.50 ATR ayari, komsu zincirlenmesiyle 1+ ATR genisliginde tek bolgeye sismez.
 - Sira skor sirasi degil, fiyata yakinlik sirasidir: izleme icin once fiyat nereye degecek sorusu onemlidir.
 
-Bu katman otomatik al-sat sinyali degil; grafikte hangi MA bolgelerinin izlenmeye deger oldugunu hizli gosterir.
+Bu katman otomatik al-sat sinyali veya hedef fiyat degildir; grafikte hangi MA
+bolgelerinin izlenmeye deger oldugunu hizli gosterir. Arada baska teknik
+destek/direnc olmadigi anlamina gelmez.
+
+Watchlist skor kolonlari iki ayri anlam tasir:
+
+- `level_score`: geriye donuk uyumluluk icin korunur; bolgedeki en iyi tek MA skorudur.
+- `best_level_score`: en iyi tek MA skoru.
+- `median_level_score` ve `zone_score`: bolgenin kolektif kalitesini daha durust gosterir; varsayilan `zone_score` medyan skordur, yeni keyfi agirlikli form?l degildir.
+- `zone_width_atr`: bolgenin ATR cinsinden genisligi.
+- `zone_member_count`, `ma_families`, `unique_periods`: bolgedeki birlesme/kalabalik yapisini aciklar.
+- `zone_quality`: Guclu/Orta/Zayif heuristik etiketidir; istatistiksel basari olasiligi veya garanti degildir. Eski `confidence` kolonu uyumluluk icin ayni degeri tasir.
+
 Komut satirinda `--watch-min-touches`, `--watch-min-score`, `--watch-cluster-atr`,
 `--watch-max-zones` gibi ayarlar degistirilebilir. Actions ekraninda yeni input eklenmez;
 varsayilan izleme seti otomatik uretilir.

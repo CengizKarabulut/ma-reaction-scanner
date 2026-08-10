@@ -93,6 +93,23 @@ class TouchOutcomeTests(unittest.TestCase):
 
         self.assertAlmostEqual(small_outcome.bounce_atr, large_outcome.bounce_atr)
 
+    def test_outcomes_ignore_bars_after_reaction_and_hold_windows(self):
+        base = frame_from(
+            highs=[100.5, 101.0, 102.0, 103.0, 150.0, 200.0],
+            lows=[99.9, 100.1, 100.5, 101.0, 80.0, 50.0],
+            closes=[100.0, 100.8, 101.5, 102.0, 120.0, 180.0],
+        )
+        mutated = base.copy()
+        mutated.iloc[-1, mutated.columns.get_loc("High")] = 1_000.0
+        mutated.iloc[-1, mutated.columns.get_loc("Low")] = 1.0
+        mutated.iloc[-1, mutated.columns.get_loc("Close")] = 999.0
+        touch = Touch(0, base.index[0], 1, 100.0, 1.0)
+
+        original = touch_outcomes(base, [touch], 1, self.config)[0]
+        changed = touch_outcomes(mutated, [touch], 1, self.config)[0]
+
+        self.assertEqual(original, changed)
+
     def test_non_positive_atr_touches_are_skipped(self):
         frame = frame_from(
             highs=[100.5, 102.0], lows=[99.9, 100.1], closes=[100.0, 101.5]
