@@ -195,6 +195,49 @@ class LevelScoreTests(unittest.TestCase):
         # 1 - 0.6 * (8/8) = 0.4 of the clean score, not a flat deduction.
         self.assertAlmostEqual(level_score(choppy, config), 40.0)
 
+    def test_score_stays_inside_zero_to_one_hundred(self):
+        config = LevelConfig()
+        samples = [
+            {
+                "level_touches": 1,
+                "hold_rate_pct": -50.0,
+                "median_bounce_atr": -2.0,
+                "cross_per_100": -10.0,
+            },
+            {
+                "level_touches": 10_000,
+                "hold_rate_pct": 500.0,
+                "median_bounce_atr": 999.0,
+                "cross_per_100": 0.0,
+            },
+            {
+                "level_touches": 10,
+                "hold_rate_pct": float("inf"),
+                "median_bounce_atr": float("nan"),
+                "cross_per_100": float("inf"),
+            },
+        ]
+
+        for metrics in samples:
+            score = level_score(metrics, config)
+            self.assertGreaterEqual(score, 0.0)
+            self.assertLessEqual(score, 100.0)
+
+    def test_score_monotonicity_for_core_inputs(self):
+        config = LevelConfig(evidence_target_touches=20, bounce_cap_atr=4.0)
+        base = {
+            "level_touches": 8,
+            "hold_rate_pct": 50.0,
+            "median_bounce_atr": 1.0,
+            "cross_per_100": 2.0,
+        }
+        base_score = level_score(base, config)
+
+        self.assertGreaterEqual(level_score(dict(base, level_touches=16), config), base_score)
+        self.assertGreaterEqual(level_score(dict(base, hold_rate_pct=70.0), config), base_score)
+        self.assertGreaterEqual(level_score(dict(base, median_bounce_atr=2.0), config), base_score)
+        self.assertLessEqual(level_score(dict(base, cross_per_100=6.0), config), base_score)
+
     def test_a_choppy_short_average_cannot_outrank_a_clean_long_one(self):
         """Regression: the additive cleanliness term let noise win.
 
