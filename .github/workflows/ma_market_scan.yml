@@ -1,14 +1,14 @@
-name: Tüm BIST MA Trend ve Tepki Taraması
+﻿name: Tüm BIST MA Trend ve Tepki Taraması
 
 on:
   schedule:
-    - cron: "15 17 * * 1-5"
+    - cron: "35 15 * * *"   # 18:35 Europe/Istanbul
   workflow_dispatch:
     inputs:
       timeframe_preset:
         description: Zaman dilimi paketi
         required: true
-        default: daily
+        default: all
         type: choice
         options: [daily, 1d, all, intraday, swing, custom]
       custom_timeframes:
@@ -116,11 +116,62 @@ permissions:
   contents: read
 
 jobs:
+  prepare_timeframes:
+    runs-on: ubuntu-latest
+    outputs:
+      timeframes: ${{ steps.resolve.outputs.timeframes }}
+    steps:
+      - name: Zaman dilimlerini ayir
+        id: resolve
+        shell: bash
+        env:
+          PRESET: ${{ inputs.timeframe_preset || 'all' }}
+          CUSTOM_TF: ${{ inputs.custom_timeframes || '' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          presets = {
+              "all": ["5m", "15m", "30m", "1h", "4h", "1d", "1wk", "1mo"],
+              "intraday": ["5m", "15m", "30m", "1h", "4h"],
+              "swing": ["1d", "1wk", "1mo"],
+              "daily": ["1d"],
+              "1d": ["1d"],
+          }
+          allowed = set(presets["all"])
+          preset = (os.environ.get("PRESET") or "all").strip().lower()
+          custom = (os.environ.get("CUSTOM_TF") or "").strip()
+
+          if preset == "custom":
+              raw_values = custom or "1d"
+              values = [item.strip().lower() for item in raw_values.split(",") if item.strip()]
+          elif custom:
+              values = [item.strip().lower() for item in custom.split(",") if item.strip()]
+          else:
+              values = list(presets.get(preset, [preset]))
+
+          unique = []
+          for value in values:
+              if value not in allowed:
+                  raise SystemExit(f"Bilinmeyen zaman dilimi: {value}")
+              if value not in unique:
+                  unique.append(value)
+          if not unique:
+              raise SystemExit("En az bir zaman dilimi gerekli")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"timeframes={json.dumps(unique)}\n")
+          print("Timeframes:", ",".join(unique))
+          PY
+
   scan:
+    needs: prepare_timeframes
     strategy:
       fail-fast: false
       max-parallel: 10
       matrix:
+        timeframe: ${{ fromJson(needs.prepare_timeframes.outputs.timeframes) }}
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     runs-on: ubuntu-latest
     timeout-minutes: 330
@@ -131,11 +182,9 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: python -m pip install -r requirements.txt
-      - name: Parçalı tüm BIST taraması
+      - name: Parcali tum BIST taramasi (${{ matrix.timeframe }})
         shell: bash
         env:
-          PRESET: ${{ inputs.timeframe_preset || 'daily' }}
-          CUSTOM_TF: ${{ inputs.custom_timeframes || '' }}
           MA_TYPES: ${{ inputs.ma_types || 'SMA,EMA,WMA,VWMA,KAMA,ALMA,HMA' }}
           PERIODS: ${{ inputs.periods || '5,8,10,13,20,21,22,34,50,55,89,100,144,200,233,377' }}
           SLOPE_BARS: ${{ inputs.trend_slope_bars || '10' }}
@@ -160,12 +209,9 @@ jobs:
           RANK_BY: ${{ inputs.rank_by || 'level' }}
           SOURCE: ${{ inputs.source || 'auto' }}
         run: |
-          TIMEFRAMES="$PRESET"
-          if [ -n "$CUSTOM_TF" ]; then TIMEFRAMES="$CUSTOM_TF"; fi
-          if [ "$PRESET" = "custom" ]; then TIMEFRAMES="${CUSTOM_TF:-1d}"; fi
           python -m scanner.ma_scan \
             --universe bist_all_stocks \
-            --timeframes "$TIMEFRAMES" \
+            --timeframes "${{ matrix.timeframe }}" \
             --ma-types "$MA_TYPES" \
             --periods "$PERIODS" \
             --trend-slope-bars "$SLOPE_BARS" \
@@ -191,17 +237,22 @@ jobs:
             --source "$SOURCE" \
             --shard-index "${{ matrix.shard }}" \
             --shard-count 20 \
-            --output-dir "reports/shard-${{ matrix.shard }}"
+            --output-dir "reports/${{ matrix.timeframe }}/shard-${{ matrix.shard }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ma-shard-${{ matrix.shard }}
-          path: reports/shard-${{ matrix.shard }}/
+          name: ma-${{ matrix.timeframe }}-shard-${{ matrix.shard }}
+          path: reports/${{ matrix.timeframe }}/shard-${{ matrix.shard }}/
           retention-days: 3
 
   merge:
-    needs: scan
-    if: always()
+    needs: [prepare_timeframes, scan]
+    if: always() && needs.prepare_timeframes.result == 'success'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        timeframe: ${{ fromJson(needs.prepare_timeframes.outputs.timeframes) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -212,22 +263,21 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - uses: actions/download-artifact@v4
         with:
-          pattern: ma-shard-*
-          path: parts
+          pattern: ma-${{ matrix.timeframe }}-shard-*
+          path: parts/${{ matrix.timeframe }}
       - run: >-
           python -m scanner.ma_scan
-          --merge-dir parts
+          --merge-dir parts/${{ matrix.timeframe }}
           --expected-shards 20
-          --output-dir reports/final
-      - name: Telegram tekilleştirilmiş özet ve tam CSV
+          --output-dir reports/final/${{ matrix.timeframe }}
+      - name: Telegram ozet ve tam CSV (${{ matrix.timeframe }})
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m scanner.ma_notify --summary reports/final/market_summary.csv --watchlist reports/final/ma_watchlist.csv --label "Tüm BIST MA Trend ve Tepki" --top 25
+        run: python -m scanner.ma_notify --summary reports/final/${{ matrix.timeframe }}/market_summary.csv --watchlist reports/final/${{ matrix.timeframe }}/ma_watchlist.csv --label "Tum BIST MA Trend ve Tepki - ${{ matrix.timeframe }}" --top 25
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
-          name: tum-bist-ma-trend-tepki-${{ github.run_id }}
-          path: reports/final/
+          name: tum-bist-ma-trend-tepki-${{ matrix.timeframe }}-${{ github.run_id }}
+          path: reports/final/${{ matrix.timeframe }}/
           retention-days: 90
-
