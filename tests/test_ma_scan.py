@@ -142,6 +142,10 @@ class ScannerInputTests(unittest.TestCase):
             classify_scan_error(RuntimeError("borsapy: OHLC fiyatlari sonlu olmalidir")),
             "data_validation",
         )
+        self.assertEqual(
+            classify_scan_error(RuntimeError("Endeks verisi alinamadi (XU100 1d): offline")),
+            "provider_error",
+        )
         self.assertEqual(classify_scan_error(Exception("boom")), "unexpected_error")
 
     def test_main_fails_when_every_request_errors(self):
@@ -335,6 +339,9 @@ class ScannerInputTests(unittest.TestCase):
                     "symbol": "THYAO",
                     "asset_class": "stock",
                     "market": "BIST",
+                    "sector": float("nan"),
+                    "industry": pd.NA,
+                    "index_memberships": float("nan"),
                     "timeframe": "1d",
                     "data_source": "cache",
                     "analysis_basis": "nominal",
@@ -360,6 +367,11 @@ class ScannerInputTests(unittest.TestCase):
             [item["symbol"] for item in payload["instruments"]],
             ["ASELS", "THYAO"],
         )
+        recovered = payload["instruments"][1]
+        self.assertEqual(recovered["sector"], "")
+        self.assertEqual(recovered["industry"], "")
+        self.assertEqual(recovered["index_memberships"], "")
+        json.dumps(payload, allow_nan=False)
 
     def test_single_stock_table_keeps_each_selected_ma_side(self):
         detail = pd.DataFrame(
