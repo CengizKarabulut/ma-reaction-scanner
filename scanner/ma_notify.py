@@ -27,7 +27,6 @@ def _number(value: object, digits: int = 2) -> str:
 _TELEGRAM_TEXT_BUDGET = 4_000
 _IMAGE_ROW_LIMIT = 30
 _MIN_DISPLAY_TOUCHES = 5
-_MIN_WEAK_DISPLAY_TOUCHES = 2
 _FOOTER = [
     "Skor = 0-100 gozlemsel seviye gucu; Uyum = eski trade-simulasyon skoru.",
     "Telegram tablolarinda varsayilan olarak 5+ temasli satirlar one cikarilir.",
@@ -69,7 +68,11 @@ def _display_frame_by_touch_strength(
     *touch_columns: str,
     min_touches: int = _MIN_DISPLAY_TOUCHES,
 ) -> tuple[pd.DataFrame, bool]:
-    """Return strong rows, or the best repeated weak-touch bucket if none exist."""
+    """Return only rows with enough repeated touches for user-facing reports.
+
+    The full CSV/HTML artifacts still preserve every raw row. Telegram images and
+    short text must not promote 1-4 touch rows as actionable MA DNA.
+    """
 
     if frame is None or frame.empty:
         return frame, False
@@ -77,12 +80,7 @@ def _display_frame_by_touch_strength(
     if not found:
         return frame, False
     strong = frame[touches >= min_touches].copy()
-    if not strong.empty:
-        return strong, False
-    max_touch = int(touches.max()) if len(touches) else 0
-    if max_touch < _MIN_WEAK_DISPLAY_TOUCHES:
-        return frame.iloc[0:0].copy(), True
-    return frame[touches >= max_touch].copy(), True
+    return strong, strong.empty and len(frame) > 0
 
 
 def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
@@ -97,7 +95,7 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     ]
     if weak_fallback:
         lines.append(
-            "5+ temasli guclu satir yok; asagida yalnizca en yuksek tekrarli zayif/ham adaylar var."
+            "5+ temasli guclu satir yok; 1-4 temasli ham adaylar sadece CSV/HTML ekinde tutuldu."
         )
     lines.extend([
         "",
@@ -112,6 +110,8 @@ def format_summary(frame: pd.DataFrame, label: str, top: int = 25) -> str:
     )
     reason_reserve = ["Filtre disi nedenleri tam CSV'de.", ""] if has_exclusions else []
     displayed_indices: list[object] = []
+    if selected.empty and weak_fallback:
+        lines.append("5+ temasli satir yok; gosterilecek guvenilir aday bulunmadi.")
     for index, row in selected.iterrows():
         eligible = str(row.get("filter_status", "Uygun")) == "Uygun"
         touches = row.get("best_level_touches", row.get("best_touches"))
@@ -184,8 +184,8 @@ def format_single_detail(frame: pd.DataFrame, label: str, top: int = 20) -> str:
     display_frame, weak_fallback = _display_frame_by_touch_strength(frame, "Temas", "level_touches")
     if weak_fallback:
         lines[2] = (
-            "5+ temasli guclu satir yok; asagida sadece en yuksek tekrarli "
-            "zayif/ham adaylar gosterilir. Tek temasli satirlar gizlidir."
+            "5+ temasli guvenilir MA DNA satiri yok; 1-4 temasli ham satirlar "
+            "yalnizca CSV/HTML ekinde tutuldu."
         )
     for _, row in display_frame.head(max(1, top)).iterrows():
         touches = row.get("Temas")
@@ -381,6 +381,16 @@ _DETAIL_LEVEL_HEADERS = (
 )
 
 
+def _current_side_label(row: pd.Series) -> str:
+    price = _safe_number(_first_value(row, *_DETAIL_PRICE_HEADERS, default=None))
+    level = _safe_number(_first_value(row, *_DETAIL_LEVEL_HEADERS, default=None))
+    if price is None or level is None:
+        return str(row.get("Taraf", row.get("side", "-")))
+    if abs(price - level) < 1e-12:
+        return "Temas"
+    return "Destek" if level < price else "Direnc"
+
+
 def _watchlist_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[bytes, str]:
     selected = frame.head(_image_limit(top)).copy()
     include_symbol = "symbol" in selected.columns and selected["symbol"].nunique(dropna=True) > 1
@@ -441,7 +451,7 @@ def _single_rows_from_frame(
             "ma": row.get("MA", "-"),
             "price": _fmt_price_like(_first_value(row, *_DETAIL_PRICE_HEADERS, default=None)),
             "level": _fmt_price_like(_first_value(row, *_DETAIL_LEVEL_HEADERS, default=None)),
-            "side": row.get("Taraf", "-"),
+            "side": _current_side_label(row),
             "touches": _fmt_int(row.get("Temas", row.get("level_touches"))),
             "score": _fmt(row.get("Seviye Skoru", row.get("Uyum Skoru")), 1),
             "hold": _fmt(row.get("Tutma %", row.get("Taraf Koruma %")), 0, "%"),
@@ -468,7 +478,7 @@ def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[by
         TableColumn("ma", "MA", 130),
         TableColumn("price", "Fiyat", 96, "right"),
         TableColumn("level", "Seviye", 108, "right"),
-        TableColumn("side", "Taraf", 92),
+        TableColumn("side", "Bugun", 92),
         TableColumn("touches", "Temas", 72, "right"),
         TableColumn("score", "Skor", 76, "right"),
         TableColumn("hold", "Tut", 68, "right"),
@@ -476,11 +486,12 @@ def _single_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[by
         TableColumn("role", "Rol", 118),
     ]
     omitted = max(0, len(frame) - len(rows))
-    badge = f"{len(rows)} satir" + (f" | +{omitted}" if omitted else "")
+    if weak_fallback and not rows:
+        badge = f"Kanit yok | {len(frame)} ham"
+    else:
+        badge = f"{len(rows)} satir" + (f" | +{omitted}" if omitted else "")
     subtitle = (
-        "5+ temas yok - en yuksek tekrarli zayif adaylar (tek temas gizli)"
-        if weak_fallback and rows
-        else "5+ temas yok - tekrarlayan guclu MA bulunmadi"
+        "5+ temas yok - guvenilir MA DNA bulunmadi; ham satirlar CSV/HTML ekte"
         if weak_fallback
         else "En guclu MA satirlari - izleme seti varsa once o gosterilir"
     )
@@ -515,11 +526,12 @@ def _summary_image_payload(frame: pd.DataFrame, label: str, top: int) -> tuple[b
         TableColumn("status", "Durum", 140),
     ]
     omitted = max(0, len(frame) - len(selected))
-    badge = f"{len(selected)} satir" + (f" | +{omitted}" if omitted else "")
+    if weak_fallback and not rows:
+        badge = f"Kanit yok | {len(frame)} ham"
+    else:
+        badge = f"{len(selected)} satir" + (f" | +{omitted}" if omitted else "")
     subtitle = (
-        "5+ temas yok - en yuksek tekrarli zayif adaylar; tam CSV/HTML ekte"
-        if weak_fallback and rows
-        else "5+ temas yok - tekrarlayan guclu MA bulunmadi; tam CSV/HTML ekte"
+        "5+ temas yok - guvenilir MA DNA bulunmadi; ham satirlar CSV/HTML ekte"
         if weak_fallback
         else "Her varlik icin en iyi MA DNA satiri - tam liste CSV/HTML ekte"
     )

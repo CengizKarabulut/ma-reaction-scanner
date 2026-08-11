@@ -158,7 +158,7 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("SMA55", message)
 
 
-    def test_single_image_uses_best_repeated_weak_bucket_when_no_strong_rows(self):
+    def test_single_image_hides_all_weak_rows_when_no_strong_rows(self):
         frame = pd.DataFrame(
             [
                 {"Zaman Dilimi": "1d", "MA": "ALMA55", "Taraf": "Direnc", "Temas": 1,
@@ -173,12 +173,12 @@ class NotificationTests(unittest.TestCase):
         rows = _single_image_rows(frame, top=20)
         message = format_single_detail(frame, "TEST", top=20)
 
-        self.assertEqual([row["ma"] for row in rows], ["SMA13"])
-        self.assertEqual(rows[0]["role"], "Ham<5")
+        self.assertEqual(rows, [])
         self.assertNotIn("ALMA55", message)
         self.assertNotIn("SMA55", message)
-        self.assertIn("SMA13", message)
-        self.assertIn("zayif/ham", message)
+        self.assertNotIn("SMA13", message)
+        self.assertIn("5+ temasli guvenilir", message)
+        self.assertIn("1-4 temasli ham", message)
 
 
     def test_single_image_rows_use_emitted_unicode_headers(self):
@@ -205,6 +205,39 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(rows[0]["level"], "343.12")
         self.assertEqual(rows[0]["distance"], "2.4%")
         self.assertEqual(rows[0]["role"], "Aktif")
+
+    def test_single_image_side_uses_current_price_against_level(self):
+        frame = pd.DataFrame(
+            [
+                {
+                    "Zaman Dilimi": "1d",
+                    "MA": "VWMA22",
+                    "Fiyat": 32.1,
+                    "MA Degeri": 36.93,
+                    "Taraf": "Destek",
+                    "Temas": 5,
+                    "Seviye Skoru": 55.0,
+                    "Tutma %": 60.0,
+                    "Uzaklik %": 15.0,
+                },
+                {
+                    "Zaman Dilimi": "1d",
+                    "MA": "SMA200",
+                    "Fiyat": 32.1,
+                    "MA Degeri": 30.0,
+                    "Taraf": "Direnc",
+                    "Temas": 5,
+                    "Seviye Skoru": 50.0,
+                    "Tutma %": 60.0,
+                    "Uzaklik %": -6.5,
+                },
+            ]
+        )
+
+        rows = _single_image_rows(frame, top=20)
+
+        self.assertEqual(rows[0]["side"], "Direnc")
+        self.assertEqual(rows[1]["side"], "Destek")
 
     def test_watchlist_notification_image_includes_price_column(self):
         frame = pd.DataFrame(
@@ -240,6 +273,29 @@ class NotificationTests(unittest.TestCase):
         self.assertTrue(image_bytes.startswith(b"\x89PNG"))
         self.assertIn("price", [column.key for column in captured["columns"]])
         self.assertEqual(captured["rows"][0]["price"], "336.25")
+
+    def test_detail_image_empty_evidence_badge_is_explicit(self):
+        frame = pd.DataFrame(
+            [
+                {"Zaman Dilimi": "1d", "MA": "SMA13", "Taraf": "Destek", "Temas": 3,
+                 "Seviye Skoru": 23.5, "Tutma %": 66.7, "Uzaklik %": -11.4}
+            ]
+        )
+        captured = {}
+
+        def fake_render(rows, columns, **kwargs):
+            captured["rows"] = rows
+            captured["columns"] = columns
+            captured.update(kwargs)
+            return b"\x89PNG\r\n\x1a\n" + b"x" * 100
+
+        with patch("scanner.ma_notify.render_table_png", side_effect=fake_render):
+            payload = build_notification_image(frame, "TEST", top=20, detail_path=object())
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(captured["rows"], [])
+        self.assertEqual(captured["badge"], "Kanit yok | 1 ham")
+        self.assertIn("guvenilir MA DNA bulunmadi", captured["subtitle"])
 
 
 if __name__ == "__main__":
