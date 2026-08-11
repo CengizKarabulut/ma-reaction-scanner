@@ -172,8 +172,10 @@ problemli sembol `errors.csv` icinde gorunur.
 
 Kullanıcıya açık iki analiz vardır:
 
-- **Tüm BIST MA Trend ve Tepki Taraması:** BIST'teki tüm hisseleri 20 paralel
-  parçaya böler, sonuçları birleştirir ve her hisseyi tek satırda sıralar.
+- **Tum BIST MA Trend ve Tepki Taramasi:** BIST'teki tum hisseleri secilen
+  her zaman dilimi icin ayri ayri tarar. Her zaman dilimi 20 paralel parcaya
+  bolunur, kendi icinde birlesir ve ayri Telegram raporu/artifact uretir.
+  Zamanlanmis kosu her gun 18:35 Turkiye saatiyle baslar.
 - **Tek Hisse MA Trend ve Tepki Analizi:** bir sembolü seçilen tüm MA ve zaman
   dilimlerinde ayrıntılı inceler.
 
@@ -183,6 +185,10 @@ Altyapı iş akışları:
 - **BIST Veri Güncelleyici (Endeks Listeleri)**
 
 Telegram once okunabilir PNG tablo gorseli gonderir; gorsel uretilemezse eski metin tablosuna duser. Tam CSV/HTML dosyalari yine belge olarak eklenir.
+Tum BIST workflow'unda birden fazla zaman dilimi secilirse artifact'ler
+`tum-bist-ma-trend-tepki-<timeframe>-<run_id>` olarak ayri gelir; ornegin
+`5m`, `1h` ve `1d` ayni kosuda uc ayri rapor halinde uretilir.
+
 GitHub artifact içinde:
 
 - `market_summary.csv`: her varlık bir satır, tum teknik alanlarla
