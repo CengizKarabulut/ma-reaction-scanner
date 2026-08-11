@@ -141,15 +141,15 @@ def classify_scan_error(exc: Exception) -> str:
         "periyot", "shard", "unsupported",
     )
     data_tokens = (
-        "ohlc", "volume", "hacim", "fiyat", "verisi", "temizleme",
+        "ohlc", "volume", "hacim", "fiyat", "temizleme",
         "pozitif", "sifir", "s?f?r", "sonlu", "siralamasi", "s?ralamas?",
     )
     if isinstance(exc, pd.errors.EmptyDataError):
         return "data_error"
-    if any(token in message for token in data_tokens):
-        return "data_validation"
     if any(token in message for token in config_tokens):
         return "invalid_configuration"
+    if any(token in message for token in data_tokens):
+        return "data_validation"
     if isinstance(exc, ValueError):
         return "value_error"
     if isinstance(exc, ConnectionError | TimeoutError | RuntimeError):
@@ -269,6 +269,20 @@ def _instrument_key(payload: dict[str, object]) -> tuple[str, str, str]:
     )
 
 
+def _missing_manifest_value(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(missing) if isinstance(missing, bool) else False
+
+
+def _manifest_value_or_empty(value: object) -> object:
+    return "" if _missing_manifest_value(value) else value
+
+
 def _manifest_from_detail(detail: pd.DataFrame) -> list[dict[str, object]]:
     if detail is None or detail.empty or "symbol" not in detail.columns:
         return []
@@ -281,7 +295,10 @@ def _manifest_from_detail(detail: pd.DataFrame) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for _, group in detail.groupby(identity or ["symbol"], sort=True, dropna=False):
         first = group.iloc[0]
-        records.append({field: first.get(field, "") for field in available})
+        records.append({
+            field: _manifest_value_or_empty(first.get(field, ""))
+            for field in available
+        })
     return records
 
 
@@ -322,7 +339,7 @@ def merged_run_config_payload(
             existing = instruments[existing_key]
             for field, value in item.items():
                 current = existing.get(field, "")
-                if (current is None or str(current).strip() == "") and pd.notna(value):
+                if _missing_manifest_value(current) or str(current).strip() == "":
                     existing[field] = value
             continue
         key = _instrument_key(item)
