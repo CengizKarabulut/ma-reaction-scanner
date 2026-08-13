@@ -2,7 +2,7 @@
 
 on:
   schedule:
-    - cron: "35 15 * * *"   # 18:35 Europe/Istanbul
+    - cron: "55 13 * * *"   # 16:55 Europe/Istanbul
   workflow_dispatch:
     inputs:
       timeframe_preset:
