@@ -175,7 +175,7 @@ Kullanıcıya açık iki analiz vardır:
 - **Tum BIST MA Trend ve Tepki Taramasi:** BIST'teki tum hisseleri secilen
   her zaman dilimi icin ayri ayri tarar. Her zaman dilimi 20 paralel parcaya
   bolunur, kendi icinde birlesir ve ayri Telegram raporu/artifact uretir.
-  Zamanlanmis kosu her gun 16:15 Turkiye saatiyle baslar.
+  Zamanlanmis kosular her gun 14:30 ve 16:15 Turkiye saatiyle baslar.
 - **Tek Hisse MA Trend ve Tepki Analizi:** bir sembolü seçilen tüm MA ve zaman
   dilimlerinde ayrıntılı inceler.
 

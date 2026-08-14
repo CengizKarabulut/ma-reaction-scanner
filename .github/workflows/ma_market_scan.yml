@@ -2,6 +2,7 @@
 
 on:
   schedule:
+    - cron: "30 11 * * *"   # 14:30 Europe/Istanbul
     - cron: "15 13 * * *"   # 16:15 Europe/Istanbul
   workflow_dispatch:
     inputs:
