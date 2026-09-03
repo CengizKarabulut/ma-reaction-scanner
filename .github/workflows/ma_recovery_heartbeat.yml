@@ -36,9 +36,26 @@ jobs:
           hour="$(TZ=Europe/Istanbul date +%H)"
           minute="$(TZ=Europe/Istanbul date +%M)"
           now_min=$((10#${hour} * 60 + 10#${minute}))
+          echo "TR saati: $(TZ=Europe/Istanbul date '+%F %T %Z')"
 
           if [ "${dow}" -gt 5 ]; then
             echo "Hafta sonu; işlem yok."
+            exit 0
+          fi
+
+          # Gecikmis heartbeat gece uyansa bile hicbir MA kosusu baslatamaz.
+          if ! { (( now_min >= 660 && now_min <= 1139 )) || (( now_min >= 1170 && now_min <= 1199 )); }; then
+            echo "MA otomatik tarama penceresi disinda; kurtarma yok."
+            exit 0
+          fi
+
+          active_count="$(
+            gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=50" |
+              jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress")] | length'
+          )"
+
+          if [ "${active_count}" -gt 0 ]; then
+            echo "Ana MA taramasi halen aktif (${active_count}); ust uste yeni 160-job kosusu baslatilmiyor."
             exit 0
           fi
 
@@ -46,7 +63,7 @@ jobs:
             slot_start="$(TZ=Europe/Istanbul date +%Y-%m-%dT${hour}:00:00%:z)"
             slot_start_utc="$(date -u -d "${slot_start}" +%Y-%m-%dT%H:%M:%SZ)"
             slot_count="$(
-              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=40" |
+              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=50" |
                 jq --arg cutoff "${slot_start_utc}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
             )"
             if [ "${slot_count}" -eq 0 ]; then
@@ -58,13 +75,15 @@ jobs:
             exit 0
           fi
 
-          if (( now_min >= 1175 && now_min <= 1199 )); then
-            cutoff="$(date -u -d '35 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
-            recent_count="$(
-              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=30" |
-                jq --arg cutoff "${cutoff}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
+          # Kapanis sonrasi hedef 19:30. Ilk uygun heartbeat 19:30'dan itibaren baslatabilir.
+          if (( now_min >= 1170 && now_min <= 1199 )); then
+            close_start="$(TZ=Europe/Istanbul date +%Y-%m-%dT19:30:00%:z)"
+            close_start_utc="$(date -u -d "${close_start}" +%Y-%m-%dT%H:%M:%SZ)"
+            close_count="$(
+              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=50" |
+                jq --arg cutoff "${close_start_utc}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
             )"
-            if [ "${recent_count}" -eq 0 ]; then
+            if [ "${close_count}" -eq 0 ]; then
               echo "19:30 kapanış sonrası MA taraması bulunamadı; kurtarma başlatılıyor."
               gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
             else
