@@ -3,11 +3,11 @@ run-name: "MA Watchdog · ${{ github.event.schedule || github.event_name }}"
 
 on:
   schedule:
-    # Ana kosular 11:00-18:00; watchdog her birinden 12 dakika sonra kontrol eder.
-    - cron: "12 11-18 * * *"
+    # Ana kosular hafta ici 11:00-18:00; watchdog her birinden 12 dakika sonra kontrol eder.
+    - cron: "12 11-18 * * 1-5"
       timezone: "Europe/Istanbul"
-    # Kapanis sonrasi 19:30 taramasini 19:42'de kontrol et.
-    - cron: "42 19 * * *"
+    # Kapanis sonrasi hafta ici 19:30 taramasini 19:42'de kontrol et.
+    - cron: "42 19 * * 1-5"
       timezone: "Europe/Istanbul"
   workflow_dispatch:
 
