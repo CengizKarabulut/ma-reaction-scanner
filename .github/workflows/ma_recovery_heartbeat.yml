@@ -1,0 +1,71 @@
+name: MA Recovery Heartbeat
+run-name: "MA Recovery · ${{ github.event.schedule || github.event_name }}"
+
+on:
+  schedule:
+    - cron: "*/5 11-19 * * 1-5"
+      timezone: "Europe/Istanbul"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ma-recovery-heartbeat
+  cancel-in-progress: true
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Recover missing hourly MA scan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_WORKFLOW: ma_market_scan.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dow="$(TZ=Europe/Istanbul date +%u)"
+          hour="$(TZ=Europe/Istanbul date +%H)"
+          minute="$(TZ=Europe/Istanbul date +%M)"
+          now_min=$((10#${hour} * 60 + 10#${minute}))
+
+          if [ "${dow}" -gt 5 ]; then
+            echo "Hafta sonu; işlem yok."
+            exit 0
+          fi
+
+          # 11:00-18:59 arasında son 70 dakikada aktif/başarılı bir ana MA koşusu yoksa kurtar.
+          if (( now_min >= 660 && now_min <= 1139 )); then
+            cutoff="$(date -u -d '70 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+            recent_count="$(
+              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=30" |
+                jq --arg cutoff "${cutoff}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
+            )"
+            if [ "${recent_count}" -eq 0 ]; then
+              echo "Son 70 dakikada MA taraması yok; kurtarma taraması başlatılıyor."
+              gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
+            else
+              echo "MA taraması yakın zamanda başlamış/çalışmış; yeni koşu yok."
+            fi
+            exit 0
+          fi
+
+          # Kapanış sonrası 19:30 koşusunu 19:35-19:59 arasında güvenceye al.
+          if (( now_min >= 1175 && now_min <= 1199 )); then
+            cutoff="$(date -u -d '35 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+            recent_count="$(
+              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=30" |
+                jq --arg cutoff "${cutoff}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
+            )"
+            if [ "${recent_count}" -eq 0 ]; then
+              echo "19:30 kapanış sonrası MA taraması bulunamadı; kurtarma başlatılıyor."
+              gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
+            else
+              echo "Kapanış sonrası MA koşusu mevcut."
+            fi
+          fi
