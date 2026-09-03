@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "*/5 11-19 * * 1-5"
       timezone: "Europe/Istanbul"
+  push:
+    paths:
+      - ".github/heartbeat-bootstrap"
   workflow_dispatch:
 
 permissions:
@@ -39,23 +42,22 @@ jobs:
             exit 0
           fi
 
-          # 11:00-18:59 arasında son 70 dakikada aktif/başarılı bir ana MA koşusu yoksa kurtar.
           if (( now_min >= 660 && now_min <= 1139 )); then
-            cutoff="$(date -u -d '70 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
-            recent_count="$(
-              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=30" |
-                jq --arg cutoff "${cutoff}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
+            slot_start="$(TZ=Europe/Istanbul date +%Y-%m-%dT${hour}:00:00%:z)"
+            slot_start_utc="$(date -u -d "${slot_start}" +%Y-%m-%dT%H:%M:%SZ)"
+            slot_count="$(
+              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=40" |
+                jq --arg cutoff "${slot_start_utc}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
             )"
-            if [ "${recent_count}" -eq 0 ]; then
-              echo "Son 70 dakikada MA taraması yok; kurtarma taraması başlatılıyor."
+            if [ "${slot_count}" -eq 0 ]; then
+              echo "Bu saat diliminde MA taraması yok; kurtarma taraması başlatılıyor."
               gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
             else
-              echo "MA taraması yakın zamanda başlamış/çalışmış; yeni koşu yok."
+              echo "Bu saat diliminde MA taraması mevcut; yeni koşu yok."
             fi
             exit 0
           fi
 
-          # Kapanış sonrası 19:30 koşusunu 19:35-19:59 arasında güvenceye al.
           if (( now_min >= 1175 && now_min <= 1199 )); then
             cutoff="$(date -u -d '35 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
             recent_count="$(
