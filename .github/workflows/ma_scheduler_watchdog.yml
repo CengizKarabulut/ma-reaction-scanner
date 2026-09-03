@@ -1,0 +1,63 @@
+name: MA Market Scan Watchdog
+run-name: "MA Watchdog · ${{ github.event.schedule || github.event_name }}"
+
+on:
+  schedule:
+    # Ana kosular: 14:30, 16:15, 19:30 Europe/Istanbul.
+    # Watchdog her birinden 12 dakika sonra kontrol eder.
+    - cron: "42 14 * * *"
+      timezone: "Europe/Istanbul"
+    - cron: "27 16 * * *"
+      timezone: "Europe/Istanbul"
+    - cron: "42 19 * * *"
+      timezone: "Europe/Istanbul"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ma-market-scan-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Son MA taramasini kontrol et ve gerekiyorsa yeniden baslat
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_WORKFLOW: ma_market_scan.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cutoff="$(date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
+          existing_count="$(
+            gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=30" |
+              jq --arg cutoff "${cutoff}" '
+                [.workflow_runs[]
+                  | select(.created_at >= $cutoff)
+                  | select(
+                      .status == "queued"
+                      or .status == "in_progress"
+                      or .conclusion == "success"
+                    )]
+                | length
+              '
+          )"
+
+          echo "Son 20 dakikadaki aktif/basarili MA taramasi: ${existing_count}"
+
+          if [ "${existing_count}" -gt 0 ]; then
+            echo "Ana MA taramasi mevcut; watchdog yeni kosu baslatmadi."
+            exit 0
+          fi
+
+          echo "Beklenen MA taramasi bulunamadi; varsayilan tum BIST taramasi baslatiliyor."
+          gh workflow run "${TARGET_WORKFLOW}" \
+            --repo "${REPOSITORY}" \
+            --ref main
