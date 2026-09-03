@@ -2,9 +2,12 @@
 
 on:
   schedule:
-    - cron: "30 11 * * *"   # 14:30 Europe/Istanbul
-    - cron: "15 13 * * *"   # 16:15 Europe/Istanbul
-    - cron: "30 16 * * *"   # 19:30 Europe/Istanbul
+    # Her gün Europe/Istanbul saatiyle 11:00-18:00 arası saat başı.
+    - cron: "0 11-18 * * *"
+      timezone: "Europe/Istanbul"
+    # Kapanış sonrası tarama aynı kalır: 19:30.
+    - cron: "30 19 * * *"
+      timezone: "Europe/Istanbul"
   workflow_dispatch:
     inputs:
       timeframe_preset:
