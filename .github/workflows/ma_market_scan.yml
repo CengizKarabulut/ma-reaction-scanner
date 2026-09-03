@@ -1,13 +1,9 @@
-﻿name: Tüm BIST MA Trend ve Tepki Taraması
+name: Tüm BIST MA Trend ve Tepki Taraması
 
+# Otomatik saat yönetimi ma_recovery_heartbeat.yml tarafından yapılır.
+# Bu workflow doğrudan schedule kabul etmez; böylece saatlerce gecikmiş
+# GitHub cron olayları piyasa/kapanış penceresi dışında tarama başlatamaz.
 on:
-  schedule:
-    # Pazartesi-Cuma Europe/Istanbul saatiyle 11:00-18:00 arası saat başı.
-    - cron: "0 11-18 * * 1-5"
-      timezone: "Europe/Istanbul"
-    # Kapanış sonrası tarama aynı kalır: hafta içi 19:30.
-    - cron: "30 19 * * 1-5"
-      timezone: "Europe/Istanbul"
   workflow_dispatch:
     inputs:
       timeframe_preset:
