@@ -1,14 +1,7 @@
 name: MA Market Scan Watchdog
-run-name: "MA Watchdog · ${{ github.event.schedule || github.event_name }}"
+run-name: "MA Watchdog · ${{ github.event_name }}"
 
 on:
-  schedule:
-    # Ana kosular hafta ici 11:00-18:00; watchdog her birinden 12 dakika sonra kontrol eder.
-    - cron: "12 11-18 * * 1-5"
-      timezone: "Europe/Istanbul"
-    # Kapanis sonrasi hafta ici 19:30 taramasini 19:42'de kontrol et.
-    - cron: "42 19 * * 1-5"
-      timezone: "Europe/Istanbul"
   workflow_dispatch:
 
 permissions:
@@ -17,14 +10,14 @@ permissions:
 
 concurrency:
   group: ma-market-scan-watchdog
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   watchdog:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Son MA taramasini kontrol et ve gerekiyorsa yeniden baslat
+      - name: Manuel MA watchdog testi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -33,29 +26,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          cutoff="$(date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"
-          existing_count="$(
-            gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=30" |
-              jq --arg cutoff "${cutoff}" '
-                [.workflow_runs[]
-                  | select(.created_at >= $cutoff)
-                  | select(
-                      .status == "queued"
-                      or .status == "in_progress"
-                      or .conclusion == "success"
-                    )]
-                | length
-              '
-          )"
+          dow="$(TZ=Europe/Istanbul date +%u)"
+          hour="$(TZ=Europe/Istanbul date +%H)"
+          minute="$(TZ=Europe/Istanbul date +%M)"
+          now_min=$((10#${hour} * 60 + 10#${minute}))
 
-          echo "Son 20 dakikadaki aktif/basarili MA taramasi: ${existing_count}"
-
-          if [ "${existing_count}" -gt 0 ]; then
-            echo "Ana MA taramasi mevcut; watchdog yeni kosu baslatmadi."
+          if [ "${dow}" -gt 5 ]; then
+            echo "Hafta sonu; MA taramasi baslatilmadi."
             exit 0
           fi
 
-          echo "Beklenen MA taramasi bulunamadi; varsayilan tum BIST taramasi baslatiliyor."
-          gh workflow run "${TARGET_WORKFLOW}" \
-            --repo "${REPOSITORY}" \
-            --ref main
+          # Manuel watchdog sadece normal MA pencerelerinde calisabilir.
+          if ! { (( now_min >= 660 && now_min <= 1139 )) || (( now_min >= 1170 && now_min <= 1200 )); }; then
+            echo "MA tarama penceresi disinda; kurtarma engellendi: $(TZ=Europe/Istanbul date '+%F %T')"
+            exit 0
+          fi
+
+          active_count="$(
+            gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=40" |
+              jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress")] | length'
+          )"
+
+          if [ "${active_count}" -gt 0 ]; then
+            echo "Ana MA taramasi zaten aktif; yeni kosu yok."
+            exit 0
+          fi
+
+          echo "Manuel watchdog ana MA taramasini baslatiyor."
+          gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
