@@ -185,6 +185,7 @@ Altyapı iş akışları:
 - **BIST Veri Güncelleyici (Endeks Listeleri)**
 
 Telegram once okunabilir PNG tablo gorseli gonderir; gorsel uretilemezse eski metin tablosuna duser. Tam CSV/HTML dosyalari yine belge olarak eklenir.
+Forum konusu icin `TELEGRAM_MESSAGE_THREAD_ID` secret'i verildiginde bildirimler ilgili Telegram konu basligina gider.
 Tum BIST workflow'unda birden fazla zaman dilimi secilirse artifact'ler
 `tum-bist-ma-trend-tepki-<timeframe>-<run_id>` olarak ayri gelir; ornegin
 `5m`, `1h` ve `1d` ayni kosuda uc ayri rapor halinde uretilir.

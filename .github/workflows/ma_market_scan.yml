@@ -275,6 +275,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
         run: python -m scanner.ma_notify --summary reports/final/${{ matrix.timeframe }}/market_summary.csv --watchlist reports/final/${{ matrix.timeframe }}/ma_watchlist.csv --label "Tum BIST MA Trend ve Tepki - ${{ matrix.timeframe }}" --top 25
         continue-on-error: true
       - uses: actions/upload-artifact@v4
