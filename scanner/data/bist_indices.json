@@ -4,7 +4,7 @@
     "XBANK": {
       "count": 12,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:23.706412",
+      "fetched_at": "2026-09-14T08:40:51.665110",
       "index": "XBANK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -26,7 +26,7 @@
     "XELKT": {
       "count": 42,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:27.225541",
+      "fetched_at": "2026-09-14T08:40:55.184820",
       "index": "XELKT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -78,7 +78,7 @@
     "XGIDA": {
       "count": 48,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:24.712299",
+      "fetched_at": "2026-09-14T08:40:52.670744",
       "index": "XGIDA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -136,7 +136,7 @@
     "XHOLD": {
       "count": 49,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:25.717871",
+      "fetched_at": "2026-09-14T08:40:53.676628",
       "index": "XHOLD",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -195,7 +195,7 @@
     "XILTM": {
       "count": 2,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:27.728156",
+      "fetched_at": "2026-09-14T08:40:55.687509",
       "index": "XILTM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -207,7 +207,7 @@
     "XINSA": {
       "count": 14,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:28.231036",
+      "fetched_at": "2026-09-14T08:40:56.190291",
       "index": "XINSA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -231,7 +231,7 @@
     "XKMYA": {
       "count": 49,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:25.215213",
+      "fetched_at": "2026-09-14T08:40:53.173760",
       "index": "XKMYA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -290,7 +290,7 @@
     "XMADN": {
       "count": 7,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:28.733824",
+      "fetched_at": "2026-09-14T08:40:56.693178",
       "index": "XMADN",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -307,7 +307,7 @@
     "XMANA": {
       "count": 32,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:29.236600",
+      "fetched_at": "2026-09-14T08:40:57.196046",
       "index": "XMANA",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -349,7 +349,7 @@
     "XSGRT": {
       "count": 7,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:26.220560",
+      "fetched_at": "2026-09-14T08:40:54.179409",
       "index": "XSGRT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -366,7 +366,7 @@
     "XSPOR": {
       "count": 4,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:29.738968",
+      "fetched_at": "2026-09-14T08:40:57.698809",
       "index": "XSPOR",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -378,16 +378,15 @@
       "verified": true
     },
     "XTEKS": {
-      "count": 20,
+      "count": 19,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:30.241544",
+      "fetched_at": "2026-09-14T08:40:58.201555",
       "index": "XTEKS",
       "source": "borsapy.component_symbols",
       "symbols": [
         "ARTMS",
         "BLCYT",
         "BOSSA",
-        "DAGI",
         "DERIM",
         "DESA",
         "ENSRI",
@@ -410,7 +409,7 @@
     "XTRZM": {
       "count": 14,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:26.723092",
+      "fetched_at": "2026-09-14T08:40:54.682051",
       "index": "XTRZM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -434,7 +433,7 @@
     "XU030": {
       "count": 30,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:21.694094",
+      "fetched_at": "2026-09-14T08:40:49.652207",
       "index": "XU030",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -474,7 +473,7 @@
     "XU050": {
       "count": 50,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:22.197197",
+      "fetched_at": "2026-09-14T08:40:50.155302",
       "index": "XU050",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -534,7 +533,7 @@
     "XU100": {
       "count": 100,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:22.700029",
+      "fetched_at": "2026-09-14T08:40:50.658437",
       "index": "XU100",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -644,7 +643,7 @@
     "XULAS": {
       "count": 12,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:30.744176",
+      "fetched_at": "2026-09-14T08:40:58.704258",
       "index": "XULAS",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -666,7 +665,7 @@
     "XUMAL": {
       "count": 152,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:31.750045",
+      "fetched_at": "2026-09-14T08:40:59.710511",
       "index": "XUMAL",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -826,9 +825,9 @@
       "verified": true
     },
     "XUSIN": {
-      "count": 250,
+      "count": 248,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:31.247302",
+      "fetched_at": "2026-09-14T08:40:59.207548",
       "index": "XUSIN",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -845,7 +844,6 @@
         "ALKA",
         "ALKIM",
         "ALKLC",
-        "ALVES",
         "ANGEN",
         "ARCLK",
         "ARMGD",
@@ -892,7 +890,6 @@
         "CMBTN",
         "CUSAN",
         "CVKMD",
-        "DAGI",
         "DARDL",
         "DERIM",
         "DESA",
@@ -1088,7 +1085,7 @@
     "XUTEK": {
       "count": 43,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:24.209323",
+      "fetched_at": "2026-09-14T08:40:52.168010",
       "index": "XUTEK",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1139,9 +1136,9 @@
       "verified": true
     },
     "XUTUM": {
-      "count": 584,
+      "count": 583,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:23.203940",
+      "fetched_at": "2026-09-14T08:40:51.162393",
       "index": "XUTUM",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1185,7 +1182,6 @@
         "ALKIM",
         "ALKLC",
         "ALTNY",
-        "ALVES",
         "ANELE",
         "ANGEN",
         "ANHYT",
@@ -1735,7 +1731,7 @@
     "XYORT": {
       "count": 9,
       "failures": [],
-      "fetched_at": "2026-09-07T08:03:32.252475",
+      "fetched_at": "2026-09-14T08:41:00.213192",
       "index": "XYORT",
       "source": "borsapy.component_symbols",
       "symbols": [
@@ -1752,5 +1748,5 @@
       "verified": true
     }
   },
-  "updated_at": "2026-09-07T08:03:32.252724"
+  "updated_at": "2026-09-14T08:41:00.213484"
 }
