@@ -6,6 +6,7 @@ import pandas as pd
 
 from scanner.ma_data import (
     MarketDataProvider,
+    TIMEFRAMES,
     _yfinance_symbol,
     fingerprint_frame,
     resample_ohlcv,
@@ -29,18 +30,24 @@ class DataLayerTests(unittest.TestCase):
             index=index,
         )
 
+    def test_supported_timeframes_are_core_four(self):
+        self.assertEqual(TIMEFRAMES, ("1h", "4h", "1d", "1wk"))
+
     def test_four_hour_bars_anchor_to_bist_open(self):
         result = resample_ohlcv(self.frame, "4h")
         self.assertTrue(set(result.index.hour).issubset({10, 14}))
         self.assertEqual(len(result), 4)
 
-    def test_weekly_and_monthly_resampling_preserve_ohlc(self):
+    def test_weekly_resampling_preserves_ohlc(self):
         weekly = resample_ohlcv(self.frame, "1wk")
-        monthly = resample_ohlcv(self.frame, "1mo")
         self.assertEqual(len(weekly), 1)
-        self.assertEqual(len(monthly), 1)
         self.assertEqual(weekly.iloc[0]["Open"], self.frame.iloc[0]["Open"])
         self.assertEqual(weekly.iloc[0]["Close"], self.frame.iloc[-1]["Close"])
+
+    def test_retired_timeframe_is_rejected(self):
+        provider = MarketDataProvider(source="auto", snapshot=False)
+        with self.assertRaisesRegex(ValueError, "unsupported timeframe"):
+            provider.fetch("ASELS", "15m", market="BIST")
 
     def test_fingerprint_is_deterministic_and_data_sensitive(self):
         first = fingerprint_frame(self.frame)
