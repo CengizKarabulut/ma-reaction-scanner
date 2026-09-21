@@ -11,9 +11,9 @@ on:
         required: true
         default: all
         type: choice
-        options: [daily, 1d, all, intraday, swing, custom]
+        options: [all, 1h, 4h, 1d, 1wk, custom]
       custom_timeframes:
-        description: "custom için: 5m,15m,30m,1h,4h,1d,1wk,1mo"
+        description: "custom için yalnızca: 1h,4h,1d,1wk"
         required: false
         default: ""
       ma_types:
@@ -134,11 +134,11 @@ jobs:
           import os
 
           presets = {
-              "all": ["5m", "15m", "30m", "1h", "4h", "1d", "1wk", "1mo"],
-              "intraday": ["5m", "15m", "30m", "1h", "4h"],
-              "swing": ["1d", "1wk", "1mo"],
-              "daily": ["1d"],
+              "all": ["1h", "4h", "1d", "1wk"],
+              "1h": ["1h"],
+              "4h": ["4h"],
               "1d": ["1d"],
+              "1wk": ["1wk"],
           }
           allowed = set(presets["all"])
           preset = (os.environ.get("PRESET") or "all").strip().lower()
@@ -155,7 +155,10 @@ jobs:
           unique = []
           for value in values:
               if value not in allowed:
-                  raise SystemExit(f"Bilinmeyen zaman dilimi: {value}")
+                  raise SystemExit(
+                      f"Bilinmeyen zaman dilimi: {value}. "
+                      "Yalnizca 1h,4h,1d,1wk desteklenir."
+                  )
               if value not in unique:
                   unique.append(value)
           if not unique:
