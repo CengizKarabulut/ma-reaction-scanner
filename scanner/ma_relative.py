@@ -64,9 +64,9 @@ def to_relative(
 class BenchmarkCache:
     """Fetch each benchmark series once per timeframe, not once per symbol.
 
-    A full-BIST scan touches hundreds of symbols across eight timeframes.
-    Without memoisation the benchmark would be downloaded once per symbol,
-    which multiplies provider load and run time by the size of the universe.
+    A full-BIST scan touches hundreds of symbols across the four supported
+    timeframes. Without memoisation the benchmark would be downloaded once per
+    symbol, which multiplies provider load and run time by the universe size.
     """
 
     def __init__(
