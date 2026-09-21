@@ -28,11 +28,13 @@ except ImportError:  # pragma: no cover - environment dependent
     yf = None
 
 
-TIMEFRAMES: tuple[str, ...] = ("5m", "15m", "30m", "1h", "4h", "1d", "1wk", "1mo")
-DIRECT_INTERVALS = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "1d": "1d"}
-BASE_INTERVAL = {"4h": "1h", "1wk": "1d", "1mo": "1d"}
-YF_PERIODS = {"5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d", "1d": "10y"}
-BP_PERIODS = {"5m": "5g", "15m": "5g", "30m": "5g", "1h": "1ay", "4h": "3ay"}
+# Project-wide supported analysis timeframes. 4h and 1wk are deliberately
+# derived from 1h and 1d so providers only need two direct intervals.
+TIMEFRAMES: tuple[str, ...] = ("1h", "4h", "1d", "1wk")
+DIRECT_INTERVALS = {"1h": "1h", "1d": "1d"}
+BASE_INTERVAL = {"4h": "1h", "1wk": "1d"}
+YF_PERIODS = {"1h": "730d", "1d": "10y"}
+BP_PERIODS = {"1h": "1ay"}
 
 
 def _safe_name(value: str) -> str:
@@ -83,7 +85,7 @@ def resample_ohlcv(
     *,
     allow_non_positive: bool = False,
 ) -> pd.DataFrame:
-    """Resample with BIST-aware 4h bins and completed week/month labels."""
+    """Resample with BIST-aware 4h bins and completed weekly labels."""
 
     df = normalize_ohlcv(frame, allow_non_positive=allow_non_positive)
     aggregations = {
@@ -94,15 +96,13 @@ def resample_ohlcv(
         "Volume": "sum",
     }
     if timeframe == "4h":
-        # BIST continuous session starts at 10:00 Europe/Istanbul.  Anchoring to
+        # BIST continuous session starts at 10:00 Europe/Istanbul. Anchoring to
         # 10:00 prevents arbitrary midnight-aligned 4h candles.
         sampled = df.resample(
             "4h", origin="start_day", offset="10h", label="left", closed="left"
         ).agg(aggregations)
     elif timeframe == "1wk":
         sampled = df.resample("W-FRI", label="right", closed="right").agg(aggregations)
-    elif timeframe == "1mo":
-        sampled = df.resample("ME", label="right", closed="right").agg(aggregations)
     else:
         raise ValueError(f"unsupported derived timeframe: {timeframe}")
     return normalize_ohlcv(
@@ -235,7 +235,9 @@ class MarketDataProvider:
         market: str | None = None,
     ) -> FetchResult:
         if timeframe not in TIMEFRAMES:
-            raise ValueError(f"unsupported timeframe: {timeframe}")
+            raise ValueError(
+                f"unsupported timeframe: {timeframe}; supported: {', '.join(TIMEFRAMES)}"
+            )
         cached = self._latest_cache(ticker, timeframe)
         if prefer_cache and cached is not None:
             return self._read_cache(cached, ticker, timeframe)
