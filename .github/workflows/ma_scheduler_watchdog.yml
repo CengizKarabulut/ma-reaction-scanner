@@ -1,8 +1,15 @@
 name: MA Market Scan Watchdog
-run-name: "MA Watchdog · ${{ github.event_name }}"
+run-name: "MA Watchdog · ${{ inputs.timeframe || github.event_name }}"
 
 on:
   workflow_dispatch:
+    inputs:
+      timeframe:
+        description: "Manuel watchdog zaman dilimi"
+        required: true
+        default: "1h"
+        type: choice
+        options: [1h, 4h, 1d, 1wk]
 
 permissions:
   actions: write
@@ -22,25 +29,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           TARGET_WORKFLOW: ma_market_scan.yml
+          TIMEFRAME: ${{ inputs.timeframe }}
         shell: bash
         run: |
           set -euo pipefail
 
-          dow="$(TZ=Europe/Istanbul date +%u)"
-          hour="$(TZ=Europe/Istanbul date +%H)"
-          minute="$(TZ=Europe/Istanbul date +%M)"
-          now_min=$((10#${hour} * 60 + 10#${minute}))
-
-          if [ "${dow}" -gt 5 ]; then
-            echo "Hafta sonu; MA taramasi baslatilmadi."
-            exit 0
-          fi
-
-          # Manuel watchdog sadece normal MA pencerelerinde calisabilir.
-          if ! { (( now_min >= 660 && now_min <= 1139 )) || (( now_min >= 1170 && now_min <= 1200 )); }; then
-            echo "MA tarama penceresi disinda; kurtarma engellendi: $(TZ=Europe/Istanbul date '+%F %T')"
-            exit 0
-          fi
+          case "${TIMEFRAME}" in
+            1h|4h|1d|1wk) ;;
+            *)
+              echo "Desteklenmeyen zaman dilimi: ${TIMEFRAME}"
+              exit 1
+              ;;
+          esac
 
           active_count="$(
             gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=40" |
@@ -52,5 +52,8 @@ jobs:
             exit 0
           fi
 
-          echo "Manuel watchdog ana MA taramasini baslatiyor."
-          gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
+          echo "Manuel watchdog ${TIMEFRAME} MA taramasini baslatiyor."
+          gh workflow run "${TARGET_WORKFLOW}" \
+            --repo "${REPOSITORY}" \
+            --ref main \
+            -f timeframe_preset="${TIMEFRAME}"
