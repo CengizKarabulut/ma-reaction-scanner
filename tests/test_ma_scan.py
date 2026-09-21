@@ -26,11 +26,25 @@ from scanner.ma_scan import (
 
 
 class ScannerInputTests(unittest.TestCase):
-    def test_all_timeframe_preset_contains_eight_options(self):
+    def test_all_timeframe_preset_contains_only_core_options(self):
+        self.assertEqual(TIMEFRAMES, ("1h", "4h", "1d", "1wk"))
         self.assertEqual(parse_timeframes("all"), TIMEFRAMES)
 
-    def test_custom_timeframes_preserve_user_selection(self):
-        self.assertEqual(parse_timeframes("15m,1h,4h,1d"), ("15m", "1h", "4h", "1d"))
+    def test_custom_timeframes_preserve_core_user_selection(self):
+        self.assertEqual(
+            parse_timeframes("1h,4h,1d,1wk"),
+            ("1h", "4h", "1d", "1wk"),
+        )
+
+    def test_retired_timeframes_are_rejected(self):
+        for value in ("5m", "15m", "30m", "2h", "1mo"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_timeframes(value)
+
+    def test_retired_presets_are_rejected(self):
+        for value in ("intraday", "swing"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_timeframes(value)
 
     def test_daily_timeframe_preset_is_single_daily_bar(self):
         self.assertEqual(parse_timeframes("daily"), ("1d",))
@@ -412,11 +426,12 @@ class ScannerInputTests(unittest.TestCase):
         self.assertEqual(table.loc[0, "Temas"], 18)
         self.assertEqual(table.loc[0, "Taraf Koruma %"], 81.5)
         self.assertEqual(table.loc[0, "Güncel Rol"], "Aktif")
+
     def test_single_stock_table_marks_requested_combination_without_history(self):
         detail = pd.DataFrame(
             [
                 {
-                    "timeframe": "1mo", "ma_type": "SMA", "period": 55,
+                    "timeframe": "1wk", "ma_type": "SMA", "period": 55,
                     "ma": "SMA55", "side": "Destek", "active_side": True,
                     "compatibility": "Uyumlu", "compatibility_score": 70.0,
                     "touches": 14, "positive_periods": 3, "edge_r": 0.3,
@@ -428,7 +443,7 @@ class ScannerInputTests(unittest.TestCase):
 
         table = build_single_stock_table(
             detail,
-            timeframes=["1mo"],
+            timeframes=["1wk"],
             ma_types=["SMA"],
             periods=[55, 377],
         )
@@ -437,5 +452,7 @@ class ScannerInputTests(unittest.TestCase):
         self.assertEqual(missing["Taraf"], "Veri yok")
         self.assertEqual(missing["Uyum"], "Yetersiz veri")
         self.assertEqual(missing["Filtre Nedeni"], "Seçilen MA için yeterli geçmiş mum yok")
+
+
 if __name__ == "__main__":
     unittest.main()

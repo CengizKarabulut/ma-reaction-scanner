@@ -1,14 +1,18 @@
 name: MA Recovery Heartbeat
-run-name: "MA Recovery · ${{ github.event.schedule || github.event_name }}"
+run-name: "MA Recovery · ${{ inputs.timeframe || github.event_name }}"
 
+# Otomatik taramalar ma_market_scan.yml icindeki kesin slotlardan calisir.
+# Bu dosya artik yalnizca gerektiğinde manuel kurtarma icindir; otomatik ek
+# tarama uretmez.
 on:
-  schedule:
-    - cron: "*/5 11-19 * * 1-5"
-      timezone: "Europe/Istanbul"
-  push:
-    paths:
-      - ".github/heartbeat-bootstrap"
   workflow_dispatch:
+    inputs:
+      timeframe:
+        description: "Manuel kurtarma zaman dilimi"
+        required: true
+        default: "1h"
+        type: choice
+        options: [1h, 4h, 1d, 1wk]
 
 permissions:
   actions: write
@@ -23,31 +27,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Recover missing hourly MA scan
+      - name: Manuel MA kurtarma taramasini baslat
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           TARGET_WORKFLOW: ma_market_scan.yml
+          TIMEFRAME: ${{ inputs.timeframe }}
         shell: bash
         run: |
           set -euo pipefail
 
-          dow="$(TZ=Europe/Istanbul date +%u)"
-          hour="$(TZ=Europe/Istanbul date +%H)"
-          minute="$(TZ=Europe/Istanbul date +%M)"
-          now_min=$((10#${hour} * 60 + 10#${minute}))
-          echo "TR saati: $(TZ=Europe/Istanbul date '+%F %T %Z')"
-
-          if [ "${dow}" -gt 5 ]; then
-            echo "Hafta sonu; işlem yok."
-            exit 0
-          fi
-
-          # Gecikmis heartbeat gece uyansa bile hicbir MA kosusu baslatamaz.
-          if ! { (( now_min >= 660 && now_min <= 1139 )) || (( now_min >= 1170 && now_min <= 1199 )); }; then
-            echo "MA otomatik tarama penceresi disinda; kurtarma yok."
-            exit 0
-          fi
+          case "${TIMEFRAME}" in
+            1h|4h|1d|1wk) ;;
+            *)
+              echo "Desteklenmeyen zaman dilimi: ${TIMEFRAME}"
+              exit 1
+              ;;
+          esac
 
           active_count="$(
             gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=50" |
@@ -55,38 +51,12 @@ jobs:
           )"
 
           if [ "${active_count}" -gt 0 ]; then
-            echo "Ana MA taramasi halen aktif (${active_count}); ust uste yeni 160-job kosusu baslatilmiyor."
+            echo "Ana MA taramasi halen aktif (${active_count}); manuel kurtarma baslatilmadi."
             exit 0
           fi
 
-          if (( now_min >= 660 && now_min <= 1139 )); then
-            slot_start="$(TZ=Europe/Istanbul date +%Y-%m-%dT${hour}:00:00%:z)"
-            slot_start_utc="$(date -u -d "${slot_start}" +%Y-%m-%dT%H:%M:%SZ)"
-            slot_count="$(
-              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=50" |
-                jq --arg cutoff "${slot_start_utc}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
-            )"
-            if [ "${slot_count}" -eq 0 ]; then
-              echo "Bu saat diliminde MA taraması yok; kurtarma taraması başlatılıyor."
-              gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
-            else
-              echo "Bu saat diliminde MA taraması mevcut; yeni koşu yok."
-            fi
-            exit 0
-          fi
-
-          # Kapanis sonrasi hedef 19:30. Ilk uygun heartbeat 19:30'dan itibaren baslatabilir.
-          if (( now_min >= 1170 && now_min <= 1199 )); then
-            close_start="$(TZ=Europe/Istanbul date +%Y-%m-%dT19:30:00%:z)"
-            close_start_utc="$(date -u -d "${close_start}" +%Y-%m-%dT%H:%M:%SZ)"
-            close_count="$(
-              gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=50" |
-                jq --arg cutoff "${close_start_utc}" '[.workflow_runs[] | select(.created_at >= $cutoff) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length'
-            )"
-            if [ "${close_count}" -eq 0 ]; then
-              echo "19:30 kapanış sonrası MA taraması bulunamadı; kurtarma başlatılıyor."
-              gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
-            else
-              echo "Kapanış sonrası MA koşusu mevcut."
-            fi
-          fi
+          echo "${TIMEFRAME} manuel kurtarma taramasi baslatiliyor."
+          gh workflow run "${TARGET_WORKFLOW}" \
+            --repo "${REPOSITORY}" \
+            --ref main \
+            -f timeframe_preset="${TIMEFRAME}"

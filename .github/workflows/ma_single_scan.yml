@@ -8,7 +8,7 @@ on:
         required: true
         default: ASELS
       timeframes:
-        description: "daily/1d/all veya CSV: 5m,15m,30m,1h,4h,1d,1wk,1mo"
+        description: "all veya CSV: 1h,4h,1d,1wk"
         required: true
         default: 1d
       ma_types:
@@ -126,13 +126,31 @@ jobs:
         shell: bash
         env:
           LEVEL_CONFIG_JSON: ${{ inputs.level_config_json || '{}' }}
+          REQUESTED_TIMEFRAMES: ${{ inputs.timeframes }}
         run: |
+          set -euo pipefail
+          timeframes="${REQUESTED_TIMEFRAMES,,}"
+          if [ "$timeframes" = "all" ]; then
+            timeframes="1h,4h,1d,1wk"
+          fi
+          IFS=',' read -ra requested <<< "$timeframes"
+          for raw in "${requested[@]}"; do
+            value="$(echo "$raw" | xargs)"
+            case "$value" in
+              1h|4h|1d|1wk) ;;
+              *)
+                echo "Desteklenmeyen zaman dilimi: $value. Yalnizca 1h,4h,1d,1wk desteklenir."
+                exit 2
+                ;;
+            esac
+          done
+
           python -m scanner.ma_scan \
             --universe custom \
             --asset-class stock \
             --market BIST \
             --symbol "${{ inputs.symbol }}" \
-            --timeframes "${{ inputs.timeframes }}" \
+            --timeframes "$timeframes" \
             --ma-types "${{ inputs.ma_types }}" \
             --periods "${{ inputs.periods }}" \
             --trend-slope-bars "${{ inputs.trend_slope_bars }}" \
