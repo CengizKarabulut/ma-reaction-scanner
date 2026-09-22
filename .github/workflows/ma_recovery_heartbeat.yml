@@ -1,18 +1,15 @@
 name: MA Recovery Heartbeat
-run-name: "MA Recovery · ${{ inputs.timeframe || github.event_name }}"
+run-name: "MA Recovery Heartbeat"
 
-# Otomatik taramalar ma_market_scan.yml icindeki kesin slotlardan calisir.
-# Bu dosya artik yalnizca gerektiğinde manuel kurtarma icindir; otomatik ek
-# tarama uretmez.
 on:
   workflow_dispatch:
-    inputs:
-      timeframe:
-        description: "Manuel kurtarma zaman dilimi"
-        required: true
-        default: "1h"
-        type: choice
-        options: [1h, 4h, 1d, 1wk]
+  schedule:
+    # Zincir herhangi bir nedenle koparsa her is gunu 09:00 TR'de yeniden baslat.
+    - cron: "0 6 * * 1-5"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/ma_recovery_heartbeat.yml"
 
 permissions:
   actions: write
@@ -20,43 +17,91 @@ permissions:
 
 concurrency:
   group: ma-recovery-heartbeat
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
     steps:
-      - name: Manuel MA kurtarma taramasini baslat
+      - name: Eksik MA slotlarini izle ve tamamla
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           TARGET_WORKFLOW: ma_market_scan.yml
-          TIMEFRAME: ${{ inputs.timeframe }}
         shell: bash
         run: |
           set -euo pipefail
 
-          case "${TIMEFRAME}" in
-            1h|4h|1d|1wk) ;;
-            *)
-              echo "Desteklenmeyen zaman dilimi: ${TIMEFRAME}"
-              exit 1
-              ;;
-          esac
+          check_slots() {
+            while IFS='|' read -r slot_key timeframe schedule_expr slot_utc; do
+              [ -n "${slot_key}" ] || continue
 
-          active_count="$(
-            gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=50" |
-              jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress")] | length'
-          )"
+              runs_json="$(gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=100")"
+              covered="$(
+                printf '%s' "${runs_json}" | jq --arg since "${slot_utc}" --arg expr "MA Tarama · ${schedule_expr}" --arg tf "MA Tarama · ${timeframe}" '
+                  [.workflow_runs[] |
+                    select(.created_at >= $since) |
+                    select(.display_title == $expr or .display_title == $tf)
+                  ] | length'
+              )"
 
-          if [ "${active_count}" -gt 0 ]; then
-            echo "Ana MA taramasi halen aktif (${active_count}); manuel kurtarma baslatilmadi."
-            exit 0
-          fi
+              if [ "${covered}" -gt 0 ]; then
+                echo "${slot_key} (${timeframe}) zaten kapsanmis."
+                continue
+              fi
 
-          echo "${TIMEFRAME} manuel kurtarma taramasi baslatiliyor."
-          gh workflow run "${TARGET_WORKFLOW}" \
-            --repo "${REPOSITORY}" \
-            --ref main \
-            -f timeframe_preset="${TIMEFRAME}"
+              echo "Eksik slot bulundu: ${slot_key} (${timeframe}); kurtarma taramasi baslatiliyor."
+              gh workflow run "${TARGET_WORKFLOW}" \
+                --repo "${REPOSITORY}" \
+                --ref main \
+                -f timeframe_preset="${timeframe}"
+            done < <(python - <<'PY'
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+
+          tz = ZoneInfo("Europe/Istanbul")
+          now = datetime.now(tz)
+          if now.weekday() >= 5:
+              raise SystemExit(0)
+
+          slots = [
+              (10,20,"1h","20 7-15 * * 1-5"), (11,20,"1h","20 7-15 * * 1-5"),
+              (12,20,"1h","20 7-15 * * 1-5"), (13,20,"1h","20 7-15 * * 1-5"),
+              (14,20,"1h","20 7-15 * * 1-5"), (15,20,"1h","20 7-15 * * 1-5"),
+              (16,20,"1h","20 7-15 * * 1-5"), (17,20,"1h","20 7-15 * * 1-5"),
+              (17,40,"1h","40 14 * * 1-5"), (18,20,"1h","20 7-15 * * 1-5"),
+              (11,0,"4h","0 8,10 * * 1-5"), (13,0,"4h","0 8,10 * * 1-5"),
+              (14,30,"4h","30 11,13-15 * * 1-5"), (16,30,"4h","30 11,13-15 * * 1-5"),
+              (17,30,"4h","30 11,13-15 * * 1-5"), (18,30,"4h","30 11,13-15 * * 1-5"),
+              (10,45,"1d","45 7,9,11,13-15 * * 1-5"), (12,45,"1d","45 7,9,11,13-15 * * 1-5"),
+              (14,45,"1d","45 7,9,11,13-15 * * 1-5"), (16,45,"1d","45 7,9,11,13-15 * * 1-5"),
+              (17,45,"1d","45 7,9,11,13-15 * * 1-5"), (18,45,"1d","45 7,9,11,13-15 * * 1-5"),
+              (10,30,"1wk","30 7 * * 1-5"), (13,45,"1wk","45 10 * * 1-5"),
+              (16,0,"1wk","0 13 * * 1-5"), (17,25,"1wk","25 14 * * 1-5"),
+              (19,0,"1wk","0 16 * * 1-5"),
+          ]
+          grace = timedelta(minutes=20)
+          for hour, minute, tf, expr in slots:
+              due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+              age = now - due
+              if timedelta(0) <= age <= grace:
+                  due_utc = due.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
+                  print(f"{due.strftime('%Y-%m-%dT%H:%M')}|{tf}|{expr}|{due_utc}")
+          PY
+            )
+          }
+
+          end=$(( $(date +%s) + 3000 ))
+          while [ "$(date +%s)" -lt "${end}" ]; do
+            check_slots || true
+            sleep 60
+          done
+
+      - name: Heartbeat zincirini devam ettir
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh workflow run ma_recovery_heartbeat.yml --repo "${REPOSITORY}" --ref main
