@@ -4,7 +4,6 @@ run-name: "MA Recovery Heartbeat"
 on:
   workflow_dispatch:
   schedule:
-    # Zincir herhangi bir nedenle koparsa her is gunu 09:00 TR'de yeniden baslat.
     - cron: "0 6 * * 1-5"
   push:
     branches: [main]
@@ -32,76 +31,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           check_slots() {
             while IFS='|' read -r slot_key timeframe schedule_expr slot_utc; do
               [ -n "${slot_key}" ] || continue
-
               runs_json="$(gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=100")"
-              covered="$(
-                printf '%s' "${runs_json}" | jq --arg since "${slot_utc}" --arg expr "MA Tarama · ${schedule_expr}" --arg tf "MA Tarama · ${timeframe}" '
-                  [.workflow_runs[] |
-                    select(.created_at >= $since) |
-                    select(.display_title == $expr or .display_title == $tf)
-                  ] | length'
-              )"
-
-              if [ "${covered}" -gt 0 ]; then
-                echo "${slot_key} (${timeframe}) zaten kapsanmis."
-                continue
-              fi
-
-              echo "Eksik slot bulundu: ${slot_key} (${timeframe}); kurtarma taramasi baslatiliyor."
-              gh workflow run "${TARGET_WORKFLOW}" \
-                --repo "${REPOSITORY}" \
-                --ref main \
-                -f timeframe_preset="${timeframe}"
+              covered="$(printf '%s' "${runs_json}" | jq --arg since "${slot_utc}" --arg expr "MA Tarama · ${schedule_expr}" --arg tf "MA Tarama · ${timeframe}" '[.workflow_runs[] | select(.created_at >= $since) | select(.display_title == $expr or .display_title == $tf)] | length')"
+              if [ "${covered}" -gt 0 ]; then echo "${slot_key} zaten kapsanmis."; continue; fi
+              echo "Eksik slot: ${slot_key} (${timeframe}); kurtarma taramasi baslatiliyor."
+              gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main -f timeframe_preset="${timeframe}"
             done < <(python - <<'PY'
-          from datetime import datetime, timedelta
+          from datetime import datetime,timedelta
           from zoneinfo import ZoneInfo
-
-          tz = ZoneInfo("Europe/Istanbul")
-          now = datetime.now(tz)
-          if now.weekday() >= 5:
-              raise SystemExit(0)
-
-          slots = [
-              (10,20,"1h","20 7-15 * * 1-5"), (11,20,"1h","20 7-15 * * 1-5"),
-              (12,20,"1h","20 7-15 * * 1-5"), (13,20,"1h","20 7-15 * * 1-5"),
-              (14,20,"1h","20 7-15 * * 1-5"), (15,20,"1h","20 7-15 * * 1-5"),
-              (16,20,"1h","20 7-15 * * 1-5"), (17,20,"1h","20 7-15 * * 1-5"),
-              (17,40,"1h","40 14 * * 1-5"), (18,20,"1h","20 7-15 * * 1-5"),
-              (11,0,"4h","0 8,10 * * 1-5"), (13,0,"4h","0 8,10 * * 1-5"),
-              (14,30,"4h","30 11,13-15 * * 1-5"), (16,30,"4h","30 11,13-15 * * 1-5"),
-              (17,30,"4h","30 11,13-15 * * 1-5"), (18,30,"4h","30 11,13-15 * * 1-5"),
-              (10,45,"1d","45 7,9,11,13-15 * * 1-5"), (12,45,"1d","45 7,9,11,13-15 * * 1-5"),
-              (14,45,"1d","45 7,9,11,13-15 * * 1-5"), (16,45,"1d","45 7,9,11,13-15 * * 1-5"),
-              (17,45,"1d","45 7,9,11,13-15 * * 1-5"), (18,45,"1d","45 7,9,11,13-15 * * 1-5"),
-              (10,30,"1wk","30 7 * * 1-5"), (13,45,"1wk","45 10 * * 1-5"),
-              (16,0,"1wk","0 13 * * 1-5"), (17,25,"1wk","25 14 * * 1-5"),
-              (19,0,"1wk","0 16 * * 1-5"),
-          ]
-          grace = timedelta(minutes=20)
-          for hour, minute, tf, expr in slots:
-              due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-              age = now - due
-              if timedelta(0) <= age <= grace:
-                  due_utc = due.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
-                  print(f"{due.strftime('%Y-%m-%dT%H:%M')}|{tf}|{expr}|{due_utc}")
+          tz=ZoneInfo('Europe/Istanbul'); now=datetime.now(tz)
+          if now.weekday()>=5: raise SystemExit(0)
+          slots=[(10,20,'1h','20 7-15 * * 1-5'),(11,20,'1h','20 7-15 * * 1-5'),(12,20,'1h','20 7-15 * * 1-5'),(13,20,'1h','20 7-15 * * 1-5'),(14,20,'1h','20 7-15 * * 1-5'),(15,20,'1h','20 7-15 * * 1-5'),(16,20,'1h','20 7-15 * * 1-5'),(17,20,'1h','20 7-15 * * 1-5'),(17,40,'1h','40 14 * * 1-5'),(18,20,'1h','20 7-15 * * 1-5'),(11,0,'4h','0 8,10 * * 1-5'),(13,0,'4h','0 8,10 * * 1-5'),(14,30,'4h','30 11,13-15 * * 1-5'),(16,30,'4h','30 11,13-15 * * 1-5'),(17,30,'4h','30 11,13-15 * * 1-5'),(18,30,'4h','30 11,13-15 * * 1-5'),(10,45,'1d','45 7,9,11,13-15 * * 1-5'),(12,45,'1d','45 7,9,11,13-15 * * 1-5'),(14,45,'1d','45 7,9,11,13-15 * * 1-5'),(16,45,'1d','45 7,9,11,13-15 * * 1-5'),(17,45,'1d','45 7,9,11,13-15 * * 1-5'),(18,45,'1d','45 7,9,11,13-15 * * 1-5'),(10,30,'1wk','30 7 * * 1-5'),(13,45,'1wk','45 10 * * 1-5'),(16,0,'1wk','0 13 * * 1-5'),(17,25,'1wk','25 14 * * 1-5'),(19,0,'1wk','0 16 * * 1-5')]
+          grace=timedelta(minutes=20)
+          for h,m,tf,e in slots:
+            due=now.replace(hour=h,minute=m,second=0,microsecond=0); age=now-due
+            if timedelta(0)<=age<=grace:
+              u=due.astimezone(ZoneInfo('UTC')).isoformat().replace('+00:00','Z'); print(f"{due.strftime('%Y-%m-%dT%H:%M')}|{tf}|{e}|{u}")
           PY
             )
           }
-
           end=$(( $(date +%s) + 3000 ))
-          while [ "$(date +%s)" -lt "${end}" ]; do
-            check_slots || true
-            sleep 60
-          done
-
+          while [ "$(date +%s)" -lt "${end}" ]; do check_slots || true; sleep 60; done
       - name: Heartbeat zincirini devam ettir
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-        run: |
-          gh workflow run ma_recovery_heartbeat.yml --repo "${REPOSITORY}" --ref main
+        run: gh workflow run ma_recovery_heartbeat.yml --repo "${REPOSITORY}" --ref main
