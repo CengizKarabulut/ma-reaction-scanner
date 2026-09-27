@@ -44,12 +44,12 @@ jobs:
             while IFS='|' read -r slot_key timeframe schedule_expr slot_utc; do
               [ -n "${slot_key}" ] || continue
               runs_json="$(gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=100")"
-              covered="$(printf '%s' "${runs_json}" | jq --arg since "${slot_utc}" --arg expr "MA Tarama · ${schedule_expr}" --arg tf "MA Tarama · ${timeframe}" '[.workflow_runs[] | select(.created_at >= $since) | select(.display_title == $expr or .display_title == $tf)] | length')"
+              covered="$(printf '%s' "${runs_json}" | jq --arg since "${slot_utc}" --arg expr "MA Tarama · ${schedule_expr}" --arg tf "MA Tarama · ${timeframe}" '[.workflow_runs[] | select(.created_at >= $since) | select(.display_title == $expr or .display_title == $tf) | select(.status == "queued" or .status == "in_progress" or .conclusion == "success")] | length')"
               if [ "${covered}" -gt 0 ]; then
-                echo "${slot_key} zaten kapsanmis."
+                echo "${slot_key} zaten basarili/aktif bir kosuyla kapsanmis."
                 continue
               fi
-              echo "Eksik slot: ${slot_key} (${timeframe}); kurtarma taramasi baslatiliyor."
+              echo "Eksik veya basarisiz slot: ${slot_key} (${timeframe}); kurtarma taramasi baslatiliyor."
               gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main -f timeframe_preset="${timeframe}"
             done < <(python - <<'PY'
           from datetime import datetime, timedelta
