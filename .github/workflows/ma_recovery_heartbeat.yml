@@ -4,7 +4,8 @@ run-name: "MA Recovery Heartbeat"
 on:
   workflow_dispatch:
   schedule:
-    # Zincir koparsa her iş günü 09:00 Türkiye saatinde yeniden başlat.
+    # Acil bootstrap: self-dispatch zinciri herhangi bir nedenle koparsa
+    # her is gunu 09:00 Türkiye saatinde yeniden baslatmayi dener.
     - cron: "0 6 * * 1-5"
   push:
     branches: [main]
@@ -33,14 +34,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          day="$(TZ=Europe/Istanbul date +%u)"
-          hhmm="$(TZ=Europe/Istanbul date +%H%M)"
-          if [ "${day}" -gt 5 ] || [ "${hhmm}" -lt 0900 ] || [ "${hhmm}" -gt 1925 ]; then
-            echo "Türkiye saati ile piyasa izleme penceresi disinda; heartbeat tarama yapmadan sonlanacak."
-            exit 0
-          fi
-
           check_slots() {
+            local day hhmm
+            day="$(TZ=Europe/Istanbul date +%u)"
+            hhmm="$(TZ=Europe/Istanbul date +%H%M)"
+
+            # Recovery zinciri 7/24 yasamaya devam eder; piyasa penceresi
+            # disinda tarama baslatmaz, sadece bir sonraki devri bekler.
+            if [ "${day}" -gt 5 ] || [ "${hhmm}" -lt 0900 ] || [ "${hhmm}" -gt 1925 ]; then
+              echo "TR gun=${day} saat=${hhmm}: piyasa izleme penceresi disinda; zincir korunuyor."
+              return 0
+            fi
+
             while IFS='|' read -r slot_key timeframe schedule_expr slot_utc; do
               [ -n "${slot_key}" ] || continue
               runs_json="$(gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=100")"
@@ -91,13 +96,16 @@ jobs:
             )
           }
 
+          # Yaklasik 50 dakika boyunca dakikada bir kontrol et. Piyasa kapali
+          # olsa bile kosu hemen sonlanmaz; self-dispatch zinciri gece boyunca
+          # yasamaya devam eder ve ertesi sabah cron'a bagimli kalmaz.
           end=$(( $(date +%s) + 3000 ))
           while [ "$(date +%s)" -lt "${end}" ]; do
             check_slots || true
             sleep 60
           done
 
-      - name: Heartbeat zincirini devam ettir
+      - name: Heartbeat zincirini 7/24 devam ettir
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -105,11 +113,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          day="$(TZ=Europe/Istanbul date +%u)"
-          hhmm="$(TZ=Europe/Istanbul date +%H%M)"
-          if [ "${day}" -le 5 ] && [ "${hhmm}" -ge 0900 ] && [ "${hhmm}" -le 1925 ]; then
-            echo "Piyasa izleme penceresi aktif; heartbeat zinciri devam ediyor."
-            gh workflow run ma_recovery_heartbeat.yml --repo "${REPOSITORY}" --ref main
-          else
-            echo "Piyasa izleme penceresi kapali; zincir durduruldu. Bir sonraki is gunu 09:00 cron'u yeniden baslatacak."
-          fi
+          echo "MA recovery heartbeat devrediliyor; cron yalnızca acil bootstrap yedegi."
+          gh workflow run ma_recovery_heartbeat.yml --repo "${REPOSITORY}" --ref main
