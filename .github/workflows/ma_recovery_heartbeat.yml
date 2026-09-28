@@ -82,10 +82,10 @@ jobs:
               (19,0,"1wk","0 16 * * 1-5"),
           ]
 
-          # Ana GitHub cron'una birkaç dakika öncelik ver. Yalnızca cron gelmezse
-          # heartbeat 6-25 dakika aralığında eksik slotu tamamlar.
+          # Ana cron'a 6 dakika öncelik ver; zincir bir süre kesilirse aynı gün
+          # içindeki son 90 dakikalık slotları da geriye dönük tamamlayabilsin.
           min_age = timedelta(minutes=6)
-          max_age = timedelta(minutes=25)
+          max_age = timedelta(minutes=90)
           for hour, minute, timeframe, expression in slots:
               due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
               age = now - due
