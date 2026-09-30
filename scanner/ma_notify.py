@@ -35,6 +35,21 @@ _FOOTER = [
 ]
 
 
+def _telegram_request_data(chat_id: str, **fields: str) -> dict[str, str]:
+    """Build Telegram payload fields, including forum topic routing when configured."""
+
+    data = {"chat_id": chat_id, **fields}
+    thread_id = (
+        os.environ.get("TELEGRAM_MESSAGE_THREAD_ID")
+        or os.environ.get("TELEGRAM_THREAD_ID")
+        or os.environ.get("TELEGRAM_TOPIC_ID")
+        or ""
+    ).strip()
+    if thread_id:
+        data["message_thread_id"] = thread_id
+    return data
+
+
 def _fits(lines: list[str], additions: list[str]) -> bool:
     return len("\n".join([*lines, *additions, *_FOOTER])) <= _TELEGRAM_TEXT_BUDGET
 
@@ -611,11 +626,11 @@ def send(
             image_bytes, kind = image_payload
             response = client.post(
                 f"{base}/sendPhoto",
-                data={
-                    "chat_id": chat_id,
-                    "caption": _photo_caption(label, kind),
-                    "parse_mode": "HTML",
-                },
+                data=_telegram_request_data(
+                    chat_id,
+                    caption=_photo_caption(label, kind),
+                    parse_mode="HTML",
+                ),
                 files={"photo": ("ma_table.png", image_bytes, "image/png")},
             )
             try:
@@ -626,7 +641,7 @@ def send(
         if not photo_sent:
             response = client.post(
                 f"{base}/sendMessage",
-                data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+                data=_telegram_request_data(chat_id, text=message, parse_mode="HTML"),
             )
             response.raise_for_status()
         attachments = [message_path]
@@ -638,7 +653,7 @@ def send(
             with attachment.open("rb") as handle:
                 response = client.post(
                     f"{base}/sendDocument",
-                    data={"chat_id": chat_id, "caption": f"{label} — tam tablo"},
+                    data=_telegram_request_data(chat_id, caption=f"{label} — tam tablo"),
                     files={"document": (attachment.name, handle)},
                 )
             response.raise_for_status()

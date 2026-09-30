@@ -5,6 +5,7 @@ import pandas as pd
 
 from scanner.ma_notify import (
     _single_image_rows,
+    _telegram_request_data,
     build_notification_image,
     format_single_detail,
     format_summary,
@@ -13,6 +14,32 @@ from scanner.ma_notify import (
 
 
 class NotificationTests(unittest.TestCase):
+    def test_telegram_payload_includes_topic_when_configured(self):
+        with patch.dict(
+            "os.environ",
+            {"TELEGRAM_MESSAGE_THREAD_ID": "3982"},
+            clear=False,
+        ):
+            data = _telegram_request_data("-1003502567927", text="test")
+
+        self.assertEqual(data["chat_id"], "-1003502567927")
+        self.assertEqual(data["message_thread_id"], "3982")
+        self.assertEqual(data["text"], "test")
+
+    def test_telegram_payload_omits_topic_when_unset(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "TELEGRAM_MESSAGE_THREAD_ID": "",
+                "TELEGRAM_THREAD_ID": "",
+                "TELEGRAM_TOPIC_ID": "",
+            },
+            clear=False,
+        ):
+            data = _telegram_request_data("-1003502567927", text="test")
+
+        self.assertNotIn("message_thread_id", data)
+
     def test_filtered_row_shows_status_and_reason(self):
         frame = pd.DataFrame(
             [
